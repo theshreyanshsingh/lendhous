@@ -12,7 +12,7 @@ export function LoginPanel({ next, demo }: { next?: string; demo?: DemoDesk }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   return (
-    <div className={demo ? "grid gap-6 md:grid-cols-[380px_minmax(0,1fr)]" : ""}>
+    <div className={demo ? "grid gap-8 md:grid-cols-[400px_minmax(0,1fr)] md:gap-12" : ""}>
       <form action={action} className="glass space-y-4 self-start p-7 shadow-[var(--shadow)]">
         <input type="hidden" name="next" value={next ?? ""} />
         <label className="block">
@@ -24,18 +24,20 @@ export function LoginPanel({ next, demo }: { next?: string; demo?: DemoDesk }) {
           <input data-testid="login-password" name="password" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} className="desk-input mt-1.5" required />
         </label>
         {state.error && <p className="text-sm text-bad" role="alert">{state.error}</p>}
-        <SubmitButton className="h-10 w-full text-[13px] font-semibold" pendingLabel="Checking…">Sign in</SubmitButton>
+        <SubmitButton className="h-11 w-full text-[13.5px] font-medium" pendingLabel="Checking…">Sign in</SubmitButton>
       </form>
       {demo && (
-        <aside className="space-y-2">
+        <aside>
           <p className="eyebrow">Demo seats</p>
-          <p className="text-sm text-muted-foreground">Every sample account uses the password {demo.password}. All of them are FAKE.</p>
-          {demo.accounts.map((account) => (
-            <button key={account.email} type="button" onClick={() => { setEmail(account.email); setPassword(demo.password); }} className="block w-full rounded-xl border border-border bg-card px-3.5 py-2.5 text-left transition hover:bg-hover">
-              <span className="block text-xs font-medium text-link">{account.role}</span>
-              <span className="mt-1 block text-sm text-foreground">{account.email}</span>
-            </button>
-          ))}
+          <p className="mt-2 text-sm text-muted-foreground">Every sample account uses the password {demo.password}. All of them are FAKE.</p>
+          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+            {demo.accounts.map((account) => (
+              <button key={account.email} type="button" onClick={() => { setEmail(account.email); setPassword(demo.password); }} className="block w-full rounded-[2px] border border-border bg-card px-3.5 py-3 text-left transition hover:border-rule hover:bg-hover">
+                <span className="block text-[10.5px] font-medium tracking-[0.12em] text-eyebrow uppercase">{account.role}</span>
+                <span className="mt-1 block truncate text-sm text-foreground">{account.email}</span>
+              </button>
+            ))}
+          </div>
         </aside>
       )}
     </div>

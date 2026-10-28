@@ -49,15 +49,15 @@ export default function Shell({ children, account }: { children: React.ReactNode
   return (
     <div className="min-h-screen">
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-72 flex-col border-r border-sidebar-border bg-sidebar px-3 pt-3.5 pb-3 md:flex">
-        <div className="flex items-center gap-2 px-2 pt-1 pb-3"><Logo href={home[s.role]} /><Tag /></div>
+        <div className="flex items-center gap-2.5 px-2 pt-2 pb-5"><Logo href={home[s.role]} /><Tag /></div>
         <SideNav items={items} path={path} />
         <Controls testid account={account} />
       </aside>
       <div className="md:pl-72">
-        <div className="sticky top-0 z-30 flex items-center justify-between border-b border-border bg-card px-4 py-3 md:hidden">
-          <div className="flex items-center gap-2"><Logo href={home[s.role]} /><Tag /></div>
+        <div className="sticky top-0 z-30 flex items-center justify-between border-b border-rule bg-background px-4 py-3 md:hidden">
+          <div className="flex items-center gap-2.5"><Logo href={home[s.role]} /><Tag /></div>
           <Sheet open={open} onOpenChange={setOpen}>
-            <SheetTrigger className="inline-flex size-9 items-center justify-center rounded-lg border border-border bg-card" aria-label="Open navigation">
+            <SheetTrigger className="inline-flex size-9 items-center justify-center rounded-[2px] border border-rule bg-background" aria-label="Open navigation">
               <Menu className="size-4" />
             </SheetTrigger>
             <SheetContent side="left" className="flex flex-col bg-sidebar px-3 pt-10 pb-3">
@@ -66,16 +66,16 @@ export default function Shell({ children, account }: { children: React.ReactNode
             </SheetContent>
           </Sheet>
         </div>
-        <div className="border-b border-border bg-warn/12 px-4 py-1.5 text-center text-[11px] font-medium text-warn">CLICKABLE PROTOTYPE · all people, companies, addresses and numbers are FAKE · rates are PLACEHOLDERS · estimates are not commitments to lend</div>
+        <div className="border-b border-warn/20 bg-warn/10 px-4 py-1.5 text-center text-[10.5px] font-medium tracking-[0.06em] text-warn">CLICKABLE PROTOTYPE · all people, companies, addresses and numbers are FAKE · rates are PLACEHOLDERS · estimates are not commitments to lend</div>
         <main id="desk" className="mx-auto min-w-0 max-w-7xl px-4 pt-5 pb-8 md:px-[22px] md:pt-[18px] md:pb-7">{children}</main>
-        <footer className="mx-auto max-w-7xl px-4 pb-8 text-xs text-faint md:px-[22px]">Lendhous prototype · pricing from <code>lib/pricing-config.ts</code> (placeholders) · engine per Spec v3 §5</footer>
+        <footer className="mx-auto max-w-7xl px-4 pb-8 text-xs text-faint md:px-[22px]">LendHous prototype · pricing from <code>lib/pricing-config.ts</code> (placeholders) · engine per Spec v3 §5</footer>
       </div>
     </div>
   );
 }
 
 function Tag() {
-  return <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">PROTOTYPE</span>;
+  return <span className="rounded-[2px] border border-rule px-1.5 py-0.5 text-[9.5px] font-medium tracking-[0.14em] text-eyebrow">PROTOTYPE</span>;
 }
 
 function SideNav({ items, path }: { items: NavItem[]; path: string }) {
@@ -90,12 +90,12 @@ function SideNav({ items, path }: { items: NavItem[]; path: string }) {
     <nav className="mt-1 min-h-0 flex-1 overflow-y-auto overscroll-contain">
       {sections.map((section) => (
         <div key={section.label || "main"} className={section.label ? "mt-4" : ""}>
-          {section.label && <p className="px-2.5 pt-1 pb-1.5 text-xs text-faint">{section.label}</p>}
+          {section.label && <p className="px-2.5 pt-1 pb-1.5 text-[10.5px] font-medium tracking-[0.14em] text-eyebrow uppercase">{section.label}</p>}
           {section.items.map((item) => {
             const on = active(path, item.href);
             const Icon = item.icon;
             return (
-              <Link key={item.href} href={item.href} className={cn("mb-0.5 flex min-h-8 items-center gap-2 rounded-lg px-2.5 text-[13px] transition-colors", on ? "bg-active font-semibold text-foreground" : "text-nav hover:bg-hover")}>
+              <Link key={item.href} href={item.href} className={cn("mb-0.5 flex min-h-9 items-center gap-2.5 rounded-[2px] px-2.5 text-[13.5px] transition-colors", on ? "bg-active font-medium text-foreground shadow-[inset_2px_0_0_var(--primary)]" : "text-nav hover:bg-hover")}>
                 <Icon className="size-4 shrink-0 text-muted-foreground" />
                 <span className="min-w-0 flex-1 truncate">{item.label}</span>
               </Link>
@@ -145,8 +145,8 @@ function Controls({ testid, account }: { testid?: boolean; account: ShellAccount
         )}
       </div>
       {account && (
-        <div className="flex items-center gap-2 rounded-[10px] p-2" data-testid="signed-in-as">
-          <span className="grid size-7 shrink-0 place-items-center rounded-full bg-muted text-[10px] font-bold text-foreground">{account.name.split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("")}</span>
+        <div className="flex items-center gap-2 rounded-[2px] p-2" data-testid="signed-in-as">
+          <span className="grid size-7 shrink-0 place-items-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">{account.name.split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("")}</span>
           <span className="min-w-0 flex-1">
             <strong className="block truncate text-[13px]">{account.name}</strong>
             <em className="block truncate text-xs not-italic text-muted-foreground">{account.roles.join(" · ")}</em>

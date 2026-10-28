@@ -26,14 +26,14 @@ export function RatioPill({ label, value, limit, color, kind = "max", isMultiple
 export function ColorDot({ color }: { color: Color }) { return <span className={`inline-block size-2.5 rounded-full ${dot[color]}`} />; }
 const gradeCls: Record<Grade, string> = { A: "bg-good/10 text-good", B: "bg-good/10 text-good", C: "bg-warn/12 text-warn", D: "bg-bad/10 text-bad", E: "bg-bad/10 text-bad" };
 export function GradeBadge({ grade, score }: { grade: Grade; score?: number }) {
-  return <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ${gradeCls[grade]}`}>{grade}{score !== undefined && <span className="font-medium opacity-80">· {score}</span>}</span>;
+  return <span className={`inline-flex items-center gap-1 whitespace-nowrap rounded-[2px] px-2 py-0.5 text-xs font-semibold ${gradeCls[grade]}`}>{grade}{score !== undefined && <span className="font-medium opacity-80">· {score}</span>}</span>;
 }
 export function Badge({ children, tone = "slate" }: { children: React.ReactNode; tone?: "slate" | "blue" | "green" | "amber" | "rose" | "violet" }) {
   const t = { slate: "bg-muted text-muted-foreground", blue: "bg-link/10 text-link", green: "bg-good/10 text-good", amber: "bg-warn/12 text-warn", rose: "bg-bad/10 text-bad", violet: "bg-foreground/[0.07] text-foreground" }[tone];
-  return <span className={`inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ${t}`}>{children}</span>;
+  return <span className={`inline-flex items-center whitespace-nowrap rounded-[2px] px-2 py-0.5 text-xs font-medium ${t}`}>{children}</span>;
 }
 export function Stat({ label, value, sub }: { label: string; value: React.ReactNode; sub?: React.ReactNode }) {
-  return <div><div className="text-xs text-muted-foreground">{label}</div><div className="mt-0.5 text-base font-semibold tracking-tight text-foreground">{value}</div>{sub && <div className="text-xs text-muted-foreground">{sub}</div>}</div>;
+  return <div><div className="text-xs text-muted-foreground">{label}</div><div className="mt-0.5 text-base font-semibold tracking-tight text-foreground tabular-nums">{value}</div>{sub && <div className="text-xs text-muted-foreground">{sub}</div>}</div>;
 }
 export function Section({ title, children, right }: { title: string; children: React.ReactNode; right?: React.ReactNode }) {
   return <section className="glass p-4 sm:p-5"><div className="mb-3 flex items-center justify-between gap-2"><h2 className="eyebrow">{title}</h2>{right}</div>{children}</section>;

@@ -1,4 +1,4 @@
-// Ported from UPB Capital's components/notice.tsx, with Lendhous's own copy.
+// Ported from UPB Capital's components/notice.tsx, with LendHous's own copy.
 const COPY: Record<string, string> = {
   totp: "Add the secret to an authenticator, then confirm the code.",
   totp_on: "Two-factor sign-in is on.",
@@ -12,11 +12,11 @@ const COPY: Record<string, string> = {
 
 export function Notice({ notice, error }: { notice?: string; error?: string }) {
   if (error) {
-    return <p role="alert" className="rounded-xl border border-bad/40 bg-bad/10 px-4 py-3 text-sm text-bad">{error}</p>;
+    return <p role="alert" className="rounded-[2px] border border-bad/40 bg-bad/10 px-4 py-3 text-sm text-bad">{error}</p>;
   }
   if (!notice) return null;
   return (
-    <p role="status" className="rounded-xl border border-link/30 bg-link/10 px-4 py-3 text-sm text-foreground">
+    <p role="status" className="rounded-[2px] border border-brand/35 bg-brand/10 px-4 py-3 text-sm text-foreground">
       {COPY[notice] ?? decodeURIComponent(notice)}
     </p>
   );

@@ -18,13 +18,13 @@ export default function Pipeline() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <PageIntro eyebrow="Underwriting" title="Pipeline" lede="Every ratio is recalculated live from the pricing config. Click a deal to open its workspace." />
         <div className="mb-6 grid grid-cols-3 gap-3 text-right">
-          <div className="glass px-3 py-2"><div className="text-xs text-muted-foreground">Open pipeline</div><div className="font-semibold">{pre.length} · {k(pre.reduce((a, d) => a + est(d.app).noteAmount, 0))}</div></div>
-          <div className="glass px-3 py-2"><div className="text-xs text-muted-foreground">GT available</div><div className="font-semibold text-good">{k(cap.available)}</div></div>
-          <div className="glass px-3 py-2"><div className="text-xs text-muted-foreground">Bids waiting</div><div className="font-semibold text-foreground">{s.bids.filter((b) => b.status === "submitted").length}</div></div>
+          <div className="glass px-3 py-2"><div className="text-xs text-muted-foreground">Open pipeline</div><div className="font-heading text-base font-semibold whitespace-nowrap sm:text-xl">{pre.length} · {k(pre.reduce((a, d) => a + est(d.app).noteAmount, 0))}</div></div>
+          <div className="glass px-3 py-2"><div className="text-xs text-muted-foreground">GT available</div><div className="font-heading text-base font-semibold whitespace-nowrap sm:text-xl text-good">{k(cap.available)}</div></div>
+          <div className="glass px-3 py-2"><div className="text-xs text-muted-foreground">Bids waiting</div><div className="font-heading text-base font-semibold whitespace-nowrap sm:text-xl text-foreground">{s.bids.filter((b) => b.status === "submitted").length}</div></div>
         </div>
       </div>
       <div className="flex gap-2 overflow-x-auto pb-1">
-        {counts.map((c) => <div key={c.code} className="glass min-w-[120px] flex-1 px-3 py-2"><div className="text-xs text-muted-foreground">{c.label}</div><div className="text-lg font-semibold">{c.n}</div><div className="text-xs text-faint">{c.amt ? k(c.amt) : "—"}</div></div>)}
+        {counts.map((c) => <div key={c.code} className="glass min-w-[120px] flex-1 px-3 py-2"><div className="text-xs text-muted-foreground">{c.label}</div><div className="font-heading text-2xl font-semibold">{c.n}</div><div className="text-xs text-faint">{c.amt ? k(c.amt) : "—"}</div></div>)}
       </div>
       <div className="glass overflow-hidden">
         <div className="flex flex-wrap gap-2 border-b border-border p-3">

@@ -1,11 +1,11 @@
 import Link from "next/link";
 
-/** Same mark as UPB Capital's logo: an ink tile with the initial. */
+/** The LendHous wordmark: the name in the display serif with a sage full stop, as on the marketing site. */
 export function Logo({ compact = false, href = "/" }: { compact?: boolean; href?: string }) {
   return (
-    <Link href={href} className="inline-flex items-center gap-2">
-      <span className="grid size-[22px] place-items-center rounded-[7px] bg-primary text-xs font-bold text-primary-foreground">L</span>
-      {!compact && <span className="text-[15px] font-semibold tracking-tight text-foreground">Lendhous</span>}
+    <Link href={href} aria-label="LendHous home" className="inline-flex items-baseline font-heading text-[23px] leading-none font-medium tracking-[-0.035em] text-foreground">
+      {compact ? "L" : "LendHous"}
+      <span className="text-brand">.</span>
     </Link>
   );
 }

@@ -4,13 +4,13 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Theme tokens copied from UPB Capital (upb-capital-source/app/globals.css) so GT's products share one look. */
+/* Token names follow UPB Capital (upb-capital-source/app/globals.css); the values are LendHous's own brand. */
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-inter), Inter, ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-inter), Inter, ui-sans-serif, system-ui, sans-serif;
+  --font-heading: var(--font-serif), "Source Serif 4", Georgia, "Times New Roman", serif;
   --color-link: var(--link);
   --color-faint: var(--faint);
   --color-good: var(--good);
@@ -19,6 +19,9 @@
   --color-hover: var(--hover);
   --color-active: var(--active);
   --color-nav: var(--nav);
+  --color-brand: var(--brand);
+  --color-eyebrow: var(--eyebrow);
+  --color-rule: var(--rule);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -57,93 +60,103 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-/* The SynergiFund workspace palette: grey page, white panels, ink actions, one blue for links. */
+/* The LendHous palette, sampled from the marketing site: warm off-white page, forest-green actions,
+   green-black ink, a sage full stop, hairline rules and near-square corners. */
 :root {
-  --background: #f3f4f6;
-  --foreground: #111827;
+  --background: #fafbf8;
+  --foreground: #1f2a25;
   --card: #ffffff;
-  --card-foreground: #111827;
+  --card-foreground: #1f2a25;
   --popover: #ffffff;
-  --popover-foreground: #111827;
-  --primary: #111111;
-  --primary-foreground: #ffffff;
-  --secondary: #eef0f3;
-  --secondary-foreground: #111827;
-  --muted: #eef0f3;
-  --muted-foreground: #6b7280;
-  --accent: #e7e8ec;
-  --accent-foreground: #111827;
-  --destructive: #b42318;
-  --border: #e6e7eb;
-  --input: #e6e7eb;
-  --ring: #1a73e8;
-  --link: #1a73e8;
-  --faint: #9ca3af;
-  --good: #17803d;
-  --warn: #92710c;
-  --bad: #b42318;
-  --hover: #e7e8ec;
-  --active: #eceef2;
-  --nav: #374151;
-  --shadow: 0 12px 40px rgba(17, 24, 39, 0.12);
-  --chart-1: #111111;
-  --chart-2: #1a73e8;
-  --chart-3: #17803d;
-  --chart-4: #b42318;
-  --chart-5: #92710c;
-  --radius: 0.625rem;
-  --sidebar: #f3f4f6;
-  --sidebar-foreground: #111827;
-  --sidebar-primary: #111111;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #eceef2;
-  --sidebar-accent-foreground: #111827;
-  --sidebar-border: #e6e7eb;
-  --sidebar-ring: #1a73e8;
+  --popover-foreground: #1f2a25;
+  --primary: #243f36;
+  --primary-hover: #1a3029;
+  --primary-foreground: #fafbf8;
+  --secondary: #eff1ec;
+  --secondary-foreground: #1f2a25;
+  --muted: #eff1ec;
+  --muted-foreground: #595f5a;
+  --accent: #e9ece5;
+  --accent-foreground: #1f2a25;
+  --destructive: #a8382b;
+  --border: #e1e3dd;
+  --input: #d3d6cf;
+  --ring: #5e7d63;
+  --link: #2b5d6a;
+  --faint: #8b928c;
+  --good: #2e6b45;
+  --warn: #8a6410;
+  --bad: #a8382b;
+  --hover: #eff1ec;
+  --active: #e7ebe3;
+  --nav: #2d3d34;
+  --brand: #5e7d63;
+  --eyebrow: #636e65;
+  --rule: #cfd0cb;
+  --shadow: 0 1px 2px rgba(31, 42, 37, 0.04), 0 16px 40px rgba(31, 42, 37, 0.07);
+  --chart-1: #243f36;
+  --chart-2: #5e7d63;
+  --chart-3: #2b5d6a;
+  --chart-4: #a8382b;
+  --chart-5: #8a6410;
+  --radius: 0.25rem;
+  --sidebar: #f4f5f1;
+  --sidebar-foreground: #1f2a25;
+  --sidebar-primary: #243f36;
+  --sidebar-primary-foreground: #fafbf8;
+  --sidebar-accent: #e7ebe3;
+  --sidebar-accent-foreground: #1f2a25;
+  --sidebar-border: #e1e3dd;
+  --sidebar-ring: #5e7d63;
   color-scheme: light;
 }
 
+/* The same brand after dark: green-black page, a lifted forest green for actions, sage accents. */
 .dark {
-  --background: #101114;
-  --foreground: #f4f4f5;
-  --card: #1c1f26;
-  --card-foreground: #f4f4f5;
-  --popover: #1c1f26;
-  --popover-foreground: #f4f4f5;
-  --primary: #f4f4f5;
-  --primary-foreground: #111214;
-  --secondary: #2a2e36;
-  --secondary-foreground: #f4f4f5;
-  --muted: #2a2e36;
-  --muted-foreground: #a1a1aa;
-  --accent: #23262d;
-  --accent-foreground: #f4f4f5;
-  --destructive: #f87171;
-  --border: #2c3038;
-  --input: #2c3038;
-  --ring: #4c8dff;
-  --link: #4c8dff;
-  --faint: #71717a;
-  --good: #4ade80;
-  --warn: #f5d061;
-  --bad: #f87171;
-  --hover: #23262d;
-  --active: #2c313a;
-  --nav: #e4e4e7;
-  --shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
-  --chart-1: #f4f4f5;
-  --chart-2: #4c8dff;
-  --chart-3: #4ade80;
-  --chart-4: #f87171;
-  --chart-5: #f5d061;
-  --sidebar: #16181d;
-  --sidebar-foreground: #f4f4f5;
-  --sidebar-primary: #f4f4f5;
-  --sidebar-primary-foreground: #111214;
-  --sidebar-accent: #2c313a;
-  --sidebar-accent-foreground: #f4f4f5;
-  --sidebar-border: #2c3038;
-  --sidebar-ring: #4c8dff;
+  --background: #0f1512;
+  --foreground: #eceee8;
+  --card: #161e1a;
+  --card-foreground: #eceee8;
+  --popover: #161e1a;
+  --popover-foreground: #eceee8;
+  --primary: #3b6b55;
+  --primary-hover: #457a62;
+  --primary-foreground: #fafbf8;
+  --secondary: #1f2924;
+  --secondary-foreground: #eceee8;
+  --muted: #1f2924;
+  --muted-foreground: #a3aca5;
+  --accent: #222d27;
+  --accent-foreground: #eceee8;
+  --destructive: #f08a7a;
+  --border: #26312b;
+  --input: #34403a;
+  --ring: #8fb396;
+  --link: #8cc4d0;
+  --faint: #6f7a72;
+  --good: #74c491;
+  --warn: #e2b85c;
+  --bad: #f08a7a;
+  --hover: #1c2621;
+  --active: #24302a;
+  --nav: #d9ded7;
+  --brand: #8fb396;
+  --eyebrow: #9aa79d;
+  --rule: #34403a;
+  --shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+  --chart-1: #8fb396;
+  --chart-2: #3b6b55;
+  --chart-3: #8cc4d0;
+  --chart-4: #f08a7a;
+  --chart-5: #e2b85c;
+  --sidebar: #121a16;
+  --sidebar-foreground: #eceee8;
+  --sidebar-primary: #3b6b55;
+  --sidebar-primary-foreground: #fafbf8;
+  --sidebar-accent: #24302a;
+  --sidebar-accent-foreground: #eceee8;
+  --sidebar-border: #26312b;
+  --sidebar-ring: #8fb396;
   color-scheme: dark;
 }
 
@@ -158,14 +171,24 @@
     @apply bg-background text-foreground;
     letter-spacing: -0.011em;
   }
+  h1 {
+    font-family: var(--font-heading);
+    letter-spacing: -0.02em;
+  }
   ::selection {
-    background: color-mix(in srgb, var(--link) 22%, transparent);
+    background: color-mix(in srgb, var(--brand) 26%, transparent);
   }
   ::placeholder {
     color: var(--faint);
   }
+  input[type="checkbox"],
+  input[type="radio"],
+  input[type="range"],
+  progress {
+    accent-color: var(--primary);
+  }
   th {
-    @apply px-4 py-3 text-left text-xs font-normal text-muted-foreground;
+    @apply px-4 py-3 text-left text-[11px] font-medium tracking-[0.08em] text-eyebrow uppercase;
   }
   td {
     @apply px-4 py-3 text-sm;
@@ -177,13 +200,15 @@
   .glass {
     background: var(--card);
     border: 1px solid var(--border);
-    border-radius: 16px;
+    border-radius: var(--radius);
   }
 
   .eyebrow {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--muted-foreground);
+    font-size: 11.5px;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--eyebrow);
   }
 
   .label {
@@ -193,10 +218,10 @@
   .desk-input {
     height: 2.5rem;
     width: 100%;
-    border-radius: 10px;
-    border: 1px solid var(--border);
+    border-radius: 3px;
+    border: 1px solid var(--input);
     background: var(--card);
-    padding: 0 0.7rem;
+    padding: 0 0.75rem;
     font-size: 0.875rem;
     color: var(--foreground);
     outline: none;
@@ -204,8 +229,8 @@
   }
 
   .desk-input:focus {
-    border-color: var(--ring);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 18%, transparent);
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 22%, transparent);
   }
 
   .desk-input:focus-visible {
@@ -214,18 +239,18 @@
 
   select.desk-input {
     appearance: none;
-    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path fill='none' stroke='%236b7280' stroke-width='1.5' d='M1 1.5l5 5 5-5'/></svg>");
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path fill='none' stroke='%23636e65' stroke-width='1.5' d='M1 1.5l5 5 5-5'/></svg>");
     background-repeat: no-repeat;
     background-position: right 0.75rem center;
     padding-right: 2rem;
   }
 
   .btn-primary {
-    @apply inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-[13px] font-medium whitespace-nowrap text-primary-foreground transition-colors hover:bg-primary/85 disabled:cursor-not-allowed disabled:opacity-40;
+    @apply inline-flex h-10 items-center justify-center gap-2 rounded-[2px] bg-primary px-5 text-[13.5px] font-medium whitespace-nowrap text-primary-foreground transition-colors hover:bg-(--primary-hover) disabled:cursor-not-allowed disabled:opacity-40;
   }
 
   .btn-ghost {
-    @apply inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-border bg-card px-4 text-[13px] font-medium whitespace-nowrap text-foreground transition-colors hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40;
+    @apply inline-flex h-10 items-center justify-center gap-2 rounded-[2px] border border-rule bg-transparent px-5 text-[13.5px] font-medium whitespace-nowrap text-foreground transition-colors hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40;
   }
 }
 
