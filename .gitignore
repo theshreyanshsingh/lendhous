@@ -1,0 +1,10 @@
+node_modules
+.next
+next-env.d.ts
+*.tsbuildinfo
+screenshots
+.env
+.env*.local
+.DS_Store
+.mongo-data
+storage

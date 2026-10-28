@@ -1,0 +1,289 @@
+// Lendhous data model on MongoDB, following UPB Capital's setup (Prisma, no migrations, `npm run db:indexes`).
+// Conventions from Spec v3 Section 3: string UUID ids, money in integer cents (*Cents), rates in basis points (*Bps),
+// createdAt / updatedAt everywhere, soft delete with deletedAt. Int is 32-bit on MongoDB: fine for loan-level
+// amounts (max $21.4M), so capital totals that can exceed that will use BigInt when they arrive (B3).
+// B0 covers identity, access, controls and plumbing. Loan tables arrive with B1.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+// Spec v3 Section 1. A user can hold several roles (user_role is many-to-many).
+enum RoleCode {
+  BORROWER
+  GUARANTOR
+  ADMIN_OWNER
+  UNDERWRITER
+  PROCESSOR
+  CAPITAL_MANAGER
+  SERVICER
+  DRAW_ADMIN
+  INSPECTOR
+  PARTNER_LENDER
+  BROKER
+  CLOSING_AGENT
+  AUDITOR
+}
+
+enum AccountStatus {
+  PENDING
+  APPROVED
+  SUSPENDED
+  REJECTED
+}
+
+enum OrgType {
+  LENDER_HOUSE
+  PARTNER_LENDER
+  BROKER
+  TITLE
+}
+
+enum OrgStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum DocStatus {
+  REQUESTED
+  UPLOADED
+  IN_REVIEW
+  ACCEPTED
+  REJECTED
+  WAIVED
+  EXPIRED
+}
+
+// Spec v3 3.2 approval.subject_type, plus the always-dual actions from 10.4.
+enum ApprovalSubject {
+  FUNDING
+  DRAW
+  DISTRIBUTION
+  MATRIX_EXCEPTION
+  TERM_SHEET_OVER_LIMIT
+  EXTENSION
+  FEE_WAIVER
+  COI_OVERRIDE
+  CHARGE_OFF
+  GUARANTOR_RELEASE
+  WIRE_CHANGE
+}
+
+enum ApprovalDecision {
+  APPROVED
+  DECLINED
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  DECLINED
+}
+
+model Organization {
+  id             String    @id @default(uuid()) @map("_id")
+  name           String
+  type           OrgType
+  licenseNumbers String[]
+  status         OrgStatus @default(ACTIVE)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  deletedAt      DateTime?
+  users          User[]
+}
+
+model User {
+  id               String        @id @default(uuid()) @map("_id")
+  email            String        @unique
+  passwordHash     String
+  name             String
+  phone            String        @default("")
+  accountStatus    AccountStatus @default(PENDING)
+  // Staff, partner, broker and title users belong to an organization; borrowers and guarantors do not.
+  organizationId   String?
+  organization     Organization? @relation(fields: [organizationId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  // Encrypted with lib/crypto.ts (UPB stores its TOTP secret in plain text; Lendhous does not).
+  totpSecretEnc    String        @default("")
+  totpEnabled      Boolean       @default(false)
+  recoveryHashes   String        @default("")
+  recoveryRevealEnc String       @default("")
+  emailOtpFallback Boolean       @default(false)
+  notifyEmail      Boolean       @default(true)
+  notifyInApp      Boolean       @default(true)
+  lastLoginAt      DateTime?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+  deletedAt        DateTime?
+  roles            UserRole[]
+  sessions         ServerSession[]
+  loginCodes       LoginCode[]
+  notifications    Notification[]
+}
+
+model UserRole {
+  id          String   @id @default(uuid()) @map("_id")
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role        RoleCode
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  @@unique([userId, role])
+}
+
+// Overrides on the default permission matrix in lib/permissions.ts (Spec v3 Section 1 "configurable role matrix").
+// Changes are logged in AuditEvent with before and after values.
+model RolePermission {
+  id          String   @id @default(uuid()) @map("_id")
+  role        RoleCode
+  permission  String
+  enabled     Boolean
+  limitCents  Int?
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([role, permission])
+}
+
+model ServerSession {
+  id         String   @id @map("_id")
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt  DateTime
+  // Staff sessions end after the idle window in PlatformSettings (Spec v3 10.1, placeholder 30 minutes).
+  lastSeenAt DateTime @default(now())
+  ipAddress  String   @default("")
+  userAgent  String   @default("")
+  createdAt  DateTime @default(now())
+
+  @@index([expiresAt])
+}
+
+model LoginCode {
+  id        String    @id @default(uuid()) @map("_id")
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash  String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
+model RateWindow {
+  key       String   @id @map("_id")
+  count     Int      @default(0)
+  expiresAt DateTime
+}
+
+// Spec v3 10.3: every change with before and after values, the actor's address and the request id.
+model AuditEvent {
+  id         String   @id @default(uuid()) @map("_id")
+  actorId    String?
+  actorIp    String   @default("")
+  userAgent  String   @default("")
+  requestId  String   @default("")
+  action     String
+  entityType String
+  entityId   String
+  before     Json?
+  after      Json?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([actorId])
+  @@index([createdAt])
+}
+
+model Notification {
+  id        String    @id @default(uuid()) @map("_id")
+  toEmail   String
+  userId    String?
+  user      User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  eventCode String    @default("")
+  subject   String
+  body      String
+  // Legal and security notices (Spec v3 12.1 "(L)") ignore the user's channel preferences.
+  legal     Boolean   @default(false)
+  delivery  String    @default("log")
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([toEmail])
+}
+
+// Spec v3 3.2 document. Owner is polymorphic until the loan tables arrive in B1.
+model Document {
+  id              String    @id @default(uuid()) @map("_id")
+  ownerType       String
+  ownerId         String
+  documentType    String
+  originalName    String
+  storageKey      String
+  mime            String
+  size            Int
+  sha256          String
+  version         Int       @default(1)
+  status          DocStatus @default(UPLOADED)
+  reviewerId      String?
+  rejectionReason String    @default("")
+  expiresAt       DateTime?
+  uploadedById    String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+
+  @@index([ownerType, ownerId])
+}
+
+// Dual control (Spec v3 3.2 approval, 10.4). One document per request so a MongoDB validator can compare the
+// three people on it: initiator, first approver and second approver must all differ (lib/mongo-validators.ts).
+model Approval {
+  id              String            @id @default(uuid()) @map("_id")
+  subjectType     ApprovalSubject
+  subjectId       String
+  amountCents     Int?
+  initiatorId     String
+  step1ApproverId String?
+  step1Decision   ApprovalDecision?
+  step1Reason     String            @default("")
+  step1At         DateTime?
+  step2ApproverId String?
+  step2Decision   ApprovalDecision?
+  step2Reason     String            @default("")
+  step2At         DateTime?
+  status          ApprovalStatus    @default(PENDING)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([subjectType, subjectId])
+  @@index([status])
+}
+
+model PlatformSettings {
+  id                            String   @id @map("_id")
+  retentionYears                Int      @default(7)
+  staffIdleMinutes              Int      @default(30)
+  // Spec v3 10.1: required for staff, partner and broker users. Only the demo seed turns it off.
+  requireStaffMfa               Boolean  @default(true)
+  // Spec v3 Section 1 placeholders: second approver above these amounts.
+  dualApprovalDrawCents         Int      @default(5000000)
+  dualApprovalDistributionCents Int      @default(25000000)
+  updatedAt                     DateTime @updatedAt
+}
+
+model JobRun {
+  id         String    @id @default(uuid()) @map("_id")
+  job        String
+  // job:YYYY-MM-DD, so a job runs once per day however often cron calls it
+  runKey     String    @unique
+  startedAt  DateTime  @default(now())
+  finishedAt DateTime?
+  ok         Boolean   @default(false)
+  summary    String    @default("")
+}
