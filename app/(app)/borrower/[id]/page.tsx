@@ -46,7 +46,7 @@ export default function BorrowerLoan() {
                         {(x.status === "requested" || x.status === "rejected" || x.status === "uploaded") && <button className="btn-ghost py-1 text-xs" onClick={() => { setTarget(x.id); fileRef.current?.click(); }}>{x.status === "uploaded" ? "Replace" : "Upload"}</button>}</div>
                     </li>))}
                 </ul></div>))}
-            <p className="text-xs text-faint">Drag and drop a file onto a row, or tap Upload (opens the camera on phones). Prototype: files stay in your browser and are not stored.</p>
+            <p className="text-xs text-faint">Drag and drop a file onto a row, or tap Upload (opens the camera on phones).</p>
           </div>
         </Section>
         <div className="space-y-4">
@@ -58,7 +58,7 @@ export default function BorrowerLoan() {
                 : <><Stat label="Cash to close" value={usd(e.cashToClose)} /><Stat label="Target closing" value={d.closingDate} /><Stat label={keyRatios.map((r) => r.label).join(" / ")} value={keyRatios.map((r) => (r.key === "dscr" ? r.actual.toFixed(2) + "x" : pct(r.actual))).join(" / ")} /><Stat label="Points" value={usd(e.points)} /></>}
             </div>
           </Section>
-          {funded && <Section title="Draws"><div className="text-sm text-muted-foreground">Budget {usd(e.holdback)} · released {usd(d.disbursedDraws ?? 0)}</div><div className="mt-2 h-2 rounded-full bg-accent"><div className="h-2 rounded-full bg-good" style={{ width: `${((d.disbursedDraws ?? 0) / Math.max(1, e.holdback)) * 100}%` }} /></div><button className="btn-primary mt-3 w-full" disabled title="Draw requests: Spec M4 Draws Lite (not in this prototype)">Request a draw (coming in M4)</button></Section>}
+          {funded && <Section title="Draws"><div className="text-sm text-muted-foreground">Budget {usd(e.holdback)} · released {usd(d.disbursedDraws ?? 0)}</div><div className="mt-2 h-2 rounded-full bg-accent"><div className="h-2 rounded-full bg-good" style={{ width: `${((d.disbursedDraws ?? 0) / Math.max(1, e.holdback)) * 100}%` }} /></div><button className="btn-primary mt-3 w-full" disabled>Request a draw (coming soon)</button></Section>}
           <Section title="Your team"><div className="text-sm">Processor: Pat Processor (FAKE)<br />Underwriter: Uma Underwriter (FAKE)</div><div className="mt-2 rounded-md bg-bad/10 p-2 text-xs text-bad">Wire-fraud warning: we will never email you wire instructions. Always confirm by phone with a number you already have.</div></Section>
         </div>
       </div>

@@ -3,8 +3,7 @@ import type { NextRequest } from "next/server";
 import { SESSION_COOKIE, verifySession } from "@/lib/session";
 
 // Coarse gate only, as in UPB Capital: is there a valid session cookie at all. Roles, permissions, idle timeouts
-// and two-factor are checked on the server against the database (lib/auth.ts). The prototype pages join the
-// matcher as they move onto real data (borrower pages in B1, the staff workspace in B2).
+// and two-factor are checked on the server against the database (lib/auth.ts and each workspace's layout).
 export async function middleware(request: NextRequest) {
   const token = request.cookies.get(SESSION_COOKIE)?.value;
   const session = token ? await verifySession(token) : null;
@@ -18,5 +17,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/account/:path*"],
+  matcher: ["/", "/apply/:path*", "/borrower/:path*", "/admin/:path*", "/partner/:path*", "/account/:path*"],
 };

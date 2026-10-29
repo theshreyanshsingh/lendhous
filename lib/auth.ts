@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { cache } from "react";
 import type { RoleCode } from "@prisma/client";
 import { secureCookies } from "@/lib/deploy";
-import { can, isStaff, needsMfa, type Permission } from "@/lib/permissions";
+import { can, homeFor, isStaff, needsMfa, viewFor, type Permission, type View } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { requestMeta } from "@/lib/request-meta";
 import { PENDING_COOKIE, SESSION_COOKIE, SESSION_DAYS, signPending, signSession, verifyPending, verifySession } from "@/lib/session";
@@ -93,6 +93,13 @@ export async function requireUser(options: { allowWithoutMfa?: boolean } = {}) {
   if (!options.allowWithoutMfa && needsMfa(user.roleCodes) && !user.totpEnabled && (await getSettings()).requireStaffMfa) {
     redirect("/account/security?notice=mfa_required");
   }
+  return user;
+}
+
+/** The signed-in user, sent to their own workspace when this one belongs to another role. */
+export async function requireView(view: View) {
+  const user = await requireUser();
+  if (viewFor(user.roleCodes) !== view) redirect(homeFor(user.roleCodes));
   return user;
 }
 

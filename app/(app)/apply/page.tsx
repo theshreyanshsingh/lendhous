@@ -26,7 +26,7 @@ function Choice<T extends string>({ value, options, onChange }: { value: T; opti
 }
 
 export default function Apply() {
-  const router = useRouter(); const { dispatch } = useStore();
+  const router = useRouter(); const { dispatch, demo } = useStore();
   const [step, setStep] = useState(0);
   const [addr, setAddr] = useState({ address: "", city: "", zip: "", entityName: "", exit: "Sell" });
   const [certs, setCerts] = useState({ bp: false, noo: false, consent: false });
@@ -42,7 +42,7 @@ export default function Apply() {
     <div className="grid gap-5 pb-16 lg:grid-cols-[1fr_380px] lg:pb-0">
       <div className="space-y-4">
         <div className="glass p-4">
-          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-muted-foreground"><span className="whitespace-nowrap">Step {step + 1} of {steps.length}</span><span>Prototype: progress isn&apos;t saved if you leave this page</span></div>
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-muted-foreground"><span className="whitespace-nowrap">Step {step + 1} of {steps.length}</span><span>Progress isn&apos;t saved if you leave this page</span></div>
           <div className="mt-2 flex gap-1">{steps.map((s, i) => <button key={s} onClick={() => setStep(i)} className={`h-1.5 flex-1 rounded-full ${i <= step ? "bg-primary" : "bg-accent"}`} aria-label={s} />)}</div>
           <h1 className="mt-3 text-xl font-semibold tracking-tight">{steps[step]}</h1>
         </div>
@@ -55,14 +55,14 @@ export default function Apply() {
           </>)}
           {step === 1 && (<>
             <div className="grid gap-3 sm:grid-cols-2">
-              <label className="block sm:col-span-2"><span className="label">Property address</span><input className="desk-input" placeholder="e.g. 100 Demo St (any fake address)" value={addr.address} onChange={(x) => setAddr({ ...addr, address: x.target.value })} /></label>
+              <label className="block sm:col-span-2"><span className="label">Property address</span><input className="desk-input" placeholder="e.g. 100 Main St" value={addr.address} onChange={(x) => setAddr({ ...addr, address: x.target.value })} /></label>
               <label className="block"><span className="label">City</span><input className="desk-input" value={addr.city} onChange={(x) => setAddr({ ...addr, city: x.target.value })} /></label>
               <label className="block"><span className="label">ZIP</span><input className="desk-input" value={addr.zip} onChange={(x) => setAddr({ ...addr, zip: x.target.value })} /></label>
               <label className="block"><span className="label">County</span><select data-testid="county" className="desk-input" value={a.state === "FL" ? a.county : "Out of state"} onChange={(x) => x.target.value === "Out of state" ? set({ county: "Out of state", state: "GA" }) : set({ county: x.target.value, state: "FL" })}>{counties.map((c) => <option key={c}>{c}</option>)}</select></label>
               <label className="block"><span className="label">Property type</span><select className="desk-input" value={a.propertyType} onChange={(x) => set({ propertyType: x.target.value as Application["propertyType"] })}><option value="sfr">Single-family</option><option value="2_4">2–4 units</option><option value="condo">Condo</option><option value="townhome">Townhome</option></select></label>
             </div>
             <div><span className="label">Occupancy</span><Choice value={a.occupancy} onChange={(v) => set({ occupancy: v })} options={[{ v: "vacant", l: "Vacant" }, { v: "tenant", l: "Tenant-occupied" }, { v: "owner_occupied", l: "I or a family member will live here" }]} /></div>
-            {ownerOcc && <div className="rounded-lg bg-bad/10 p-3 text-sm text-bad" data-testid="owner-occ-stop"><b>We can&apos;t continue with this one.</b> Lendhous makes business-purpose investment loans only. For a home you&apos;ll live in, please talk to a licensed consumer mortgage lender. (Spec 4.4 hard stop; attorney flag 10.8 #2.)</div>}
+            {ownerOcc && <div className="rounded-lg bg-bad/10 p-3 text-sm text-bad" data-testid="owner-occ-stop"><b>We can&apos;t continue with this one.</b> LendHous makes business-purpose investment loans only. For a home you&apos;ll live in, please talk to a licensed consumer mortgage lender.</div>}
           </>)}
           {step === 2 && (<div className="grid gap-3 sm:grid-cols-2">
             {a.product === "ground_up" ? (<>
@@ -88,13 +88,13 @@ export default function Apply() {
             <label className="block"><span className="label">Exit strategy</span><select className="desk-input" value={addr.exit} onChange={(x) => setAddr({ ...addr, exit: x.target.value })}><option>Sell</option><option>Refi</option><option>Hold</option></select></label>
           </div>)}
           {step === 4 && (<div className="grid gap-3 sm:grid-cols-2">
-            <label className="block sm:col-span-2"><span className="label">Borrowing entity (LLC)</span><input className="desk-input" placeholder="e.g. Sample Flips LLC (FAKE)" value={addr.entityName} onChange={(x) => setAddr({ ...addr, entityName: x.target.value })} /></label>
+            <label className="block sm:col-span-2"><span className="label">Borrowing entity (LLC)</span><input className="desk-input" placeholder="e.g. Sunrise Holdings LLC" value={addr.entityName} onChange={(x) => setAddr({ ...addr, entityName: x.target.value })} /></label>
             <Num testid="fico" label="Credit score (self-reported)" value={a.fico} onChange={(v) => set({ fico: v ?? 0 })} hint="A soft pull (no score impact) happens after you consent" />
             <Num testid="deals" label="Completed deals, last 36 months" value={a.verifiedDeals} onChange={(v) => set({ verifiedDeals: v ?? 0 })} hint="Flips, builds or rentals with HUD/closing statements" />
             <Num label="Verified liquidity (cash + reserves)" value={a.liquidity} onChange={(v) => set({ liquidity: v ?? 0 })} />
             <Num label="Earnest money already paid" value={a.earnestMoney} onChange={(v) => set({ earnestMoney: v })} />
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!a.foreignNational} onChange={(x) => set({ foreignNational: x.target.checked })} /> Foreign national guarantor</label>
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!a.repeatBorrower} onChange={(x) => set({ repeatBorrower: x.target.checked })} /> Repeat Lendhous borrower</label>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!a.repeatBorrower} onChange={(x) => set({ repeatBorrower: x.target.checked })} /> Repeat LendHous borrower</label>
           </div>)}
           {step === 5 && (<div className="space-y-3 text-sm">
             <div className="grid gap-2 rounded-lg bg-muted p-3 sm:grid-cols-2">
@@ -103,13 +103,14 @@ export default function Apply() {
             </div>
             {[["bp", "I certify this loan is for business/investment purposes only."], ["noo", "Neither I nor any family member will occupy the property."], ["consent", "I consent to a soft credit pull and identity/OFAC checks (FCRA disclosure)."]].map(([key, txt]) => (
               <label key={key} className="flex items-start gap-2"><input data-testid={`cert-${key}`} type="checkbox" className="mt-1" checked={certs[key as keyof typeof certs]} onChange={(x) => setCerts({ ...certs, [key]: x.target.checked })} /> {txt}</label>))}
-            <p className="text-xs text-muted-foreground">Prototype: no data leaves your browser. Certifications would be e-signed and timestamped in the real app.</p>
+            {demo ? <p className="text-xs text-muted-foreground">Demo account: the application is saved to the demo data in this browser only.</p>
+              : <p className="text-xs text-muted-foreground" data-testid="submit-closed">Online submission isn&apos;t open for this account yet. Contact your LendHous loan officer to apply.</p>}
           </div>)}
         </div>
         <div className="flex justify-between gap-2">
           <button className="btn-ghost" disabled={step === 0} onClick={() => setStep(step - 1)}>Back</button>
           {step < steps.length - 1 ? <button data-testid="next" className="btn-primary" disabled={!canNext} onClick={() => setStep(step + 1)}>Continue</button>
-            : <button data-testid="submit" className="btn-primary" disabled={!e.eligible || !certs.bp || !certs.noo || !certs.consent} onClick={submit}>Submit application</button>}
+            : <button data-testid="submit" className="btn-primary" disabled={!demo || !e.eligible || !certs.bp || !certs.noo || !certs.consent} onClick={submit}>Submit application</button>}
         </div>
       </div>
       <div className="lg:sticky lg:top-5 lg:self-start"><EstimatePanel e={e} product={a.product} /></div>

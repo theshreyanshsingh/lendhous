@@ -43,7 +43,7 @@ export default function EstimatePanel({ e, product, compact }: { e: Estimate; pr
             {e.flags.map((f) => <li key={f} className="rounded-md bg-warn/12 px-2 py-1 text-warn">⚠ {f}</li>)}
           </ul>
         )}
-        <p className="text-[11px] leading-snug text-faint">Estimate – not a commitment. Placeholder pricing (Tier {e.tier}, {e.location.replace("_", " ")} county). Final terms depend on underwriting, valuation, title and credit.</p>
+        <p className="text-[11px] leading-snug text-faint">Estimate – not a commitment. Priced at Tier {e.tier}, {e.location.replace("_", " ")} county. Final terms depend on underwriting, valuation, title and credit.</p>
       </div>
     </div>
   );

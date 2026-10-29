@@ -86,9 +86,18 @@ export function can(roles: readonly RoleCode[], permission: Permission, options:
 export const isStaff = (roles: readonly RoleCode[]) => roles.some((role) => STAFF_ROLES.has(role));
 export const needsMfa = (roles: readonly RoleCode[]) => roles.some((role) => MFA_ROLES.has(role));
 
+export type View = "admin" | "partner" | "borrower";
+const VIEW_HOME: Record<View, string> = { admin: "/admin", partner: "/partner", borrower: "/borrower" };
+
+/** The workspace an account opens. Staff outrank partner lenders, who outrank borrowers. */
+export function viewFor(roles: readonly RoleCode[]): View | null {
+  if (isStaff(roles)) return "admin";
+  if (roles.includes("PARTNER_LENDER")) return "partner";
+  if (roles.includes("BORROWER")) return "borrower";
+  return null;
+}
+
 export function homeFor(roles: readonly RoleCode[]) {
-  if (isStaff(roles)) return "/admin";
-  if (roles.includes("PARTNER_LENDER")) return "/partner";
-  if (roles.includes("BORROWER")) return "/borrower";
-  return "/account/security";
+  const view = viewFor(roles);
+  return view ? VIEW_HOME[view] : "/account/security";
 }

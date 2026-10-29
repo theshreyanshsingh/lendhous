@@ -4,8 +4,8 @@ GT's private lending platform, built from Product Spec v3 (`product-spec-v3.pdf`
 
 Two layers live here today:
 
-- **The clickable prototype.** Every screen under `app/(app)` except `/account`. It runs on fake data kept in the browser. **All data is fake. All pricing is placeholder.**
-- **Milestone B0, the backend foundations.** Sign-in, two-factor, roles and permissions, field encryption, dual control, audit, storage, mail, jobs, health, and the release guard. Later milestones (B1 to B4) move the prototype screens onto this backend one at a time.
+- **The workspaces.** The borrower, staff and partner screens under `app/(app)`. Every one needs a signed-in account, and the account's role decides which workspace it opens. Their records still live in the browser. Demo seats (`@lendhous.test`) get a shared book of FAKE demo records. Every other account starts empty until B1 to B4 move the records into the database. The rates in `lib/pricing-config.ts` are still placeholders.
+- **Milestone B0, the backend foundations.** Sign-in, two-factor, roles and permissions, field encryption, dual control, audit, storage, mail, jobs, health, and the release guard. Later milestones (B1 to B4) move the workspaces' records onto this backend one at a time.
 
 ## Run
 
@@ -42,14 +42,16 @@ The password for every seat is `Lendhous2026!`. They exist only in a seeded data
 | Partner lender | pia.partner@lendhous.test (Demo Partner Capital A) |
 | Broker | bea.broker@lendhous.test |
 
+Each seat opens its own role's workspace. The demo records appear only for these seats, and seats share them in one browser, so a teaser sent as the owner reaches the partner seat. **Reset demo data** in the sidebar restores them. The broker seat has no workspace yet, so it opens the security page.
+
 Spec v3 10.1 requires two-factor for staff, partner and broker users. The demo seed turns that off (`PlatformSettings.requireStaffMfa = false`) so the seats sign in quickly; production keeps it on. Set up an authenticator at `/account/security`.
 
 ## Tests
 
 ```bash
-npm test                        # 73 tests: pricing engine (Spec worked examples A–I), foundations, and MongoDB integration
+npm test                        # 75 tests: pricing engine (Spec worked examples A–I), foundations, and MongoDB integration
 npm run build && npm start      # then, with the server up:
-npm run screenshots             # prototype smoke test (24 checks) + screenshots into ./screenshots
+npm run screenshots             # workspace smoke test (34 checks, as each demo seat and a temporary non-demo account) + screenshots into ./screenshots
 npm run smoke:auth              # sign-in, two-factor, recovery codes, rate limit, audit, cron, health (18 checks; needs db:seed)
 ```
 
@@ -59,8 +61,8 @@ The integration tests start their own MongoDB 7.0 replica set (`mongodb-memory-s
 
 | Path | What |
 |---|---|
-| `lib/pricing-config.ts`, `lib/engine.ts` | The pricing and underwriting engine and its one editable config file (prototype) |
-| `lib/store.tsx`, `lib/mockData.ts` | The prototype's browser state and FAKE seed data |
+| `lib/pricing-config.ts`, `lib/engine.ts` | The pricing and underwriting engine and its one editable config file |
+| `lib/store.tsx`, `lib/mockData.ts` | The workspaces' browser state, and the FAKE demo book loaded only for demo seats |
 | `prisma/schema.prisma` | Data model: users, organizations, roles, permission overrides, sessions, audit, notifications, documents, approvals, settings, jobs |
 | `lib/auth.ts`, `lib/session.ts`, `actions/auth.ts`, `actions/security.ts` | Sessions (revocable, 30-minute staff idle timeout), sign-in, two-factor (ported from UPB) |
 | `lib/permissions.ts` | The 13 roles, permission keys with dollar limits, the default matrix. `RolePermission` rows override cells |
@@ -83,4 +85,4 @@ Spec v3 assumes PostgreSQL. Lendhous uses MongoDB to match UPB, and covers the g
 
 ## Still to build
 
-Milestones B1 to B4 move the prototype onto this backend: borrower applications and documents, then underwriting and term sheets, then capital routing and the partner portal, then closing, funding, the loan ledger and draws. See the backend plan and Spec v3 Section 13.
+Milestones B1 to B4 move the workspaces' records onto this backend: borrower applications and documents, then underwriting and term sheets, then capital routing and the partner portal, then closing, funding, the loan ledger and draws. See the backend plan and Spec v3 Section 13.

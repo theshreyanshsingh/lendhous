@@ -21,9 +21,9 @@ export default function DealWorkspace() {
   const uwApp = useMemo(() => (d ? { ...d.app, ...ov } : null), [d, ov]);
   if (!d || !uwApp) return <div className="glass p-6">Deal not found. <Link href="/admin" className="underline">Back</Link></div>;
   const e = evaluate(uwApp); const orig = est(d.app);
-  const avail = inHouseAvailable(s.deals, d.id);
+  const avail = inHouseAvailable(s.deals, s.sources, d.id);
   const rec = recommendRoute({ product: d.app.product, noteAmount: e.noteAmount, grade: e.score.grade, location: e.location, inHouseAvailable: avail });
-  const cap = capitalSummary(s.deals);
+  const cap = capitalSummary(s.deals, s.sources);
   const route = routeSel ?? d.route ?? (rec.route === "IN_HOUSE" ? "in_house" : rec.route === "SPLIT" ? "split" : "partner");
   const savedGt = d.route === "split" ? d.allocations.find((a) => a.sourceId === "gt-main")?.amount : undefined;
   const gtShare = splitAmt ?? savedGt ?? Math.min(Math.round(e.noteAmount / 2 / 5000) * 5000, Math.max(0, Math.floor(avail / 5000) * 5000));
@@ -47,7 +47,7 @@ export default function DealWorkspace() {
             <div className="text-sm text-muted-foreground">{d.borrowerName} · {d.entityName} · FICO {d.app.fico} · Tier {e.tier}</div></div>
           <div className="flex flex-wrap items-center gap-2"><GradeBadge grade={e.score.grade} score={e.score.score} /><Badge tone="blue">{statusLabel(d.status)}</Badge><Badge tone={capTone(d.capitalStatus)}>capital: {statusLabel(d.capitalStatus)}</Badge></div>
         </div>
-        {d.contractorIsGtAffiliate && <div className="mt-3 rounded-lg bg-bad/10 p-3 text-sm text-bad" data-testid="coi-banner"><b>Conflict of interest:</b> GT&apos;s construction company is the contractor. Draw inspections must be by an independent third party, a second approver outside the construction company is required, and partners must be told (Spec 7.6).</div>}
+        {d.contractorIsGtAffiliate && <div className="mt-3 rounded-lg bg-bad/10 p-3 text-sm text-bad" data-testid="coi-banner"><b>Conflict of interest:</b> GT&apos;s construction company is the contractor. Draw inspections must be by an independent third party, a second approver outside the construction company is required, and partners must be told.</div>}
         <div className="mt-4 flex gap-1 overflow-x-auto border-b border-border">
           {tabs.map((t) => <button key={t} data-testid={`tab-${t}`} onClick={() => setTab(t)} className={`whitespace-nowrap border-b-2 px-3 py-2 text-sm font-semibold ${tab === t ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>{t}</button>)}
         </div>
@@ -62,7 +62,7 @@ export default function DealWorkspace() {
               {d.app.product !== "bridge" && d.app.product !== "dscr" && <>{num("rehab", "Rehab / construction budget")}{num("arv", "ARV (selected valuation)")}</>}
               {d.app.product === "dscr" && <>{num("monthlyRent", "Qualifying rent / mo")}{num("taxesAnnual", "Taxes / yr")}{num("insuranceAnnual", "Insurance / yr")}</>}
               {num("fico", "FICO (pulled)")}{num("verifiedDeals", "Verified deals (36 mo)")}{num("liquidity", "Verified liquidity")}
-              <p className="text-[11px] text-faint">Edits are a live what-if. Original application values are kept (Spec A6).</p>
+              <p className="text-[11px] text-faint">Edits are a live what-if. Original application values are kept.</p>
             </div>
           </Section>
           <div className="space-y-4">
@@ -86,7 +86,7 @@ export default function DealWorkspace() {
                   <Stat label="Rate" value={`${e.rate.toFixed(3)}%`} sub={`matrix ${e.rateRange.join("–")}%`} />
                   <Stat label="Points" value={usd(e.points)} sub={`${e.pointsPct}%`} />
                   <Stat label="Cash to close" value={usd(e.cashToClose)} />
-                  <Stat label="All-in annualized" value={pct(e.allIn, 2)} sub={`flag at ${pct(pricingConfig.allInCostFlagCeiling, 0)} (placeholder)`} />
+                  <Stat label="All-in annualized" value={pct(e.allIn, 2)} sub={`flag at ${pct(pricingConfig.allInCostFlagCeiling, 0)}`} />
                   {d.app.product !== "dscr" && <><Stat label={`Reserve full-boat ${e.termMonths}m`} value={usd(fullBoatReserve(e.noteAmount, e.rate, e.termMonths))} /><Stat label={`Reserve Dutch ${e.termMonths}m`} value={usd(dutchReserve(e.noteAmount - e.holdback, evenDraws(e.holdback, 4), e.rate, e.termMonths))} /></>}
                   {d.app.product === "dscr" && <><Stat label="Monthly P&I" value={usd(e.monthlyPayment, 2)} /><Stat label="DSCR" value={(e.dscr ?? 0).toFixed(2) + "x"} /></>}
                 </div>
@@ -107,7 +107,7 @@ export default function DealWorkspace() {
           <Section title={`Deal score ${e.score.score}/100 · grade ${e.score.grade}`}>
             <ul className="space-y-2">{Object.entries(e.score.factors).map(([f, v]) => { const w = pricingConfig.score.weights[f as keyof typeof pricingConfig.score.weights]; return (
               <li key={f}><div className="flex justify-between text-sm"><span className="capitalize">{f.replace(/([A-Z])/g, " $1")}</span><span className="font-semibold">{v.toFixed(1)} / {w}</span></div><div className="h-2 rounded-full bg-muted"><div className="h-2 rounded-full bg-primary" style={{ width: `${(v / w) * 100}%` }} /></div></li>); })}</ul>
-            <p className="mt-3 text-[11px] text-faint">Grades: A ≥ 85 · B 70–84 · C 55–69 · D 40–54 · E &lt; 40. Placeholder curves (Spec 5.6). An underwriter override needs a logged reason.</p>
+            <p className="mt-3 text-[11px] text-faint">Grades: A ≥ 85 · B 70–84 · C 55–69 · D 40–54 · E &lt; 40. An underwriter override needs a logged reason.</p>
           </Section>
           <Section title="Automated flags & hard stops">
             {e.hardStops.length + e.flags.length === 0 ? <p className="text-sm text-good">No flags.</p> : <ul className="space-y-1 text-sm">{e.hardStops.map((h) => <li key={h} className="rounded-md bg-bad/10 px-2 py-1 text-bad">⛔ {h}</li>)}{e.flags.map((f) => <li key={f} className="rounded-md bg-warn/12 px-2 py-1 text-warn">⚠ {f}</li>)}</ul>}
@@ -120,7 +120,7 @@ export default function DealWorkspace() {
           <div className="space-y-4">
             <Section title="Recommendation">
               <div className="flex items-center gap-2" data-testid="route-rec"><Badge tone={rec.route === "IN_HOUSE" ? "green" : rec.route === "SPLIT" ? "violet" : "amber"}>{rec.route.replace(/_/g, " ")}</Badge><span className="text-sm text-muted-foreground">because: {rec.reasons.join("; ")}</span></div>
-              <p className="mt-1 text-[11px] text-faint">First matching rule wins (Spec 6.3). A human always confirms. In the MVP, SPLIT falls back to PARTNER until M8.</p>
+              <p className="mt-1 text-[11px] text-faint">First matching rule wins. A human always confirms.</p>
             </Section>
             <Section title="Capital availability">
               <div className="space-y-3">{cap.map((c) => { const used = c.reserved + c.committed + c.deployed + c.unfunded; return (
@@ -132,7 +132,7 @@ export default function DealWorkspace() {
             <Section title="Route this deal">
               <div className="grid grid-cols-3 gap-2">{(["in_house", "partner", "split"] as const).map((r) => <button key={r} data-testid={`route-${r}`} onClick={() => setRouteSel(r)} className={`rounded-lg border p-2 text-sm font-semibold ${route === r ? "border-primary bg-active text-foreground" : "border-border"}`}>{r === "in_house" ? "In-house" : r === "partner" ? "Partner" : "Split"}</button>)}</div>
               {route === "in_house" && avail < e.noteAmount && <p className="mt-2 text-xs text-bad">In-house available {usd(avail)} is less than the note amount {usd(e.noteAmount)}.</p>}
-              {route === "split" && <div className="mt-3"><label className="label">GT share: {usd(gtShare)} ({pct(gtShare / e.noteAmount, 0)}) · partners: {usd(e.noteAmount - gtShare)}</label><input type="range" className="w-full" min={0} max={e.noteAmount} step={5000} value={gtShare} onChange={(ev) => setSplitAmt(Number(ev.target.value))} /><p className="text-[11px] text-faint">Allocations must total 100% of the note before clear to close. Split participations need securities sign-off (Spec 10.8 #6).</p></div>}
+              {route === "split" && <div className="mt-3"><label className="label">GT share: {usd(gtShare)} ({pct(gtShare / e.noteAmount, 0)}) · partners: {usd(e.noteAmount - gtShare)}</label><input type="range" className="w-full" min={0} max={e.noteAmount} step={5000} value={gtShare} onChange={(ev) => setSplitAmt(Number(ev.target.value))} /><p className="text-[11px] text-faint">Allocations must total 100% of the note before clear to close. Split participations need securities sign-off.</p></div>}
               <div className="mt-3 flex flex-wrap gap-2">
                 <button className="btn-primary" data-testid="apply-route" onClick={() => dispatch({ t: "route", dealId: d.id, route, inHouseAmount: gtShare })}>Apply route</button>
                 {d.capitalStatus === "reserved" && <button className="btn-ghost" data-testid="commit" onClick={() => dispatch({ t: "commit", dealId: d.id })}>Commit capital</button>}
@@ -151,7 +151,7 @@ export default function DealWorkspace() {
             </Section>
             <Section title="Teaser preview (what partners see)">
               <div className="grid grid-cols-2 gap-2 text-sm"><div>Product: <b>{productLabel[teaser.product]}</b></div><div>Location: <b>{teaser.county}, {teaser.zip3}</b></div><div>Amount: <b>{usd(teaser.noteAmount)}</b></div><div>FICO band: <b>{teaser.ficoBand}</b></div><div>Experience: <b>Tier {teaser.tier}</b></div><div>Lender yield: <b>{teaser.lenderYieldOffered.toFixed(2)}%</b></div></div>
-              <p className="mt-2 text-[11px] text-faint">No street address, borrower name or entity name. Photos stripped of metadata (Spec 6.7).</p>
+              <p className="mt-2 text-[11px] text-faint">No street address, borrower name or entity name. Photos stripped of metadata.</p>
             </Section>
             <Section title={`Bids received (${bids.length})`}>
               {bids.length === 0 ? <p className="text-sm text-muted-foreground">No bids yet.</p> : <ul className="space-y-2">{bids.map((b) => (

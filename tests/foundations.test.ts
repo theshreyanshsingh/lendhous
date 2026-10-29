@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { nextStep } from "@/lib/approvals";
 import { sessionExpired } from "@/lib/auth";
 import { decryptField, DEV_FIELD_KEY, encryptField, last4, needsRotation, parseFieldKeys } from "@/lib/crypto";
-import { assertMongoUrl, assertReleaseEnv, demoSeedBlocked, DEV_AUTH_SECRET, DEV_DEMO_PASSWORD, secureCookies } from "@/lib/deploy";
-import { can, grantFor, homeFor, needsMfa } from "@/lib/permissions";
+import { assertMongoUrl, assertReleaseEnv, demoSeedBlocked, DEV_AUTH_SECRET, DEV_DEMO_PASSWORD, isDemoEmail, secureCookies } from "@/lib/deploy";
+import { can, grantFor, homeFor, needsMfa, viewFor } from "@/lib/permissions";
 import { rateLimit, resetRateLimits } from "@/lib/rate-limit";
 import { newRecoveryCodes, packHashes, takeRecoveryCode } from "@/lib/recovery";
 import { totpCode, verifyTotp } from "@/lib/totp";
@@ -116,6 +116,18 @@ describe("permission matrix (Spec v3 Section 1)", () => {
     expect(homeFor(["BORROWER"])).toBe("/borrower");
     expect(homeFor(["PARTNER_LENDER"])).toBe("/partner");
     expect(homeFor(["INSPECTOR"])).toBe("/admin");
+  });
+  it("opens one workspace per account: staff before partner before borrower, none for brokers yet", () => {
+    expect(viewFor(["BORROWER", "UNDERWRITER"])).toBe("admin");
+    expect(viewFor(["BORROWER", "PARTNER_LENDER"])).toBe("partner");
+    expect(viewFor(["BORROWER"])).toBe("borrower");
+    expect(viewFor(["BROKER"])).toBeNull();
+    expect(homeFor(["BROKER"])).toBe("/account/security");
+  });
+  it("only the reserved demo domain counts as a demo account", () => {
+    expect(isDemoEmail("Alex.Sample@LendHous.test")).toBe(true);
+    expect(isDemoEmail("alex@lendhous.com")).toBe(false);
+    expect(isDemoEmail("alex@notlendhous.test")).toBe(false);
   });
 });
 

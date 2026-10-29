@@ -1,13 +1,11 @@
 "use client";
 import React, { createContext, useContext, useEffect, useMemo, useReducer } from "react";
 import { evaluate, capitalAvailable, type Application, type Estimate } from "./engine";
-import { seedDeals, seedBids, capitalSources, partners as seedPartners, BORROWER_ID, type Deal, type Bid, type Partner, type DocStatus, type CapitalSource } from "./mockData";
+import { seedDeals, seedBids, capitalSources, partners as seedPartners, BORROWER_ID, DEMO_PARTNER_ID, type Deal, type Bid, type Partner, type DocStatus, type CapitalSource } from "./mockData";
 
-export type Role = "borrower" | "admin" | "partner";
-interface State { role: Role; partnerId: string; deals: Deal[]; bids: Bid[]; partners: Partner[]; audit: { at: string; text: string }[] }
+interface State { partnerId: string; deals: Deal[]; bids: Bid[]; partners: Partner[]; sources: CapitalSource[]; audit: { at: string; text: string }[] }
 
 type Action =
-  | { t: "role"; role: Role } | { t: "partner"; id: string }
   | { t: "submitApp"; app: Application; address: string; city: string; zip: string; entityName: string; exitStrategy: string }
   | { t: "uploadDoc"; dealId: string; docId: string; fileName: string }
   | { t: "docStatus"; dealId: string; docId: string; status: DocStatus }
@@ -20,25 +18,27 @@ type Action =
   | { t: "reset" };
 
 const now = () => new Date().toISOString();
-const KEY = "lendhous-proto-v3";
+// Demo seats share one demo book in the browser, so a bid placed as the partner seat shows up for the staff seats.
+const KEY = "lendhous-demo-v1";
 /** Fixed, not now(): /admin is prerendered, so a load-time stamp would not match the server HTML (hydration error). */
 const SEED_AT = "2026-10-18T09:00:00-07:00";
 
-function init(): State {
+function demoBook(): State {
   const deals = seedDeals.map((d) => {
     const e = evaluate(d.app);
     return { ...d, allocations: d.allocations.map((a) => ({ ...a, amount: a.amount || e.noteAmount })) };
   });
-  return { role: "admin", partnerId: "p-a", deals, bids: seedBids, partners: seedPartners, audit: [{ at: SEED_AT, text: "Demo data loaded (all records are FAKE)" }] };
+  return { partnerId: DEMO_PARTNER_ID, deals, bids: seedBids, partners: seedPartners, sources: capitalSources, audit: [{ at: SEED_AT, text: "Demo data loaded (all records are FAKE)" }] };
 }
+
+/** What a non-demo account sees until its records come from the database: nothing. */
+const emptyBook = (): State => ({ partnerId: "", deals: [], bids: [], partners: [], sources: [], audit: [] });
 
 function reducer(s: State, a: Action): State {
   const log = (text: string) => [{ at: now(), text }, ...s.audit].slice(0, 50);
   const upd = (id: string, f: (d: Deal) => Deal) => s.deals.map((d) => (d.id === id ? f(d) : d));
   switch (a.t) {
-    case "role": return { ...s, role: a.role };
-    case "partner": return { ...s, partnerId: a.id };
-    case "reset": return init();
+    case "reset": return demoBook();
     case "submitApp": {
       const n = s.deals.length + 1;
       const d: Deal = { id: `d${Date.now()}`, loanNumber: `LH-DEMO-${1000 + n}`, borrowerId: BORROWER_ID, borrowerName: "Alex Sample (FAKE)", entityName: a.entityName || "Sample Flips LLC (FAKE)", address: a.address || "100 New Demo St", city: a.city || "Hollywood", zip: a.zip || "33020", app: a.app, status: "submitted", daysInStage: 0, capitalStatus: "not_started", allocations: [], teaserSentTo: [], source: "web_quote",
@@ -80,18 +80,20 @@ function reducer(s: State, a: Action): State {
   }
 }
 
-const Ctx = createContext<{ s: State; dispatch: React.Dispatch<Action> } | null>(null);
+const Ctx = createContext<{ s: State; dispatch: React.Dispatch<Action>; demo: boolean; viewerName: string } | null>(null);
 type Outer = Action | { t: "hydrate"; state: State };
 function outer(s: State, a: Outer): State { return a.t === "hydrate" ? a.state : reducer(s, a); }
-export function StoreProvider({ children }: { children: React.ReactNode }) {
-  const [s, dispatch] = useReducer(outer, undefined, init);
+export function StoreProvider({ demo, viewerName, children }: { demo: boolean; viewerName: string; children: React.ReactNode }) {
+  const [s, dispatch] = useReducer(outer, demo, (isDemo: boolean) => (isDemo ? demoBook() : emptyBook()));
   const [hydrated, setHydrated] = React.useState(false);
+  // Only demo seats read or write the saved demo book; any other account never sees it, even in the same browser.
   useEffect(() => {
+    if (!demo) return;
     try { const raw = localStorage.getItem(KEY); if (raw) dispatch({ t: "hydrate", state: JSON.parse(raw) as State }); } catch {}
     setHydrated(true);
-  }, []);
-  useEffect(() => { if (hydrated) try { localStorage.setItem(KEY, JSON.stringify(s)); } catch {} }, [s, hydrated]);
-  const value = useMemo(() => ({ s, dispatch: dispatch as React.Dispatch<Action> }), [s]);
+  }, [demo]);
+  useEffect(() => { if (demo && hydrated) try { localStorage.setItem(KEY, JSON.stringify(s)); } catch {} }, [s, demo, hydrated]);
+  const value = useMemo(() => ({ s, dispatch: dispatch as React.Dispatch<Action>, demo, viewerName }), [s, demo, viewerName]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 export function useStore() { const c = useContext(Ctx); if (!c) throw new Error("no store"); return c; }
@@ -101,8 +103,8 @@ const estCache = new WeakMap<Application, Estimate>();
 export function est(app: Application) { let e = estCache.get(app); if (!e) { e = evaluate(app); estCache.set(app, e); } return e; }
 
 export interface CapRow { source: CapitalSource; reserved: number; committed: number; deployed: number; unfunded: number; available: number }
-export function capitalSummary(deals: Deal[]): CapRow[] {
-  return capitalSources.map((src) => {
+export function capitalSummary(deals: Deal[], sources: CapitalSource[]): CapRow[] {
+  return sources.map((src) => {
     let reserved = 0, committed = 0, deployed = src.baseDeployed, unfunded = src.baseUnfunded;
     for (const d of deals) {
       for (const al of d.allocations) {
@@ -121,5 +123,5 @@ export function capitalSummary(deals: Deal[]): CapRow[] {
     return { source: src, reserved, committed, deployed, unfunded, available };
   });
 }
-export const inHouseAvailable = (deals: Deal[], excludeDealId?: string) =>
-  capitalSummary(deals.map((d) => (d.id === excludeDealId ? { ...d, allocations: [] } : d))).find((r) => r.source.id === "gt-main")!.available;
+export const inHouseAvailable = (deals: Deal[], sources: CapitalSource[], excludeDealId?: string) =>
+  capitalSummary(deals.map((d) => (d.id === excludeDealId ? { ...d, allocations: [] } : d)), sources).find((r) => r.source.id === "gt-main")?.available ?? 0;

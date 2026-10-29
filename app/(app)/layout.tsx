@@ -1,16 +1,20 @@
+import { redirect } from "next/navigation";
 import Shell from "@/components/Shell";
 import { getCurrentUser } from "@/lib/auth";
-import { ROLE_LABEL } from "@/lib/permissions";
+import { isDemoEmail } from "@/lib/deploy";
+import { ROLE_LABEL, viewFor } from "@/lib/permissions";
 import { StoreProvider } from "@/lib/store";
 
-// The prototype pages still run on browser data; B1 and B2 move them behind sign-in. Until then the shell only
-// shows who is signed in. getCurrentUser() skips the database entirely when there is no session cookie.
+// Every workspace needs a signed-in account. Demo data loads only for the seeded demo seats (@lendhous.test);
+// any other account starts empty until its records come from the database. Each workspace's layout checks the role.
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await getCurrentUser();
-  const account = user ? { name: user.name, email: user.email, roles: user.roleCodes.map((role) => ROLE_LABEL[role]) } : null;
+  if (!user) redirect("/login");
+  const demo = isDemoEmail(user.email);
+  const account = { name: user.name, email: user.email, roles: user.roleCodes.map((role) => ROLE_LABEL[role]), demo };
   return (
-    <StoreProvider>
-      <Shell account={account}>{children}</Shell>
+    <StoreProvider demo={demo} viewerName={user.name}>
+      <Shell account={account} view={viewFor(user.roleCodes)}>{children}</Shell>
     </StoreProvider>
   );
 }

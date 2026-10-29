@@ -23,7 +23,6 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           <h1 className="mt-3 text-[36px] leading-[1.04] font-semibold text-foreground sm:text-[48px]">Welcome back to LendHous.</h1>
           <div className="mt-5"><Notice notice={q(params, "notice")} error={q(params, "error")} /></div>
           <div className="mt-8"><LoginPanel next={q(params, "next")} demo={demo} /></div>
-          <p className="mt-6 text-sm text-muted-foreground">Borrower sign-up arrives with the application flow (milestone B1).</p>
         </div>
       </main>
     </div>

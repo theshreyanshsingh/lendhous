@@ -10,7 +10,7 @@ export default function Pipeline() {
   const { s } = useStore();
   const [product, setProduct] = useState("all"); const [q, setQ] = useState("");
   const rows = useMemo(() => s.deals.map((d) => ({ d, e: est(d.app) })).filter(({ d }) => (product === "all" || d.app.product === product) && (q === "" || (d.borrowerName + d.address + d.loanNumber).toLowerCase().includes(q.toLowerCase()))), [s.deals, product, q]);
-  const cap = capitalSummary(s.deals).find((r) => r.source.id === "gt-main")!;
+  const cap = capitalSummary(s.deals, s.sources).find((r) => r.source.id === "gt-main");
   const pre = s.deals.filter((d) => !["servicing_current", "servicing_delinquent", "paid_off", "funded", "matured", "default"].includes(d.status));
   const counts = pipelineStages.slice(0, 9).map((st) => ({ ...st, n: s.deals.filter((d) => d.status === st.code).length, amt: s.deals.filter((d) => d.status === st.code).reduce((a, d) => a + est(d.app).noteAmount, 0) }));
   return (
@@ -19,7 +19,7 @@ export default function Pipeline() {
         <PageIntro eyebrow="Underwriting" title="Pipeline" lede="Every ratio is recalculated live from the pricing config. Click a deal to open its workspace." />
         <div className="mb-6 grid grid-cols-3 gap-3 text-right">
           <div className="glass px-3 py-2"><div className="text-xs text-muted-foreground">Open pipeline</div><div className="font-heading text-base font-semibold whitespace-nowrap sm:text-xl">{pre.length} · {k(pre.reduce((a, d) => a + est(d.app).noteAmount, 0))}</div></div>
-          <div className="glass px-3 py-2"><div className="text-xs text-muted-foreground">GT available</div><div className="font-heading text-base font-semibold whitespace-nowrap sm:text-xl text-good">{k(cap.available)}</div></div>
+          <div className="glass px-3 py-2"><div className="text-xs text-muted-foreground">GT available</div><div className="font-heading text-base font-semibold whitespace-nowrap sm:text-xl text-good">{cap ? k(cap.available) : "—"}</div></div>
           <div className="glass px-3 py-2"><div className="text-xs text-muted-foreground">Bids waiting</div><div className="font-heading text-base font-semibold whitespace-nowrap sm:text-xl text-foreground">{s.bids.filter((b) => b.status === "submitted").length}</div></div>
         </div>
       </div>
@@ -36,6 +36,7 @@ export default function Pipeline() {
           <table className="w-full min-w-[1080px] [&_td]:px-3 [&_th]:px-3 [&_th]:whitespace-nowrap" data-testid="pipeline-table">
             <thead className="bg-muted/60"><tr><th>Loan</th><th>Borrower / property</th><th>Product</th><th className="text-right">Amount</th><th>LTV</th><th>LTC</th><th>LTARV</th><th>DSCR</th><th>Score</th><th>Status</th><th>Capital</th></tr></thead>
             <tbody className="divide-y divide-border">
+              {rows.length === 0 && <tr><td colSpan={11} className="py-10 text-center text-muted-foreground">{s.deals.length === 0 ? "No loans in the pipeline yet." : "No loans match this search."}</td></tr>}
               {rows.map(({ d, e }) => {
                 const r = (key: string) => e.ratios.find((x) => x.key === key);
                 const cell = (key: string, mult = false) => { const x = r(key); if (!x) return <span className="text-faint">—</span>; return <span className="inline-flex items-center gap-1.5 font-medium"><ColorDot color={x.color} />{mult ? x.actual.toFixed(2) + "x" : pct(x.actual)}</span>; };
@@ -56,7 +57,7 @@ export default function Pipeline() {
           </table>
         </div>
       </div>
-      <div className="glass p-4"><div className="eyebrow mb-2">Activity (audit log, demo)</div><ul className="space-y-1 text-xs text-muted-foreground">{s.audit.slice(0, 6).map((a, i) => <li key={i}><span className="text-faint">{new Date(a.at).toLocaleString("en-US", { timeZone: "America/Los_Angeles" })} PT</span> · {a.text}</li>)}</ul></div>
+      <div className="glass p-4"><div className="eyebrow mb-2">Activity</div><ul className="space-y-1 text-xs text-muted-foreground">{s.audit.length === 0 && <li>No activity yet.</li>}{s.audit.slice(0, 6).map((a, i) => <li key={i}><span className="text-faint">{new Date(a.at).toLocaleString("en-US", { timeZone: "America/Los_Angeles" })} PT</span> · {a.text}</li>)}</ul></div>
     </div>
   );
 }

@@ -8,12 +8,17 @@ import { Badge, GradeBadge, ColorDot, usd, pct, productLabel } from "@/component
 
 export default function PartnerFeed() {
   const { s, dispatch } = useStore();
-  const me = s.partners.find((p) => p.id === s.partnerId)!;
+  const me = s.partners.find((p) => p.id === s.partnerId);
+  if (!me) return (
+    <div className="mx-auto max-w-xl glass p-6 text-center" data-testid="no-partner-org">
+      <h1 className="text-xl font-semibold tracking-tight">Your organization isn&apos;t connected yet</h1>
+      <p className="mt-2 text-sm text-muted-foreground">Once LendHous connects your organization and its buy box, matching deals appear here.</p>
+    </div>);
   if (!me.ndaSigned) return (
     <div className="mx-auto max-w-xl glass p-6 text-center" data-testid="nda-gate">
       <h1 className="text-xl font-semibold tracking-tight">Sign the Master Agreement + NDA / Non-Circumvention to see deals</h1>
-      <p className="mt-2 text-sm text-muted-foreground">{me.name} has not signed yet. No teaser is visible until the organization signs (Spec 6.7, acceptance test M3).</p>
-      <button className="btn-primary mt-4" onClick={() => dispatch({ t: "signNda", partnerId: me.id })}>E-sign agreement (demo)</button>
+      <p className="mt-2 text-sm text-muted-foreground">{me.name} has not signed yet. No teaser is visible until the organization signs.</p>
+      <button className="btn-primary mt-4" onClick={() => dispatch({ t: "signNda", partnerId: me.id })}>E-sign agreement</button>
     </div>);
   const feed = s.deals.filter((d) => d.teaserSentTo.includes(me.id));
   return (

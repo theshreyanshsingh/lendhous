@@ -8,8 +8,8 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 const serif = Source_Serif_4({ subsets: ["latin"], variable: "--font-serif", axes: ["opsz"] });
 
 export const metadata: Metadata = {
-  title: { default: "LendHous Prototype (demo data)", template: "%s · LendHous" },
-  description: "Clickable prototype of the LendHous private lending platform. All data fake.",
+  title: { default: "LendHous", template: "%s · LendHous" },
+  description: "LendHous private lending for real estate investors.",
 };
 export const viewport: Viewport = { width: "device-width", initialScale: 1 };
 

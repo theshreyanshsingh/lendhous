@@ -24,6 +24,8 @@ export interface Partner { id: string; name: string; ndaSigned: boolean; buyBox:
 export interface Bid { id: string; dealId: string; partnerId: string; pct: number; lenderRate: number; lenderPoints: number; conditions: string; status: "submitted" | "accepted" | "declined" | "withdrawn"; type: "bid" | "accept_as_offered"; at: string }
 
 export const BORROWER_ID = "b-alex";
+/** The partner organization the demo partner seat (pia.partner@lendhous.test) acts for. */
+export const DEMO_PARTNER_ID = "p-a";
 
 const stdDocs = (overrides: Partial<Record<string, DocStatus>> = {}): Doc[] => [
   { id: "id", name: "Government ID (each guarantor)", category: "Identity", status: overrides.id ?? "accepted" },
