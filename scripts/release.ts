@@ -1,4 +1,8 @@
+import { existsSync } from "node:fs";
 import { assertReleaseEnv, isReleaseBuild } from "../lib/deploy";
+
+// On Vercel the variables are already set. On a pm2 server they live in .env, which next build reads but tsx does not.
+if (existsSync(".env")) process.loadEnvFile(".env");
 
 async function main() {
   if (!isReleaseBuild(process.env)) {
