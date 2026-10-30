@@ -10,7 +10,7 @@ export function PageIntro({
   return (
     <header className="mb-7 max-w-3xl">
       <p className="eyebrow">{eyebrow}</p>
-      <h1 className="mt-2.5 text-[32px] leading-[1.06] font-semibold text-foreground sm:text-[40px]">{title}</h1>
+      <h1 className="mt-2.5 text-[32px] leading-[1.06] font-normal text-foreground sm:text-[40px]">{title}</h1>
       {lede && <p className="mt-3 max-w-2xl text-[15px] leading-relaxed text-muted-foreground">{lede}</p>}
     </header>
   );

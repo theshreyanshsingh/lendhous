@@ -18,7 +18,7 @@ export default async function VerifyLoginPage({ searchParams }: { searchParams: 
     <main id="desk" className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-5 py-16">
       <Logo />
       <p className="eyebrow mt-12">Second factor</p>
-      <h1 className="mt-3 text-[28px] font-semibold tracking-tight text-foreground">Enter the code.</h1>
+      <h1 className="mt-3 text-[28px] font-normal tracking-tight text-foreground">Enter the code.</h1>
       <p className="mt-4 text-sm text-muted-foreground">The authenticator on this account refreshes every thirty seconds.</p>
       <div className="mt-8"><Notice notice={q(params, "notice")} error={q(params, "error")} /></div>
       <form action={verifyLoginTotp} className="mt-6 space-y-4">

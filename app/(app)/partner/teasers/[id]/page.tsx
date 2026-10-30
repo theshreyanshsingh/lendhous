@@ -19,7 +19,7 @@ export default function TeaserDetail() {
   return (
     <div className="space-y-4">
       <Link href="/partner" className="text-sm text-link">← Deal feed</Link>
-      <div className="glass p-5"><div className="flex flex-wrap items-start justify-between gap-2"><div><div className="text-xs text-muted-foreground">{t.teaserId} · {productLabel[t.product]} · closing target {t.closingDate}</div><h1 className="text-xl font-semibold tracking-tight">{won ? `${d.address}, ${d.city} ${d.zip}` : `${t.county} County · ZIP ${t.zip3}`}</h1><div className="text-sm text-muted-foreground">{won ? `${d.borrowerName} · ${d.entityName}` : "Borrower identity hidden until a binding commitment"}</div></div><GradeBadge grade={t.grade} score={t.score} /></div></div>
+      <div className="glass p-5"><div className="flex flex-wrap items-start justify-between gap-2"><div><div className="text-xs text-muted-foreground">{t.teaserId} · {productLabel[t.product]} · closing target {t.closingDate}</div><h1 className="text-xl font-normal tracking-tight">{won ? `${d.address}, ${d.city} ${d.zip}` : `${t.county} County · ZIP ${t.zip3}`}</h1><div className="text-sm text-muted-foreground">{won ? `${d.borrowerName} · ${d.entityName}` : "Borrower identity hidden until a binding commitment"}</div></div><GradeBadge grade={t.grade} score={t.score} /></div></div>
       <div className="grid gap-4 lg:grid-cols-[1fr_380px]">
         <div className="space-y-4">
           <Section title="Blind summary">

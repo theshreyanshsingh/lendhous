@@ -1,6 +1,6 @@
 # Lendhous
 
-GT's private lending platform, built from Product Spec v3 (`product-spec-v3.pdf`, kept outside this repo). It runs on the same stack and infrastructure as UPB Capital (`../upb-capital-source`): Next.js 15, React 19, TypeScript, Tailwind 4 and shadcn, Prisma on MongoDB, signed-cookie sessions, R2 or Vercel Blob for files, and Resend or SMTP for mail. The look follows the LendHous marketing site: forest green on warm off-white, a serif for headings, and near-square corners. The tokens are in `app/globals.css`.
+GT's private lending platform, built from Product Spec v3 (`product-spec-v3.pdf`, kept outside this repo). It runs on the same stack and infrastructure as UPB Capital (`../upb-capital-source`): Next.js 15, React 19, TypeScript, Tailwind 4 and shadcn, Prisma on MongoDB, signed-cookie sessions, R2 or Vercel Blob for files, and Resend or SMTP for mail. The look follows the LendHous brand board: cream `#FAFBF8`, dark green `#202B28` and sage `#677D67`, Georgia for headings and Verdana for text, with near-square corners from the marketing site. The tokens are in `app/globals.css`; the browser and home-screen icons (`app/icon.png`, `app/apple-icon.png`) are the brand's "L" mark.
 
 Two layers live here today:
 

@@ -44,7 +44,7 @@ export default function Apply() {
         <div className="glass p-4">
           <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-muted-foreground"><span className="whitespace-nowrap">Step {step + 1} of {steps.length}</span><span>Progress isn&apos;t saved if you leave this page</span></div>
           <div className="mt-2 flex gap-1">{steps.map((s, i) => <button key={s} onClick={() => setStep(i)} className={`h-1.5 flex-1 rounded-full ${i <= step ? "bg-primary" : "bg-accent"}`} aria-label={s} />)}</div>
-          <h1 className="mt-3 text-xl font-semibold tracking-tight">{steps[step]}</h1>
+          <h1 className="mt-3 text-xl font-normal tracking-tight">{steps[step]}</h1>
         </div>
         <div className="glass space-y-4 p-4 sm:p-5" data-testid={`step-${step}`}>
           {step === 0 && (<>

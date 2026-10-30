@@ -43,7 +43,7 @@ export default function DealWorkspace() {
       <div className="glass p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div><div className="text-xs text-muted-foreground">{d.loanNumber} · {productLabel[d.app.product]} · source: {d.source.replace("_", " ")}</div>
-            <h1 className="text-xl font-semibold tracking-tight">{d.address}, {d.city} {d.zip} <span className="font-normal text-faint">({d.app.county})</span></h1>
+            <h1 className="text-xl font-normal tracking-tight">{d.address}, {d.city} {d.zip} <span className="font-normal text-faint">({d.app.county})</span></h1>
             <div className="text-sm text-muted-foreground">{d.borrowerName} · {d.entityName} · FICO {d.app.fico} · Tier {e.tier}</div></div>
           <div className="flex flex-wrap items-center gap-2"><GradeBadge grade={e.score.grade} score={e.score.score} /><Badge tone="blue">{statusLabel(d.status)}</Badge><Badge tone={capTone(d.capitalStatus)}>capital: {statusLabel(d.capitalStatus)}</Badge></div>
         </div>

@@ -20,7 +20,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
       <main id="desk" className="px-4 py-12 md:px-8 md:py-16">
         <div className={demo ? "mx-auto w-full max-w-[1080px]" : "mx-auto w-full max-w-[400px]"}>
           <p className="eyebrow">Sign in</p>
-          <h1 className="mt-3 text-[36px] leading-[1.04] font-semibold text-foreground sm:text-[48px]">Welcome back to LendHous.</h1>
+          <h1 className="mt-3 text-[36px] leading-[1.04] font-normal text-foreground sm:text-[48px]">Welcome back to LendHous.</h1>
           <div className="mt-5"><Notice notice={q(params, "notice")} error={q(params, "error")} /></div>
           <div className="mt-8"><LoginPanel next={q(params, "next")} demo={demo} /></div>
         </div>

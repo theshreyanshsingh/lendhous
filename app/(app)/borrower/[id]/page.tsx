@@ -24,7 +24,7 @@ export default function BorrowerLoan() {
     <div className="space-y-4">
       <Link href="/borrower" className="text-sm text-link">← My loans</Link>
       <div className="glass p-5">
-        <div className="flex flex-wrap items-start justify-between gap-2"><div><div className="text-xs text-muted-foreground">{d.loanNumber} · {productLabel[d.app.product]} · {d.entityName}</div><h1 className="text-xl font-semibold tracking-tight">{d.address}, {d.city} {d.zip}</h1></div><Badge tone={funded ? "green" : "blue"}>{statusLabel(d.status)}</Badge></div>
+        <div className="flex flex-wrap items-start justify-between gap-2"><div><div className="text-xs text-muted-foreground">{d.loanNumber} · {productLabel[d.app.product]} · {d.entityName}</div><h1 className="text-xl font-normal tracking-tight">{d.address}, {d.city} {d.zip}</h1></div><Badge tone={funded ? "green" : "blue"}>{statusLabel(d.status)}</Badge></div>
         <div className="mt-4"><Tracker status={d.status} /></div>
         <div className="mt-3 text-sm text-muted-foreground">Next step: {funded ? "Make your monthly payment or request a draw." : d.docs.some((x) => x.status === "requested" || x.status === "rejected") ? "Upload the documents marked Requested below." : "Your team is reviewing. We'll notify you of the next step."}</div>
       </div>

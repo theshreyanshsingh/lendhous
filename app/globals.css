@@ -8,9 +8,11 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-inter), Inter, ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-serif), "Source Serif 4", Georgia, "Times New Roman", serif;
+  /* The brand board's typefaces: Georgia for headings and the wordmark, Verdana for text. Both ship with
+     macOS, iOS and Windows, so nothing is downloaded; other systems fall back to their own serif and sans. */
+  --font-sans: Verdana, Geneva, "DejaVu Sans", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-heading: Georgia, "Times New Roman", serif;
   --color-link: var(--link);
   --color-faint: var(--faint);
   --color-good: var(--good);
@@ -60,28 +62,29 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-/* The LendHous palette, sampled from the marketing site: warm off-white page, forest-green actions,
-   green-black ink, a sage full stop, hairline rules and near-square corners. */
+/* The LendHous brand board (LendHous-Brand-Portfolio): cream #FAFBF8, dark green #202B28, sage #677D67.
+   Dark green is the ink and the actions; sage is the full stop, focus and accents. Sage is 4.3:1 on cream,
+   so it never carries small text. Hairline rules and near-square corners come from the marketing site. */
 :root {
   --background: #fafbf8;
-  --foreground: #1f2a25;
+  --foreground: #202b28;
   --card: #ffffff;
-  --card-foreground: #1f2a25;
+  --card-foreground: #202b28;
   --popover: #ffffff;
-  --popover-foreground: #1f2a25;
-  --primary: #243f36;
-  --primary-hover: #1a3029;
+  --popover-foreground: #202b28;
+  --primary: #202b28;
+  --primary-hover: #34433e;
   --primary-foreground: #fafbf8;
   --secondary: #eff1ec;
-  --secondary-foreground: #1f2a25;
+  --secondary-foreground: #202b28;
   --muted: #eff1ec;
   --muted-foreground: #595f5a;
   --accent: #e9ece5;
-  --accent-foreground: #1f2a25;
+  --accent-foreground: #202b28;
   --destructive: #a8382b;
   --border: #e1e3dd;
   --input: #d3d6cf;
-  --ring: #5e7d63;
+  --ring: #677d67;
   --link: #2b5d6a;
   --faint: #8b928c;
   --good: #2e6b45;
@@ -89,74 +92,75 @@
   --bad: #a8382b;
   --hover: #eff1ec;
   --active: #e7ebe3;
-  --nav: #2d3d34;
-  --brand: #5e7d63;
+  --nav: #34403c;
+  --brand: #677d67;
   --eyebrow: #636e65;
   --rule: #cfd0cb;
-  --shadow: 0 1px 2px rgba(31, 42, 37, 0.04), 0 16px 40px rgba(31, 42, 37, 0.07);
-  --chart-1: #243f36;
-  --chart-2: #5e7d63;
+  --shadow: 0 1px 2px rgba(32, 43, 40, 0.04), 0 16px 40px rgba(32, 43, 40, 0.07);
+  --chart-1: #202b28;
+  --chart-2: #677d67;
   --chart-3: #2b5d6a;
   --chart-4: #a8382b;
   --chart-5: #8a6410;
   --radius: 0.25rem;
   --sidebar: #f4f5f1;
-  --sidebar-foreground: #1f2a25;
-  --sidebar-primary: #243f36;
+  --sidebar-foreground: #202b28;
+  --sidebar-primary: #202b28;
   --sidebar-primary-foreground: #fafbf8;
   --sidebar-accent: #e7ebe3;
-  --sidebar-accent-foreground: #1f2a25;
+  --sidebar-accent-foreground: #202b28;
   --sidebar-border: #e1e3dd;
-  --sidebar-ring: #5e7d63;
+  --sidebar-ring: #677d67;
   color-scheme: light;
 }
 
-/* The same brand after dark: green-black page, a lifted forest green for actions, sage accents. */
+/* After dark the page is the brand's dark green, as on the dark-green logo: cream ink and cream actions
+   (cream on sage would fail contrast), the sage full stop unchanged, a lifted sage for focus rings. */
 .dark {
-  --background: #0f1512;
-  --foreground: #eceee8;
-  --card: #161e1a;
-  --card-foreground: #eceee8;
-  --popover: #161e1a;
-  --popover-foreground: #eceee8;
-  --primary: #3b6b55;
-  --primary-hover: #457a62;
-  --primary-foreground: #fafbf8;
-  --secondary: #1f2924;
-  --secondary-foreground: #eceee8;
-  --muted: #1f2924;
-  --muted-foreground: #a3aca5;
-  --accent: #222d27;
-  --accent-foreground: #eceee8;
+  --background: #202b28;
+  --foreground: #fafbf8;
+  --card: #273430;
+  --card-foreground: #fafbf8;
+  --popover: #273430;
+  --popover-foreground: #fafbf8;
+  --primary: #fafbf8;
+  --primary-hover: #e1e5dd;
+  --primary-foreground: #202b28;
+  --secondary: #2c3a35;
+  --secondary-foreground: #fafbf8;
+  --muted: #2c3a35;
+  --muted-foreground: #b0b9b3;
+  --accent: #2f3d38;
+  --accent-foreground: #fafbf8;
   --destructive: #f08a7a;
-  --border: #26312b;
-  --input: #34403a;
-  --ring: #8fb396;
+  --border: #35443e;
+  --input: #43534d;
+  --ring: #93a993;
   --link: #8cc4d0;
-  --faint: #6f7a72;
-  --good: #74c491;
+  --faint: #84918b;
+  --good: #7fcb9a;
   --warn: #e2b85c;
-  --bad: #f08a7a;
-  --hover: #1c2621;
-  --active: #24302a;
-  --nav: #d9ded7;
-  --brand: #8fb396;
-  --eyebrow: #9aa79d;
-  --rule: #34403a;
-  --shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
-  --chart-1: #8fb396;
-  --chart-2: #3b6b55;
+  --bad: #f4998a;
+  --hover: #2a3833;
+  --active: #31403a;
+  --nav: #e2e6df;
+  --brand: #677d67;
+  --eyebrow: #a6b2a9;
+  --rule: #43534d;
+  --shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+  --chart-1: #93a993;
+  --chart-2: #677d67;
   --chart-3: #8cc4d0;
   --chart-4: #f08a7a;
   --chart-5: #e2b85c;
-  --sidebar: #121a16;
-  --sidebar-foreground: #eceee8;
-  --sidebar-primary: #3b6b55;
-  --sidebar-primary-foreground: #fafbf8;
-  --sidebar-accent: #24302a;
-  --sidebar-accent-foreground: #eceee8;
-  --sidebar-border: #26312b;
-  --sidebar-ring: #8fb396;
+  --sidebar: #1b2522;
+  --sidebar-foreground: #fafbf8;
+  --sidebar-primary: #fafbf8;
+  --sidebar-primary-foreground: #202b28;
+  --sidebar-accent: #31403a;
+  --sidebar-accent-foreground: #fafbf8;
+  --sidebar-border: #35443e;
+  --sidebar-ring: #93a993;
   color-scheme: dark;
 }
 

@@ -16,7 +16,7 @@ export default async function SecurityPage({ searchParams }: { searchParams: Pro
   const params = await searchParams;
   const pending = Boolean(user.totpSecretEnc) && !user.totpEnabled;
   const secret = pending ? totpSecretOf(user) : "";
-  const qr = pending ? await QRCode.toString(otpauthUrl(secret, user.email), { type: "svg", margin: 1, width: 180, color: { dark: "#1f2a25", light: "#ffffff" } }) : "";
+  const qr = pending ? await QRCode.toString(otpauthUrl(secret, user.email), { type: "svg", margin: 1, width: 180, color: { dark: "#202b28", light: "#ffffff" } }) : "";
   const codes = user.recoveryRevealEnc ? recoveryCodesToShow(user) : [];
   return (
     <div className="max-w-xl">
