@@ -23,7 +23,7 @@ export default function Capital() {
         <div className="glass p-4"><Stat label="Total commitment" value={k(tot.c)} /></div>
         <div className="glass p-4"><Stat label="Deployed" value={k(tot.dep)} sub={`utilization ${tot.c ? pct(tot.dep / tot.c, 0) : "—"}`} /></div>
         <div className="glass p-4"><Stat label="Unfunded holdbacks" value={k(tot.un)} sub="counts against available" /></div>
-        <div className="glass p-4"><Stat label="Available now" value={<span className="text-good">{k(tot.av)}</span>} /></div>
+        <div className="glass p-4"><Stat label="Available now" value={<span className="text-good" data-testid="capital-available">{k(tot.av)}</span>} /></div>
       </div>
       <Section title="Sources" right={<button type="button" className="btn-ghost h-9! px-3! text-xs!" data-testid="add-source" onClick={() => setEditing("new")}>Add a source</button>}>
         {editing && <SourceForm source={editing === "new" ? undefined : editing} taken={s.sources} onClose={() => setEditing(null)} />}
@@ -42,7 +42,7 @@ export default function Capital() {
   );
 }
 
-// The pipeline's "Capital available" and in-house routing read the source with this id, so the first fund takes it.
+// In-house routing reads the source with this id, so the first fund takes it.
 const IN_HOUSE_ID = "gt-main";
 
 function SourceForm({ source, taken, onClose }: { source?: CapitalSource; taken: CapitalSource[]; onClose: () => void }) {

@@ -208,11 +208,16 @@ await shot(page, "08-partner-deal-room-unlocked.png");
 
 // 6. Loan buyer seat: browses blind loans, prices one and makes an offer; staff sell it; the file unlocks
 const pathOf = (p) => new URL(p.url()).pathname;
+// The saved demo book loads just after the first render, so give it a moment before reading the figure.
+const capitalNow = async () => {
+  await page.goto(BASE + "/admin/capital");
+  await page.waitForTimeout(300);
+  return parseFloat((await page.getByTestId("capital-available").innerText()).replace(/[^0-9.]/g, ""));
+};
 await actAs(SEATS.staff);
 await page.goto(BASE + "/admin");
-ok("the headline card says what it means", (await page.locator("main").innerText()).includes("Capital available") && !/\bGT\b/.test(await page.locator("main").innerText()));
-await page.waitForTimeout(300);
-const capitalBefore = parseFloat((await page.getByTestId("capital-available").innerText()).replace(/[^0-9.]/g, ""));
+ok("the pipeline doesn't show capital available or any GT label", !(await page.locator("main").innerText()).includes("available") && !/\bGT\b/.test(await page.locator("main").innerText()));
+const capitalBefore = await capitalNow();
 await signIn(page, SEATS.buyer);
 ok("the buyer seat lands on loans for sale", pathOf(page) === "/admin/buyer");
 const market = await page.locator("main").innerText();
@@ -255,9 +260,7 @@ const ready = page.getByTestId("eligible-row").filter({ hasText: "LH-DEMO-1017" 
 await ready.getByTestId("ask-input").fill("99");
 await ready.getByTestId("list-loan").click();
 ok("staff can list another funded loan", await page.getByTestId("sale-row").filter({ hasText: "LH-DEMO-1017" }).waitFor({ timeout: 5000 }).then(() => true, () => false));
-await page.goto(BASE + "/admin");
-await page.waitForTimeout(300);
-const capitalAfter = parseFloat((await page.getByTestId("capital-available").innerText()).replace(/[^0-9.]/g, ""));
+const capitalAfter = await capitalNow();
 ok(`selling a loan frees capital ($${capitalBefore}M to $${capitalAfter}M)`, capitalAfter > capitalBefore);
 await actAs(SEATS.buyer);
 await page.goto(BASE + "/admin/buyer/loans/s-d9");
@@ -414,15 +417,11 @@ await lateLoan.getByTestId("record-payment").click();
 ok("recording a payment clears the oldest late one", await seen(lateLoan.getByText("1 past due")));
 const payoffRow = page.getByTestId("payoff-row").filter({ hasText: "LH-DEMO-1011" });
 await payoffRow.getByTestId("send-payoff").click();
-await page.goto(BASE + "/admin");
-await page.waitForTimeout(300);
-const capitalBeforePayoff = parseFloat((await page.getByTestId("capital-available").innerText()).replace(/[^0-9.]/g, ""));
+const capitalBeforePayoff = await capitalNow();
 await page.goto(BASE + "/admin/servicing");
 await page.getByTestId("payoff-row").filter({ hasText: "LH-DEMO-1011" }).getByTestId("mark-paid-off").click();
 ok("a paid-off loan leaves servicing", await page.getByTestId("serviced-loan").filter({ hasText: "LH-DEMO-1011" }).waitFor({ state: "detached", timeout: 5000 }).then(() => true, () => false));
-await page.goto(BASE + "/admin");
-await page.waitForTimeout(300);
-ok("a payoff frees capital", parseFloat((await page.getByTestId("capital-available").innerText()).replace(/[^0-9.]/g, "")) > capitalBeforePayoff);
+ok("a payoff frees capital", (await capitalNow()) > capitalBeforePayoff);
 
 await page.goto(BASE + "/admin/deals/d18");
 await seen(page.getByTestId("advance-loan"));
@@ -580,7 +579,7 @@ try {
   ok("a non-demo account can't open a demo deal", (await page.locator("main").innerText()).includes("Deal not found"));
   await page.goto(BASE + "/admin");
   await page.getByTestId("load-sample").click();
-  ok("a non-demo account can load sample data", (await page.locator("main").innerText()).includes("LH-DEMO-1001") && (await page.getByTestId("capital-available").innerText()) !== "—");
+  ok("a non-demo account can load sample data", (await page.locator("main").innerText()).includes("LH-DEMO-1001") && (await page.getByTestId("attention").count()) === 1);
   ok("sample data is labeled as fake", (await page.getByTestId("sample-data-bar").innerText()).includes("FAKE"));
   await page.getByTestId("clear-sample").click();
   ok("clearing sample data empties the pipeline again", (await page.locator("main").innerText()).includes("No loans in the pipeline yet."));

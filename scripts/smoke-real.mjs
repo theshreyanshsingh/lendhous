@@ -79,7 +79,7 @@ try {
   await seen(owner.locator("main").getByText("Real Fund I"));
   await go(owner, "/admin/capital");
   ok("a capital source is saved to the database", (await owner.locator("main").innerText()).includes("Real Fund I"));
-  await go(under, "/admin");
+  await go(under, "/admin/capital");
   ok("everyone on the team sees it", (await under.getByTestId("capital-available").innerText()) === "$5.00M");
 
   // A real borrower applies
@@ -199,7 +199,7 @@ try {
   await owner.getByTestId("advance-loan").filter({ hasText: "Start servicing" }).click();
   await gone(owner.getByTestId("stage-panel"));
   ok("a second person funds it and it moves to servicing", (await owner.getByTestId("stage-panel").count()) === 0);
-  await go(owner, "/admin");
+  await go(owner, "/admin/capital");
   ok("funding uses the real capital", (await owner.getByTestId("capital-available").innerText()) !== "$5.00M");
 
   // Draws with a real photo
@@ -323,7 +323,7 @@ try {
   const saleRoute = path(buyer);
   await buyer.getByTestId("send-offer").click();
   ok("the buyer makes an offer", await seen(buyer.getByTestId("my-offer")));
-  const capitalBefore = await (async () => { await go(owner, "/admin"); return parseFloat((await owner.getByTestId("capital-available").innerText()).replace(/[^0-9.]/g, "")); })();
+  const capitalBefore = await (async () => { await go(owner, "/admin/capital"); return parseFloat((await owner.getByTestId("capital-available").innerText()).replace(/[^0-9.]/g, "")); })();
   await go(owner, "/admin/loan-sales");
   await owner.getByTestId("accept-offer").click();
   await seen(owner.getByTestId("sold-row").filter({ hasText: "LH-1001" }));
@@ -331,7 +331,7 @@ try {
   ok("buying opens the loan's address and file", (await seen(buyer.getByTestId("file-open"))) && (await buyer.getByTestId("loan-heading").innerText()).includes("100 Real Street"));
   const bought = await buyer.getByTestId("file-open").getByRole("link").first().getAttribute("href");
   ok("the buyer can open the loan's documents", (await buyer.request.get(BASE + bought)).status() === 200);
-  await go(owner, "/admin");
+  await go(owner, "/admin/capital");
   ok("selling frees the capital", parseFloat((await owner.getByTestId("capital-available").innerText()).replace(/[^0-9.]/g, "")) > capitalBefore);
 
   // A broker

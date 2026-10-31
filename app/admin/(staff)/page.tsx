@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { attentionItems } from "@/lib/attention";
 import { downloadCsv } from "@/lib/csv";
-import { useStore, est, capitalSummary } from "@/lib/store";
+import { useStore, est } from "@/lib/store";
 import { pipelineStages } from "@/lib/mockData";
 import { PageIntro } from "@/components/page-intro";
 import { Badge, GradeBadge, ColorDot, usd, pct, k, productLabel, statusLabel, capTone } from "@/components/ui";
@@ -13,7 +13,6 @@ export default function Pipeline() {
   const attention = attentionItems(s, newLeads);
   const [product, setProduct] = useState("all"); const [q, setQ] = useState("");
   const rows = useMemo(() => s.deals.map((d) => ({ d, e: est(d.app) })).filter(({ d }) => (product === "all" || d.app.product === product) && (q === "" || (d.borrowerName + d.address + d.loanNumber).toLowerCase().includes(q.toLowerCase()))), [s.deals, product, q]);
-  const cap = capitalSummary(s.deals, s.sources).find((r) => r.source.id === "gt-main");
   const pre = s.deals.filter((d) => !["servicing_current", "servicing_delinquent", "paid_off", "funded", "matured", "default"].includes(d.status));
   const counts = pipelineStages.slice(0, 9).map((st) => ({ ...st, n: s.deals.filter((d) => d.status === st.code).length, amt: s.deals.filter((d) => d.status === st.code).reduce((a, d) => a + est(d.app).noteAmount, 0) }));
   const headline = "min-w-0 glass px-3 py-2";
@@ -26,9 +25,8 @@ export default function Pipeline() {
         <div className="min-w-0"><PageIntro eyebrow="Underwriting" title="Pipeline" lede="Every ratio is recalculated live from the pricing config. Open a deal to see its workspace." /></div>
         <div className="mb-6 flex w-full flex-col gap-3 sm:w-auto">
         <Link href="/admin/new-loan" className="btn-primary sm:self-end" data-testid="new-loan">+ New loan</Link>
-        <div className="grid w-full grid-cols-2 gap-3 sm:w-auto sm:grid-cols-3 sm:text-right">
-          <div className={`${headline} col-span-2 sm:col-span-1`}><div className="text-xs text-muted-foreground">Open pipeline</div><div className={figure}>{pre.length} · {k(pre.reduce((a, d) => a + est(d.app).noteAmount, 0))}</div></div>
-          <div className={headline}><div className="text-xs text-muted-foreground">Capital available</div><div className={`${figure} text-good`} data-testid="capital-available">{cap ? k(cap.available) : "—"}</div></div>
+        <div className="grid w-full grid-cols-2 gap-3 sm:w-auto sm:text-right">
+          <div className={headline}><div className="text-xs text-muted-foreground">Open pipeline</div><div className={figure}>{pre.length} · {k(pre.reduce((a, d) => a + est(d.app).noteAmount, 0))}</div></div>
           <div className={headline}><div className="text-xs text-muted-foreground">Bids waiting</div><div className={`${figure} text-foreground`}>{s.bids.filter((b) => b.status === "submitted").length}</div></div>
         </div>
         </div>
