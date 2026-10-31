@@ -16,7 +16,7 @@ export default function Disclosures() {
           <h2>Calculators</h2>
           <p>Inputs are illustrative assumptions, not advertised rates or loan terms. Results omit costs unless a field expressly includes them. Actual loan documents, appraisals, and underwriting determine applicable calculations. No calculator result establishes eligibility or promises an investment return.</p>
           <h2>Privacy</h2>
-          <p>The deal-brief form processes entries in your browser and can download them to your device. It does not send an application to LendHous. Do not enter private borrower information or upload financial documents there.</p>
+          <p>The deal-brief form sends your contact details and project information to LendHous, which keeps them so the team can follow up. It is not a loan application and does not request a credit check. Do not enter Social Security numbers, bank details, or other sensitive information there.</p>
           <p>This application does not add advertising analytics. Hosting may process ordinary request and access information. Signing in to the portal stores a session cookie. External reference links are subject to their destination’s privacy practices.</p>
           <h2>Portal and services</h2>
           <p>The client and team portal requires an account. Document submission and payment processing are not enabled in this version. Company contact details, lending jurisdictions, applicable licensing disclosures, and a company-approved privacy policy must be supplied before a public lending launch.</p>

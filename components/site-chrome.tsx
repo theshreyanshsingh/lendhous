@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
+import { SiteMobileMenu } from "@/components/site-mobile-menu";
+import { PROGRAMS } from "@/lib/site-content";
 
 /** The public site's header. Portal login leads to the sign-in page, which opens the signed-in panel under /admin. */
 export function SiteHeader() {
@@ -15,6 +17,7 @@ export function SiteHeader() {
       <div className="nav-actions">
         <Link className="portal-link" href="/login" data-testid="portal-login">Portal login</Link>
         <Link className="button small" href="/start">Let’s talk <ArrowRight size={18} aria-hidden="true" /></Link>
+        <SiteMobileMenu />
       </div>
     </header>
   );
@@ -27,9 +30,25 @@ export function SiteFooter() {
         <Link className="brand" href="/">LendHous<span className="brand-period">.</span></Link>
         <p>Real estate investment financing.</p>
       </div>
+      <nav className="footer-nav" aria-label="Footer">
+        <div>
+          <h3>LOAN PROGRAMS</h3>
+          {PROGRAMS.map((program) => <Link key={program.slug} href={`/programs/${program.slug}`}>{program.title}</Link>)}
+        </div>
+        <div>
+          <h3>LEARN</h3>
+          <Link href="/about">About</Link>
+          <Link href="/resources">Investor resources</Link>
+          <Link href="/calculators">Calculators</Link>
+        </div>
+        <div>
+          <h3>GET STARTED</h3>
+          <Link href="/start">Let’s talk</Link>
+          <Link href="/login">Portal login</Link>
+        </div>
+      </nav>
       <div className="footer-links">
         <span>© {new Date().getFullYear()} LendHous LLC</span>
-        <Link href="/resources">Investor resources</Link>
         <Link href="/disclosures">Disclosures &amp; privacy</Link>
         <Link href="/login">Client &amp; team portals</Link>
       </div>

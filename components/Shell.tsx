@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { ClipboardList, FilePlus, Landmark, LayoutDashboard, BookOpen, Lock, LogOut, Menu, RotateCcw, type LucideIcon } from "lucide-react";
+import { ClipboardList, FilePlus, Inbox, Landmark, LayoutDashboard, BookOpen, Lock, LogOut, Menu, RotateCcw, type LucideIcon } from "lucide-react";
 import { logout } from "@/actions/auth";
 import { useStore } from "@/lib/store";
 import type { View } from "@/lib/permissions";
@@ -17,7 +17,7 @@ type NavItem = { href: string; label: string; icon: LucideIcon; section?: string
 // account's role picks the workspace; there is no switching between them.
 const nav: Record<View, NavItem[]> = {
   borrower: [{ href: "/admin/borrower", label: "My loans", icon: LayoutDashboard }, { href: "/admin/apply", label: "New application", icon: FilePlus }],
-  admin: [{ href: "/admin", label: "Pipeline", icon: ClipboardList }, { href: "/admin/capital", label: "Capital", icon: Landmark, section: "Money" }],
+  admin: [{ href: "/admin", label: "Pipeline", icon: ClipboardList }, { href: "/admin/leads", label: "Website leads", icon: Inbox }, { href: "/admin/capital", label: "Capital", icon: Landmark, section: "Money" }],
   partner: [{ href: "/admin/partner", label: "Deal feed", icon: BookOpen }],
 };
 const home: Record<View, string> = { borrower: "/admin/borrower", admin: "/admin", partner: "/admin/partner" };

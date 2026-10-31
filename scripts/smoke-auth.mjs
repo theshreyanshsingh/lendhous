@@ -78,7 +78,7 @@ ok("with two-factor on, sign-in asks for a code", page.url().endsWith("/login/ve
 await page.getByTestId("totp-code").fill("000000");
 await page.getByRole("button", { name: "Continue" }).click();
 await page.waitForURL("**/login/verify?error=*");
-ok("a wrong code is refused", await page.getByRole("alert").isVisible());
+ok("a wrong code is refused", await page.getByRole("alert").filter({ hasText: "not current" }).waitFor({ timeout: 10_000 }).then(() => true, () => false));
 await page.getByTestId("totp-code").fill(totp(secret));
 await page.getByRole("button", { name: "Continue" }).click();
 await page.waitForURL("**/admin");

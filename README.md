@@ -4,8 +4,8 @@ GT's private lending platform, built from Product Spec v3 (`product-spec-v3.pdf`
 
 Three layers live here today:
 
-- **The public site.** The landing page at `/`, plus loan programs, investor guides, calculators, the deal-brief form, about and disclosures, under `app/(site)`. No page needs an account. It was rebuilt from the LendHous marketing site's export, on the brand kit's colors and fonts. Its styles are in `app/(site)/site.css`, scoped under `.site` so they never reach the panel. The deal brief stays in the visitor's browser: nothing is sent to LendHous yet.
-- **The panel.** Portal login on the site opens `/login`, and signing in opens the panel under `/admin`: the staff pipeline at `/admin`, `/admin/capital` and `/admin/deals`, then `/admin/borrower`, `/admin/apply`, `/admin/partner` and `/admin/account/security`. Every page needs a signed-in account, and the account's role decides which section it opens. Their records still live in the browser. Demo seats (`@lendhous.test`) get a shared book of FAKE demo records. Every other account starts empty until B1 to B4 move the records into the database. The rates in `lib/pricing-config.ts` are still placeholders.
+- **The public site.** The landing page at `/`, plus loan programs, investor guides, calculators, the deal-brief form, about and disclosures, under `app/(site)`. No page needs an account. It was rebuilt from the LendHous marketing site's export, on the brand kit's colors and fonts. Its styles are in `app/(site)/site.css`, scoped under `.site` so they never reach the panel. The Let's talk form saves each brief, alerts the team (every owner-admin, plus `TEAM_EMAIL`), and lists it for staff at `/admin/leads`.
+- **The panel.** Portal login on the site opens `/login`, and signing in opens the panel under `/admin`: the staff pipeline at `/admin`, `/admin/capital` and `/admin/deals`, `/admin/leads`, then `/admin/borrower`, `/admin/apply`, `/admin/partner` and `/admin/account/security`. Every page needs a signed-in account, and the account's role decides which section it opens. Their records still live in the browser. Demo seats (`@lendhous.test`) get a shared book of FAKE demo records. Every other account starts empty until B1 to B4 move the records into the database. The rates in `lib/pricing-config.ts` are still placeholders.
 - **Milestone B0, the backend foundations.** Sign-in, two-factor, roles and permissions, field encryption, dual control, audit, storage, mail, jobs, health, and the release guard. Later milestones (B1 to B4) move the workspaces' records onto this backend one at a time.
 
 ## Run
@@ -50,9 +50,9 @@ Spec v3 10.1 requires two-factor for staff, partner and broker users. The demo s
 ## Tests
 
 ```bash
-npm test                        # 82 tests: pricing engine (Spec worked examples A–I), foundations, public site calculators, and MongoDB integration
+npm test                        # 88 tests: pricing engine (Spec worked examples A–I), foundations, public site calculators and briefs, and MongoDB integration
 npm run build && npm start      # then, with the server up:
-npm run screenshots             # site and panel smoke test (52 checks: the public site, each demo seat and a temporary non-demo account) + screenshots into ./screenshots
+npm run screenshots             # site and panel smoke test (62 checks: the public site, each demo seat and a temporary non-demo account) + screenshots into ./screenshots
 npm run smoke:auth              # sign-in, two-factor, recovery codes, rate limit, audit, cron, health (18 checks; needs db:seed)
 ```
 

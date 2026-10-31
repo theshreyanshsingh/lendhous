@@ -5,6 +5,8 @@ export type Program = {
   eyebrow: string;
   title: string;
   summary: string;
+  /** The shorter line on the landing page. */
+  homeSummary: string;
   audience: string;
   structure: string;
   prepare: string[];
@@ -17,6 +19,7 @@ export const PROGRAMS: Program[] = [
     eyebrow: "CREATE VALUE",
     title: "Fix & flip",
     summary: "Short-term financing for the purchase and renovation of an investment property, with a sale or refinance as the planned exit.",
+    homeSummary: "Purchase and renovate an investment property, with a sale or refinance in mind.",
     audience: "Investors renovating a property before resale or stabilization.",
     structure: "Acquisition financing with a renovation budget that may be released through approved draws. Interest, fees, inspections, reserves, and the maturity date should all be reflected in your project budget.",
     prepare: ["Purchase contract and property details", "Itemized scope of work, contractor estimates, and timeline", "Comparable sales and estimated after-repair value", "Borrower experience, liquidity, and sale or refinance plan"],
@@ -27,6 +30,7 @@ export const PROGRAMS: Program[] = [
     eyebrow: "HOLD FOR THE LONG TERM",
     title: "DSCR rental",
     summary: "Investment property financing where rental income is central to evaluating the property’s ability to support its debt.",
+    homeSummary: "Financing centered on rental income for investors taking the longer view.",
     audience: "Investors purchasing or refinancing income-producing rental properties.",
     structure: "A rental-focused loan may offer amortizing or interest-only payment structures, depending on eligibility. Compare the full payment, reserves, prepayment provisions, and long-term operating costs.",
     prepare: ["Lease or market-rent evidence", "Property taxes, insurance, and association dues", "Property valuation and condition", "Borrower credit, entity information, reserves, and existing liens"],
@@ -37,6 +41,7 @@ export const PROGRAMS: Program[] = [
     eyebrow: "CONNECT THE NEXT OPPORTUNITY",
     title: "Bridge financing",
     summary: "Short-term financing for an acquisition, transition, or refinance while you execute a clearly defined property strategy.",
+    homeSummary: "Short-term financing for a property acquisition or transition, with a defined exit.",
     audience: "Investors with a near-term property opportunity and a realistic repayment plan.",
     structure: "A temporary capital solution with a specified maturity. Review interest accrual, extension provisions, closing expenses, and whether renovation funding is included.",
     prepare: ["Current property value and purchase or refinance details", "Sources and uses of funds", "Property business plan and expected milestones", "Documented exit strategy and available reserves"],
@@ -47,6 +52,7 @@ export const PROGRAMS: Program[] = [
     eyebrow: "BUILD FROM THE GROUND UP",
     title: "Ground-up construction",
     summary: "Explore a financing structure for a new residential investment project, from land and plans to completed property.",
+    homeSummary: "A new residential investment project, from land and plans to completed property.",
     audience: "Builders with a defined scope, construction team, and development timeline.",
     structure: "Construction funding generally follows a budget and a schedule of draws tied to progress. Land basis, permits, contingency, inspections, and completion risk matter.",
     prepare: ["Land ownership or acquisition details", "Plans, permits, budget, and schedule", "General contractor qualifications and agreements", "Completed-value support and sale or rental strategy"],
@@ -57,18 +63,12 @@ export const PROGRAMS: Program[] = [
     eyebrow: "THINK BEYOND ONE PROPERTY",
     title: "Rental portfolio",
     summary: "Evaluate financing across multiple investment properties with a consistent view of rent, expenses, debt, and your long-term plan.",
+    homeSummary: "Financing across multiple investment properties, with one view of rent, expenses, and debt.",
     audience: "Investors managing or acquiring multiple income-producing properties.",
     structure: "Review whether separate loans or a combined structure fit your goals. Cross-collateralization, release provisions, and individual property performance need careful attention.",
     prepare: ["Property schedule and ownership entities", "Rent roll, leases, and operating expenses", "Existing loans and maturity dates", "Portfolio valuation, reserves, and acquisition plans"],
     consider: "Confirm eligibility and collateral requirements. A combined structure may affect your ability to sell or refinance individual properties.",
   },
-];
-
-/** The three programs on the landing page, with its shorter descriptions. */
-export const HOME_PROGRAMS = [
-  { slug: "fix-flip", title: "Fix & flip", summary: "Purchase and renovate an investment property, with a sale or refinance in mind." },
-  { slug: "dscr", title: "DSCR rental", summary: "Financing centered on rental income for investors taking the longer view." },
-  { slug: "bridge", title: "Bridge financing", summary: "Short-term financing for a property acquisition or transition, with a defined exit." },
 ];
 
 export type Guide = {

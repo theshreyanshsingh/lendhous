@@ -1,6 +1,6 @@
 // Mail, ported from UPB Capital's lib/email.ts: Resend, then SMTP, then the server log, and always an in-app notice.
 // Lendhous adds legal notices (Spec v3 12.1 "(L)"), which go out whatever the user's preferences say.
-import { prisma } from "@/lib/prisma";
+import { notDeleted, prisma } from "@/lib/prisma";
 import { deliverable, deskRecipients, resolveMailTransport, type MailTransport } from "@/lib/mail-config";
 
 async function deliver(transport: MailTransport, toEmail: string, subject: string, body: string) {
@@ -56,7 +56,7 @@ export async function notify(toEmail: string, subject: string, body: string, opt
 /** Team alerts go to every approved owner-admin, and to TEAM_EMAIL when it is set. */
 export async function notifyTeam(subject: string, body: string, eventCode = "") {
   const owners = await prisma.user.findMany({
-    where: { accountStatus: "APPROVED", deletedAt: null, roles: { some: { role: "ADMIN_OWNER" } } },
+    where: { accountStatus: "APPROVED", ...notDeleted, roles: { some: { role: "ADMIN_OWNER" } } },
     select: { email: true },
   });
   const recipients = deskRecipients(owners.map((owner) => owner.email), process.env.TEAM_EMAIL);

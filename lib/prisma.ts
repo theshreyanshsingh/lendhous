@@ -9,3 +9,7 @@ export const prisma =
   });
 
 if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
+
+// Soft delete on MongoDB: Prisma leaves an unset optional field out of the document, and `deletedAt: null` only
+// matches a stored null, so that filter on its own finds nothing. Spread this into a where clause instead.
+export const notDeleted = { OR: [{ deletedAt: null }, { deletedAt: { isSet: false } }] };

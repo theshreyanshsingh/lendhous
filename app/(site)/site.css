@@ -85,7 +85,7 @@ body:has(.site) {
   border-bottom: 1px solid var(--rule);
   justify-content: space-between;
   gap: 32px;
-  min-height: 112px;
+  min-height: 88px;
   padding: 0 4.5%;
 }
 
@@ -209,6 +209,7 @@ body:has(.site) {
 
 .site .hero h1 {
   margin: 0 0 28px;
+  font-size: clamp(52px,5.9vw,92px);
 }
 
 .site .hero-copy>p {
@@ -251,7 +252,7 @@ body:has(.site) {
 .site .hero-visual {
   background: var(--wash);
   flex-direction: column;
-  min-height: 640px;
+  min-height: 560px;
   margin: 0;
   display: flex;
   position: relative;
@@ -363,7 +364,7 @@ body:has(.site) {
 }
 
 .site .program-row p {
-  max-width: 430px;
+  max-width: 560px;
   margin-top: 10px;
   font-size: 14.5px;
 }
@@ -695,7 +696,7 @@ body:has(.site) {
 
 @media (min-width:1600px) {
   .site .hero-visual {
-    min-height: 720px;
+    min-height: 640px;
   }
   .site .hero-copy {
     padding-top: 45px;
@@ -719,7 +720,7 @@ body:has(.site) {
     font-size: clamp(58px,7.5vw,88px);
   }
   .site .hero-visual {
-    min-height: 620px;
+    min-height: 560px;
   }
   .site .hero-copy>p {
     font-size: 15px;
@@ -998,5 +999,246 @@ body:has(.site) {
   .site .tab-trigger {
     padding: 10px 12px;
     font-size: 12px;
+  }
+}
+
+/* Landing page additions. */
+.site .hero-copy > p.hero-note {
+  margin-top: -18px;
+  color: var(--body);
+  font-size: 12.5px;
+}
+
+.site .program-row p.row-fit {
+  margin-top: 8px;
+  color: var(--label);
+  font-size: 12.5px;
+}
+
+.site .row-fit span {
+  color: var(--eyebrow);
+}
+
+.site .tool-section {
+  display: grid;
+  grid-template-columns: 1fr 1.1fr;
+  align-items: start;
+  gap: 9%;
+}
+
+.site .tool-section .lede {
+  margin: 26px 0;
+}
+
+.site .tool-links {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.site .tool-inputs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+
+.site .tool-inputs input {
+  padding: 10px;
+}
+
+.site .tool-result {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--rule);
+}
+
+.site .tool-result .eyebrow {
+  margin-bottom: 0;
+}
+
+.site .tool-result .task-row {
+  padding: 12px 0;
+}
+
+.site .tool-result .note {
+  margin: 18px 0;
+}
+
+.site .faq-section {
+  display: grid;
+  grid-template-columns: 1fr 1.5fr;
+  gap: 9%;
+  background: var(--wash);
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+}
+
+.site .faq-section .faq details:first-child {
+  padding-top: 0;
+}
+
+.site .faq-section .lede {
+  margin: 22px 0 26px;
+}
+
+.site .cta-lede {
+  margin-top: 14px;
+}
+
+.site .footer-nav {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 28px;
+  padding-bottom: 30px;
+}
+
+.site .footer-nav h3 {
+  margin-bottom: 12px;
+  color: var(--eyebrow);
+  font-family: var(--sans);
+  font-size: 11px;
+  letter-spacing: 1.4px;
+}
+
+.site .footer-nav a {
+  display: block;
+  padding: 4px 0;
+  color: var(--label);
+  font-size: 12.5px;
+}
+
+.site .footer-nav a:hover {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* The header follows the page where it is one row tall. */
+@media (min-width: 1201px), (max-width: 700px) {
+  .site .site-header {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+  }
+}
+
+.site .menu-toggle,
+.site .mobile-menu {
+  display: none;
+}
+
+/* The deal brief's extras. */
+.site .hp {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+.site .form-error {
+  margin-top: 20px;
+  padding: 12px 16px;
+  border-left: 2px solid #a8382b;
+  background: #faf0ee;
+  color: #a8382b;
+  font-size: 12.5px;
+}
+
+.site .sent-panel {
+  grid-column: 1 / -1;
+  width: 100%;
+  max-width: 800px;
+}
+
+.site .button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+@media (max-width: 900px) {
+  .site .tool-section,
+  .site .faq-section {
+    grid-template-columns: 1fr;
+    gap: 35px;
+  }
+
+  .site .footer-nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  /* One compact row: wordmark, the main action and a menu. The original stacked its nav above the hero. */
+  .site .site-header {
+    flex-wrap: nowrap;
+    gap: 10px;
+    min-height: 64px;
+    padding: 10px 6%;
+  }
+
+  .site .site-header .brand {
+    margin-right: auto;
+    font-size: 28px;
+  }
+
+  .site .site-header nav,
+  .site .portal-link {
+    display: none;
+  }
+
+  .site .nav-actions {
+    gap: 8px;
+  }
+
+  .site .nav-actions .button {
+    display: inline-flex;
+    gap: 8px;
+    min-height: 42px;
+    padding: 8px 12px;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+
+  .site .menu-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    height: 42px;
+    border: 1px solid var(--rule);
+    color: var(--ink);
+  }
+
+  .site .mobile-menu[data-open="true"] {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    display: block;
+    padding: 6px 6% 14px;
+    border-bottom: 1px solid var(--rule);
+    background: var(--cream);
+  }
+
+  .site .mobile-menu a {
+    display: block;
+    padding: 12px 0;
+    border-bottom: 1px solid var(--rule);
+    font-size: 15px;
+  }
+
+  .site .mobile-menu a:last-child {
+    border-bottom: 0;
+  }
+
+  .site .tool-inputs {
+    grid-template-columns: 1fr;
+  }
+
+  .site .hero-copy > p.hero-note {
+    margin-top: -12px;
+    margin-bottom: 18px;
   }
 }

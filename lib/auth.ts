@@ -106,6 +106,6 @@ export async function requireView(view: View) {
 export async function requirePermission(permission: Permission, options: { amountCents?: number } = {}) {
   const user = await requireUser();
   const overrides = await prisma.rolePermission.findMany({ where: { role: { in: user.roleCodes }, permission } });
-  if (!can(user.roleCodes, permission, { amountCents: options.amountCents, overrides })) redirect("/?denied=" + permission);
+  if (!can(user.roleCodes, permission, { amountCents: options.amountCents, overrides })) redirect(`${homeFor(user.roleCodes)}?denied=${permission}`);
   return user;
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { CALCULATOR_DEFAULTS, FIELD_LABELS, flipMargin, leverageCap, rentalCoverage, validInputs } from "@/lib/site-calculators";
-import { GUIDES, HOME_PROGRAMS, PROGRAMS } from "@/lib/site-content";
+import { leadSummary, MAX_LEAD_DOLLARS, parseLead } from "@/lib/leads";
+import { GUIDES, PROGRAMS } from "@/lib/site-content";
 
 describe("public site calculators", () => {
   it("rental coverage matches the example on the original site", () => {
@@ -41,11 +42,45 @@ describe("public site calculators", () => {
 });
 
 describe("public site content", () => {
-  it("has one page per slug, and the landing page only links to programs that exist", () => {
+  it("has one page per slug, and a landing-page line for every program", () => {
     const programs = PROGRAMS.map((program) => program.slug);
     expect(new Set(programs).size).toBe(programs.length);
-    for (const program of HOME_PROGRAMS) expect(programs).toContain(program.slug);
+    for (const program of PROGRAMS) expect(program.homeSummary).toBeTruthy();
     const guides = GUIDES.map((guide) => guide.slug);
     expect(new Set(guides).size).toBe(guides.length);
+  });
+});
+
+describe("project briefs from the public site", () => {
+  const form = { name: " Dana  Investor ", email: "Dana@Example.COM", phone: "", strategy: "DSCR rental", experience: "First investment", city: "Dallas", state: "TX", propertyValue: "300000", renovation: "0", requestedLoan: "240000", targetClosing: "", notes: "Hold as a rental." };
+  it("cleans up a valid brief and stores money in cents", () => {
+    const parsed = parseLead(form);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.lead).toMatchObject({ name: "Dana Investor", email: "dana@example.com", propertyValueCents: 30000000, renovationCents: 0, requestedLoanCents: 24000000 });
+    expect(leadSummary(parsed.lead)).toContain("Requested loan: $240,000");
+    expect(leadSummary(parsed.lead)).toContain("Phone: Not given");
+  });
+  it("refuses a brief it couldn't act on", () => {
+    expect(parseLead({ ...form, name: "  " }).ok).toBe(false);
+    expect(parseLead({ ...form, email: "not-an-email" }).ok).toBe(false);
+    expect(parseLead({ ...form, city: "" }).ok).toBe(false);
+    expect(parseLead({ ...form, notes: " " }).ok).toBe(false);
+    expect(parseLead({ ...form, propertyValue: "" }).ok).toBe(false);
+    expect(parseLead({ ...form, requestedLoan: "0" }).ok).toBe(false);
+    expect(parseLead({ ...form, renovation: "-1" }).ok).toBe(false);
+    expect(parseLead({ ...form, targetClosing: "soon" }).ok).toBe(false);
+  });
+  it("keeps every amount inside the 32-bit cents column", () => {
+    expect(MAX_LEAD_DOLLARS * 100).toBeLessThanOrEqual(2147483647);
+    expect(parseLead({ ...form, requestedLoan: String(MAX_LEAD_DOLLARS + 1) }).ok).toBe(false);
+  });
+  it("won't let a header or an unknown option through", () => {
+    const parsed = parseLead({ ...form, city: "Dallas\r\nBcc: someone@example.com", strategy: "<script>", experience: "x" });
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.lead.city).not.toMatch(/[\r\n]/);
+    expect(parsed.lead.strategy).toBe("Not sure yet");
+    expect(parsed.lead.experience).toBe("");
   });
 });

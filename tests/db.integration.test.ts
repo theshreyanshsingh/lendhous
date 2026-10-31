@@ -59,6 +59,23 @@ describe("Approval collection validator (MongoDB stands in for a CHECK constrain
   });
 });
 
+describe("soft delete and team alerts", () => {
+  it("counts a user whose deletedAt was never written, and skips a deleted one", async () => {
+    const { notDeleted } = await import("@/lib/prisma");
+    const base = { name: "Owner", passwordHash: "x", accountStatus: "APPROVED" as const, roles: { create: [{ role: "ADMIN_OWNER" as const }] } };
+    await prisma.user.create({ data: { ...base, email: "owner.live@lendhous.com" } });
+    await prisma.user.create({ data: { ...base, email: "owner.gone@lendhous.com", deletedAt: new Date() } });
+    const found = await prisma.user.findMany({ where: { email: { startsWith: "owner." }, ...notDeleted }, select: { email: true } });
+    expect(found.map((user) => user.email)).toEqual(["owner.live@lendhous.com"]);
+  });
+  it("notifyTeam reaches an approved owner-admin", async () => {
+    const { notifyTeam } = await import("@/lib/email");
+    await notifyTeam("New project brief", "Details", "lead.new");
+    const notices = await prisma.notification.findMany({ where: { eventCode: "lead.new" }, select: { toEmail: true } });
+    expect(notices.map((notice) => notice.toEmail)).toEqual(["owner.live@lendhous.com"]);
+  });
+});
+
 describe("indexes and jobs", () => {
   it("enforces unique emails and one role row per user", async () => {
     const user = await prisma.user.create({ data: { email: "a@example.com", name: "A", passwordHash: "x", roles: { create: [{ role: "BORROWER" }] } } });

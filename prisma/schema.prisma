@@ -277,6 +277,30 @@ model PlatformSettings {
   updatedAt                     DateTime @updatedAt
 }
 
+// A project brief sent from the public site's /start form. Not an application: no credit is pulled and nothing is decided on it.
+model Lead {
+  id                 String    @id @default(uuid()) @map("_id")
+  name               String
+  email              String
+  phone              String    @default("")
+  strategy           String
+  experience         String    @default("")
+  city               String
+  state              String
+  propertyValueCents Int
+  renovationCents    Int       @default(0)
+  requestedLoanCents Int
+  // YYYY-MM-DD as entered; blank when the visitor has no date yet
+  targetClosing      String    @default("")
+  notes              String
+  contactedAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  deletedAt          DateTime?
+
+  @@index([createdAt])
+}
+
 model JobRun {
   id         String    @id @default(uuid()) @map("_id")
   job        String

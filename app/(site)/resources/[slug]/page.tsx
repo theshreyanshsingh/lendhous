@@ -4,7 +4,6 @@ import { notFound } from "next/navigation";
 import { PageHead } from "@/components/site-chrome";
 import { GUIDES } from "@/lib/site-content";
 
-export const dynamicParams = false;
 export const generateStaticParams = () => GUIDES.map((guide) => ({ slug: guide.slug }));
 
 type Props = { params: Promise<{ slug: string }> };

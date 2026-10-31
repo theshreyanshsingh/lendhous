@@ -13,7 +13,14 @@ const CHROME = process.env.CHROME || (process.platform === "darwin" ? "/Applicat
 const PASSWORD = "Lendhous2026!";
 const SEATS = { borrower: "alex.sample@lendhous.test", staff: "olivia.owner@lendhous.test", partner: "pia.partner@lendhous.test" };
 const NON_DEMO = "nora.nondemo@example.org";
+const LEAD_NAME = "Smoke Test Lead";
+const LEAD_EMAIL = "smoke.lead@example.org";
 fs.mkdirSync(OUT, { recursive: true });
+const { PrismaClient } = await import("@prisma/client");
+const prisma = new PrismaClient();
+// A run that crashed part-way can leave its test brief behind, and briefs are rate limited per connection.
+await prisma.lead.deleteMany({ where: { email: LEAD_EMAIL } });
+await prisma.rateWindow.deleteMany({ where: { key: { startsWith: "lead:" } } });
 const browser = await chromium.launch({ executablePath: CHROME, args: ["--no-sandbox"] });
 const errors = [];
 const checks = [];
@@ -54,6 +61,12 @@ await page.goto(BASE + "/");
 ok("the landing page is the main page", (await page.locator("h1").innerText()).includes("A considered"));
 ok("the hero photo loads", await page.locator(".hero-visual img").evaluate((img) => img.complete && img.naturalWidth > 0));
 await shot(page, "00-landing-page.png");
+ok("the landing page shows all five programs", (await page.getByTestId("home-program").count()) === 5);
+ok("the quick check shows the lower cap", (await page.getByTestId("quick-result").innerText()) === "$262,500");
+await page.getByTestId("quick-value").fill("500000");
+ok("the quick check updates live", (await page.getByTestId("quick-result").innerText()) === "$285,000");
+ok("search engines are kept out of the panel", (await (await fetch(BASE + "/robots.txt")).text()).includes("Disallow: /admin"));
+ok("the sitemap lists the program pages", (await (await fetch(BASE + "/sitemap.xml")).text()).includes("/programs/fix-flip"));
 const links = [...new Set(await page.locator("a[href^='/']").evaluateAll((items) => items.map((a) => a.getAttribute("href"))))];
 const deadLinks = (await Promise.all(links.map(async (href) => [href, (await fetch(BASE + href, { redirect: "manual" })).status]))).filter(([, status]) => status !== 200);
 ok(`every link on the landing page works${deadLinks.length ? ` (${deadLinks.join("; ")})` : ""}`, deadLinks.length === 0);
@@ -75,14 +88,16 @@ await page.getByTestId("calc-value").fill("");
 ok("an empty calculator input shows an error instead of a number", (await page.getByRole("alert").filter({ hasText: "non-negative" }).count()) === 1);
 
 await page.goto(BASE + "/start");
+await page.getByLabel("Your name").fill(LEAD_NAME);
+await page.getByLabel("Email").fill(LEAD_EMAIL);
 await page.getByLabel("Property city").fill("Dallas");
 await page.getByLabel("Property state").fill("TX");
 await page.getByLabel("Purchase price or current value ($)").fill("300000");
 await page.getByLabel("Requested loan amount ($)").fill("240000");
 await page.getByLabel("Exit strategy & project notes").fill("Renovate and sell.");
-await page.getByRole("button", { name: "Prepare my brief" }).click();
+await page.getByRole("button", { name: "Send to LendHous" }).click();
 const brief = await page.getByTestId("deal-brief").innerText();
-ok("the deal brief is prepared in the browser", brief.includes("Program: Fix & flip") && brief.includes("Property city: Dallas") && brief.includes("Not submitted to LendHous"));
+ok("the deal brief goes to the team, with a copy to keep", brief.includes("The team has your project") && brief.includes("Program: Fix & flip") && brief.includes("Property: Dallas, TX") && (await page.getByRole("button", { name: "Download a copy" }).count()) === 1);
 
 await page.evaluate(() => localStorage.setItem("lendhous-theme", "dark"));
 await page.goto(BASE + "/");
@@ -96,6 +111,8 @@ ok("no prototype banner or view switcher", !(await page.locator("body").innerTex
 ok("the demo seat is marked as a demo account", await page.getByTestId("demo-account").isVisible());
 await page.goto(BASE + "/admin");
 ok("the borrower seat can't open the staff pipeline", new URL(page.url()).pathname === "/admin/borrower");
+await page.goto(BASE + "/admin/leads");
+ok("the borrower seat can't open the website leads", new URL(page.url()).pathname === "/admin/borrower");
 
 await page.goto(BASE + "/admin/apply");
 await page.getByTestId("next").click(); // -> property
@@ -140,6 +157,13 @@ await signIn(page, SEATS.staff);
 ok("the staff seat lands on the pipeline", new URL(page.url()).pathname === "/admin");
 await page.goto(BASE + "/login");
 ok("Portal login takes someone already signed in straight to the panel", new URL(page.url()).pathname === "/admin");
+await page.goto(BASE + "/admin/leads");
+const inbox = page.getByTestId("leads-table").locator("tr", { hasText: LEAD_NAME });
+ok("the website brief reaches the staff inbox", (await inbox.count()) === 1 && (await inbox.innerText()).includes("$240,000"));
+await inbox.getByRole("button", { name: "Mark contacted" }).click();
+ok("staff can mark a lead contacted", await inbox.getByText("Contacted").waitFor({ timeout: 5000 }).then(() => true, () => false));
+await shot(page, "04b-admin-website-leads.png");
+await page.goto(BASE + "/admin");
 // the saved demo book loads after the first render, so wait for the row rather than reading the table at once
 ok(`the staff seat sees the borrower's new application (${newLoan})`, !!newLoan && (await page.getByTestId("pipeline-table").getByText(newLoan).waitFor({ timeout: 5000 }).then(() => true, () => false)));
 await shot(page, "04-admin-pipeline-scoring.png");
@@ -179,8 +203,6 @@ ok("deal room unlocks for the winning partner", await page.getByTestId("deal-roo
 await shot(page, "08-partner-deal-room-unlocked.png");
 
 // 6. A non-demo account in the same browser sees none of the demo data saved there
-const { PrismaClient } = await import("@prisma/client");
-const prisma = new PrismaClient();
 await prisma.user.deleteMany({ where: { email: NON_DEMO } });
 const nora = await prisma.user.create({ data: { email: NON_DEMO, name: "Nora Nondemo", passwordHash: await bcrypt.hash(PASSWORD, 10), accountStatus: "APPROVED", roles: { create: [{ role: "UNDERWRITER" }] } } });
 try {
@@ -196,6 +218,7 @@ try {
   await prisma.serverSession.deleteMany({ where: { userId: nora.id } });
   await prisma.rateWindow.deleteMany({ where: { key: { contains: NON_DEMO } } });
   await prisma.user.delete({ where: { id: nora.id } });
+  await prisma.lead.deleteMany({ where: { email: LEAD_EMAIL } });
   await prisma.$disconnect();
 }
 
@@ -203,6 +226,11 @@ try {
 const m = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
 await m.addCookies(sessions[SEATS.borrower]);
 const mp = await m.newPage();
+await mp.goto(BASE + "/");
+ok("the phone header keeps the main action in view", await mp.locator(".nav-actions .button").isVisible());
+await mp.getByTestId("site-menu").click();
+await mp.getByTestId("mobile-portal-login").click();
+ok("the phone menu reaches Portal login, then the panel", await mp.waitForURL("**/admin/borrower").then(() => true, () => false));
 await mp.goto(BASE + "/admin/apply");
 await mp.getByTestId("next").click(); await mp.getByTestId("next").click();
 await mp.waitForTimeout(300);
