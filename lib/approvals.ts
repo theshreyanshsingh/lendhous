@@ -21,12 +21,12 @@ const PERMISSION_FOR: Record<ApprovalSubject, Permission> = {
 
 export class ApprovalError extends Error {}
 
-export type Approver = { id: string; roles: RoleCode[] };
+export type Approver = { id: string; roles: RoleCode[]; extraPermissions?: string[]; deniedPermissions?: string[] };
 
 /** Pure rule check, shared by the action and the tests. Returns the step this person may decide, or a reason. */
 export function nextStep(approval: { initiatorId: string; step1ApproverId: string | null; step2ApproverId: string | null; status: string; subjectType: ApprovalSubject }, approver: Approver): { step: 1 | 2 } | { error: string } {
   if (approval.status !== "PENDING") return { error: "This approval is already decided." };
-  if (!can(approver.roles, PERMISSION_FOR[approval.subjectType])) return { error: "Your role cannot approve this." };
+  if (!can(approver.roles, PERMISSION_FOR[approval.subjectType], { member: approver })) return { error: "Your role cannot approve this." };
   if (approver.id === approval.initiatorId) return { error: "The person who started this cannot approve it." };
   if (!approval.step1ApproverId) return { step: 1 };
   if (approver.id === approval.step1ApproverId) return { error: "A second, different approver is required." };

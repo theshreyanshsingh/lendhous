@@ -21,6 +21,7 @@ const seats: { local: string; name: string; roles: RoleCode[]; org?: "house" | "
   { local: "ivan.inspector", name: "Ivan Inspector (FAKE)", roles: ["INSPECTOR"], org: "house" },
   { local: "alex.sample", name: "Alex Sample (FAKE)", roles: ["BORROWER"] },
   { local: "pia.partner", name: "Pia Partner (FAKE)", roles: ["PARTNER_LENDER"], org: "partner" },
+  { local: "bella.buyer", name: "Bella Buyer (FAKE)", roles: ["LOAN_BUYER"] },
   { local: "bea.broker", name: "Bea Broker (FAKE)", roles: ["BROKER"], org: "broker" },
 ];
 
@@ -46,9 +47,16 @@ async function main() {
       },
     });
   }
-  // Demo convenience only: staff and partner seats can sign in without an authenticator. Production bootstrap
+  // Demo convenience only: staff and partner seats can sign in without an emailed code. Production bootstrap
   // leaves the default (required). Turn it back on in the demo with requireStaffMfa: true.
   await prisma.platformSettings.create({ data: { id: "default", requireStaffMfa: false } });
+  await prisma.lead.createMany({
+    data: [
+      { name: "Dana Sample (FAKE)", email: "dana.sample@example.org", phone: "(555) 010-0142", strategy: "Fix & flip", experience: "3 to 5 projects", city: "Dallas", state: "TX", propertyValueCents: 31_500_000, renovationCents: 8_000_000, requestedLoanCents: 29_000_000, targetClosing: "Within 30 days", notes: "Three-bed in Oak Cliff. Cosmetic rehab, then sell." },
+      { name: "Lee Example (FAKE)", email: "lee.example@example.org", strategy: "DSCR rental", experience: "6 or more projects", city: "Fort Lauderdale", state: "FL", propertyValueCents: 46_000_000, requestedLoanCents: 34_500_000, notes: "Refinancing a stabilized duplex to pull out cash for the next one." },
+      { name: "Sam Testcase (FAKE)", email: "sam.testcase@example.org", phone: "(555) 010-0178", strategy: "Bridge", city: "Miami", state: "FL", propertyValueCents: 72_000_000, requestedLoanCents: 50_000_000, targetClosing: "Within 14 days", notes: "Needs to close quickly before a long-term refinance." },
+    ],
+  });
   console.log(`Seeded ${seats.length} demo seats (password ${DEV_DEMO_PASSWORD}) in 3 organizations.`);
 }
 

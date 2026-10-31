@@ -10,6 +10,7 @@ async function deliver(transport: MailTransport, toEmail: string, subject: strin
       method: "POST",
       headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json" },
       body: JSON.stringify({ from, to: [toEmail], subject, text: body }),
+      signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) {
       const detail = await response.text();
@@ -51,6 +52,35 @@ export async function notify(toEmail: string, subject: string, body: string, opt
   }
   if (!keepInApp) return;
   await prisma.notification.create({ data: { toEmail, userId: user?.id, subject, body, delivery, legal, eventCode: options.eventCode ?? "" } });
+}
+
+/**
+ * For mail that carries something live, a sign-in code or a password link. It skips notify(), so the secret never sits
+ * in the notifications table or, when delivery fails, in the log. Returns how it went so the screen can say so.
+ */
+async function sendSecret(toEmail: string, subject: string, body: string): Promise<"sent" | "logged" | "failed"> {
+  const transport = deliverable(toEmail) ? resolveMailTransport() : "log";
+  if (transport === "log") {
+    console.info(`[lendhous-mail] to=${toEmail} subject=${subject}\n${body}`);
+    return "logged";
+  }
+  try {
+    await deliver(transport, toEmail, subject, body);
+    return "sent";
+  } catch (error) {
+    console.error(`[lendhous-mail] ${transport} failed for ${toEmail}:`, error);
+    return "failed";
+  }
+}
+
+export async function sendLoginCode(toEmail: string, code: string) {
+  const outcome = await sendSecret(toEmail, "Your LendHous sign-in code", `Your LendHous sign-in code is ${code}. It expires in ten minutes.\n\nIf you didn't try to sign in, someone may have your password. Contact your LendHous administrator.`);
+  return outcome !== "failed";
+}
+
+export function sendPasswordLink(toEmail: string, link: string, invite: { by: string; roles: string } | null) {
+  const opening = invite ? `${invite.by} added you to LendHous as ${invite.roles}.` : "Your LendHous administrator sent you a new password link.";
+  return sendSecret(toEmail, invite ? "You're invited to LendHous" : "Set a new LendHous password", `${opening}\n\nSet your password here:\n${link}\n\nThe link works once and expires in seven days. If you weren't expecting this, you can ignore it.`);
 }
 
 /** Team alerts go to every approved owner-admin, and to TEAM_EMAIL when it is set. */

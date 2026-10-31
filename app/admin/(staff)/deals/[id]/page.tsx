@@ -6,7 +6,7 @@ import { useStore, est, inHouseAvailable, capitalSummary } from "@/lib/store";
 import { evaluate, recommendRoute, matchPartner, fullBoatReserve, dutchReserve, evenDraws, type Application } from "@/lib/engine";
 import { pricingConfig } from "@/lib/pricing-config";
 import { teaserOf } from "@/lib/teaser";
-import { Badge, GradeBadge, RatioPill, Section, Stat, usd, pct, k, productLabel, statusLabel, capTone } from "@/components/ui";
+import { Badge, GradeBadge, RatioPill, Section, Stat, usd, pct, k, productLabel, statusLabel, capTone, ratioGrid, statGrid } from "@/components/ui";
 
 const tabs = ["Numbers & Ratios", "Score & Flags", "Capital Routing", "Documents"] as const;
 
@@ -42,19 +42,19 @@ export default function DealWorkspace() {
       <Link href="/admin" className="text-sm text-link">← Pipeline</Link>
       <div className="glass p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div><div className="text-xs text-muted-foreground">{d.loanNumber} · {productLabel[d.app.product]} · source: {d.source.replace("_", " ")}</div>
+          <div className="min-w-0"><div className="text-xs text-muted-foreground">{d.loanNumber} · {productLabel[d.app.product]} · source: {d.source.replace("_", " ")}</div>
             <h1 className="text-xl font-normal tracking-tight">{d.address}, {d.city} {d.zip} <span className="font-normal text-faint">({d.app.county})</span></h1>
             <div className="text-sm text-muted-foreground">{d.borrowerName} · {d.entityName} · FICO {d.app.fico} · Tier {e.tier}</div></div>
           <div className="flex flex-wrap items-center gap-2"><GradeBadge grade={e.score.grade} score={e.score.score} /><Badge tone="blue">{statusLabel(d.status)}</Badge><Badge tone={capTone(d.capitalStatus)}>capital: {statusLabel(d.capitalStatus)}</Badge></div>
         </div>
-        {d.contractorIsGtAffiliate && <div className="mt-3 rounded-lg bg-bad/10 p-3 text-sm text-bad" data-testid="coi-banner"><b>Conflict of interest:</b> GT&apos;s construction company is the contractor. Draw inspections must be by an independent third party, a second approver outside the construction company is required, and partners must be told.</div>}
-        <div className="mt-4 flex gap-1 overflow-x-auto border-b border-border">
-          {tabs.map((t) => <button key={t} data-testid={`tab-${t}`} onClick={() => setTab(t)} className={`whitespace-nowrap border-b-2 px-3 py-2 text-sm font-semibold ${tab === t ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>{t}</button>)}
+        {d.contractorIsGtAffiliate && <div className="mt-3 rounded-lg bg-bad/10 p-3 text-sm text-bad" data-testid="coi-banner"><b>Conflict of interest:</b> LendHous&apos;s affiliated construction company is the contractor. Draw inspections must be by an independent third party, a second approver outside the construction company is required, and partners must be told.</div>}
+        <div className="mt-4 grid grid-cols-2 border-b border-border sm:flex sm:gap-1">
+          {tabs.map((t) => <button key={t} data-testid={`tab-${t}`} onClick={() => setTab(t)} className={`border-b-2 px-3 py-2 text-left text-sm font-semibold sm:whitespace-nowrap ${tab === t ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>{t}</button>)}
         </div>
       </div>
 
       {tab === "Numbers & Ratios" && (
-        <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
+        <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
           <Section title="Underwritten inputs" right={Object.keys(ov).length > 0 ? <button className="text-xs text-link underline" onClick={() => setOv({})}>reset</button> : undefined}>
             <div className="space-y-3">
               {num("purchasePrice", d.app.product === "ground_up" ? "Land value" : "Purchase / as-is")}
@@ -65,13 +65,13 @@ export default function DealWorkspace() {
               <p className="text-[11px] text-faint">Edits are a live what-if. Original application values are kept.</p>
             </div>
           </Section>
-          <div className="space-y-4">
+          <div className="min-w-0 space-y-4">
             <Section title="Ratios vs. matrix limits">
-              <div className={`grid gap-2 ${e.ratios.length > 2 ? "grid-cols-3" : "grid-cols-2"}`}>{e.ratios.map((r) => <RatioPill key={r.key} label={r.label} value={r.actual} limit={r.limit} color={r.color} kind={r.kind} isMultiple={r.key === "dscr"} />)}</div>
+              <div className={ratioGrid(e.ratios.length)}>{e.ratios.map((r) => <RatioPill key={r.key} label={r.label} value={r.actual} limit={r.limit} color={r.color} kind={r.kind} isMultiple={r.key === "dscr"} />)}</div>
               {d.app.product !== "bridge" && d.app.product !== "dscr" && <div className="mt-2 text-xs text-muted-foreground">Total loan ÷ as-is = {pct(e.noteAmount / uwApp.purchasePrice)} (normal for rehab loans; the holdback is released by draws).</div>}
             </Section>
             <Section title="Loan sizing">
-              <div className="grid gap-3 sm:grid-cols-4">
+              <div className={statGrid}>
                 <Stat label="Note amount" value={usd(e.noteAmount)} sub={orig.noteAmount !== e.noteAmount ? `application: ${usd(orig.noteAmount)}` : undefined} />
                 <Stat label="Binding constraint" value={e.binding} />
                 <Stat label="Initial advance" value={usd(e.initialAdvance)} />
@@ -117,14 +117,14 @@ export default function DealWorkspace() {
 
       {tab === "Capital Routing" && (
         <div className="grid gap-4 lg:grid-cols-2">
-          <div className="space-y-4">
+          <div className="min-w-0 space-y-4">
             <Section title="Recommendation">
-              <div className="flex items-center gap-2" data-testid="route-rec"><Badge tone={rec.route === "IN_HOUSE" ? "green" : rec.route === "SPLIT" ? "violet" : "amber"}>{rec.route.replace(/_/g, " ")}</Badge><span className="text-sm text-muted-foreground">because: {rec.reasons.join("; ")}</span></div>
+              <div className="flex flex-wrap items-center gap-2" data-testid="route-rec"><Badge tone={rec.route === "IN_HOUSE" ? "green" : rec.route === "SPLIT" ? "violet" : "amber"}>{rec.route.replace(/_/g, " ")}</Badge><span className="text-sm text-muted-foreground">because: {rec.reasons.join("; ")}</span></div>
               <p className="mt-1 text-[11px] text-faint">First matching rule wins. A human always confirms.</p>
             </Section>
             <Section title="Capital availability">
               <div className="space-y-3">{cap.map((c) => { const used = c.reserved + c.committed + c.deployed + c.unfunded; return (
-                <div key={c.source.id}><div className="flex justify-between text-sm"><span className="font-medium">{c.source.name}</span><span className="font-semibold text-good">{k(c.available)} available</span></div>
+                <div key={c.source.id}><div className="flex flex-wrap justify-between gap-x-3 text-sm"><span className="font-medium">{c.source.name}</span><span className="font-semibold text-good">{k(c.available)} available</span></div>
                   <div className="mt-1 flex h-2.5 overflow-hidden rounded-full bg-muted">{[[c.deployed, "bg-primary"], [c.unfunded, "bg-primary/35"], [c.committed, "bg-link"], [c.reserved, "bg-warn"]].map(([v, cl], i) => <div key={i} className={cl as string} style={{ width: `${((v as number) / c.source.commitment) * 100}%` }} />)}</div>
                   <div className="mt-0.5 text-[11px] text-faint">commitment {k(c.source.commitment)} · used {k(used)}</div></div>); })}</div>
               <div className="mt-2 flex flex-wrap gap-3 text-[11px] text-muted-foreground">{([["bg-primary", "deployed"], ["bg-primary/35", "unfunded holdbacks"], ["bg-link", "committed"], ["bg-warn", "reserved"]] as const).map(([cl, l]) => <span key={l} className="inline-flex items-center gap-1"><span className={`size-2 rounded-xs ${cl}`} />{l}</span>)}</div>
@@ -132,20 +132,20 @@ export default function DealWorkspace() {
             <Section title="Route this deal">
               <div className="grid grid-cols-3 gap-2">{(["in_house", "partner", "split"] as const).map((r) => <button key={r} data-testid={`route-${r}`} onClick={() => setRouteSel(r)} className={`rounded-lg border p-2 text-sm font-semibold ${route === r ? "border-primary bg-active text-foreground" : "border-border"}`}>{r === "in_house" ? "In-house" : r === "partner" ? "Partner" : "Split"}</button>)}</div>
               {route === "in_house" && avail < e.noteAmount && <p className="mt-2 text-xs text-bad">In-house available {usd(avail)} is less than the note amount {usd(e.noteAmount)}.</p>}
-              {route === "split" && <div className="mt-3"><label className="label">GT share: {usd(gtShare)} ({pct(gtShare / e.noteAmount, 0)}) · partners: {usd(e.noteAmount - gtShare)}</label><input type="range" className="w-full" min={0} max={e.noteAmount} step={5000} value={gtShare} onChange={(ev) => setSplitAmt(Number(ev.target.value))} /><p className="text-[11px] text-faint">Allocations must total 100% of the note before clear to close. Split participations need securities sign-off.</p></div>}
+              {route === "split" && <div className="mt-3"><label className="label">In-house share: {usd(gtShare)} ({pct(gtShare / e.noteAmount, 0)}) · partners: {usd(e.noteAmount - gtShare)}</label><input type="range" className="w-full" min={0} max={e.noteAmount} step={5000} value={gtShare} onChange={(ev) => setSplitAmt(Number(ev.target.value))} /><p className="text-[11px] text-faint">Allocations must total 100% of the note before clear to close. Split participations need securities sign-off.</p></div>}
               <div className="mt-3 flex flex-wrap gap-2">
                 <button className="btn-primary" data-testid="apply-route" onClick={() => dispatch({ t: "route", dealId: d.id, route, inHouseAmount: gtShare })}>Apply route</button>
                 {d.capitalStatus === "reserved" && <button className="btn-ghost" data-testid="commit" onClick={() => dispatch({ t: "commit", dealId: d.id })}>Commit capital</button>}
               </div>
-              {d.allocations.length > 0 && <ul className="mt-3 text-sm">{d.allocations.map((a) => <li key={a.sourceId} className="flex justify-between"><span>{a.sourceId.startsWith("partner:") ? s.partners.find((p) => "partner:" + p.id === a.sourceId)?.name : cap.find((c) => c.source.id === a.sourceId)?.source.name}</span><b>{usd(a.amount)}</b></li>)}<li className="flex justify-between border-t pt-1 text-xs text-muted-foreground"><span>Total vs note</span><span>{pct(d.allocations.reduce((x, a) => x + a.amount, 0) / e.noteAmount, 0)}</span></li></ul>}
+              {d.allocations.length > 0 && <ul className="mt-3 text-sm">{d.allocations.map((a) => <li key={a.sourceId} className="flex flex-wrap justify-between gap-x-3"><span>{a.sourceId.startsWith("partner:") ? s.partners.find((p) => "partner:" + p.id === a.sourceId)?.name : a.sourceId.startsWith("buyer:") ? `Sold to ${s.buyers.find((b) => "buyer:" + b.id === a.sourceId)?.name}` : cap.find((c) => c.source.id === a.sourceId)?.source.name}</span><b>{usd(a.amount)}</b></li>)}<li className="flex justify-between border-t pt-1 text-xs text-muted-foreground"><span>Total vs note</span><span>{pct(d.allocations.reduce((x, a) => x + a.amount, 0) / e.noteAmount, 0)}</span></li></ul>}
             </Section>
           </div>
-          <div className="space-y-4">
+          <div className="min-w-0 space-y-4">
             <Section title="Matched partners (buy box)">
               <ul className="divide-y divide-border">{matches.map(({ p, m }) => (
                 <li key={p.id} className="flex items-start gap-2 py-2">
                   <input type="checkbox" className="mt-1" disabled={!p.ndaSigned || m.match === 0 || d.teaserSentTo.includes(p.id)} checked={sel.includes(p.id) || d.teaserSentTo.includes(p.id)} onChange={(ev) => setSel(ev.target.checked ? [...sel, p.id] : sel.filter((x) => x !== p.id))} />
-                  <div className="flex-1"><div className="flex justify-between text-sm"><span className="font-medium">{p.name}</span><span className="font-semibold">{m.match}%</span></div><div className="text-[11px] text-muted-foreground">{!p.ndaSigned ? "NDA not signed: can't receive teasers" : m.reasons.join(" · ")}{d.teaserSentTo.includes(p.id) && " · teaser sent"}</div></div>
+                  <div className="min-w-0 flex-1"><div className="flex justify-between gap-2 text-sm"><span className="min-w-0 font-medium">{p.name}</span><span className="font-semibold">{m.match}%</span></div><div className="text-[11px] text-muted-foreground">{!p.ndaSigned ? "NDA not signed: can't receive teasers" : m.reasons.join(" · ")}{d.teaserSentTo.includes(p.id) && " · teaser sent"}</div></div>
                 </li>))}</ul>
               <button className="btn-primary mt-2" data-testid="send-teaser" disabled={sel.length === 0} onClick={() => { dispatch({ t: "sendTeaser", dealId: d.id, partnerIds: sel }); setSel([]); }}>Send blind teaser to {sel.length || "…"}</button>
             </Section>
@@ -155,7 +155,7 @@ export default function DealWorkspace() {
             </Section>
             <Section title={`Bids received (${bids.length})`}>
               {bids.length === 0 ? <p className="text-sm text-muted-foreground">No bids yet.</p> : <ul className="space-y-2">{bids.map((b) => (
-                <li key={b.id} className="rounded-lg border border-border p-3 text-sm" data-testid="bid-row"><div className="flex justify-between"><b>{s.partners.find((p) => p.id === b.partnerId)?.name}</b><Badge tone={b.status === "accepted" ? "green" : b.status === "declined" ? "slate" : "violet"}>{b.status}</Badge></div>
+                <li key={b.id} className="rounded-lg border border-border p-3 text-sm" data-testid="bid-row"><div className="flex flex-wrap justify-between gap-2"><b className="min-w-0">{s.partners.find((p) => p.id === b.partnerId)?.name}</b><Badge tone={b.status === "accepted" ? "green" : b.status === "declined" ? "slate" : "violet"}>{b.status}</Badge></div>
                   <div className="text-muted-foreground">{b.type === "accept_as_offered" ? "Accept as offered" : "Bid"} · {b.pct}% of loan · lender yield {b.lenderRate}% · {b.lenderPoints} pts{b.conditions && ` · ${b.conditions}`}</div>
                   {b.status === "submitted" && <button className="btn-primary mt-2 py-1 text-xs" data-testid="accept-bid" onClick={() => dispatch({ t: "acceptBid", bidId: b.id })}>Accept &amp; issue commitment</button>}</li>))}</ul>}
             </Section>
@@ -166,7 +166,7 @@ export default function DealWorkspace() {
       {tab === "Documents" && (
         <Section title="Documents">
           <ul className="divide-y divide-border">{d.docs.map((x) => (
-            <li key={x.id} className="flex flex-wrap items-center justify-between gap-2 py-2"><div><div className="text-sm font-medium">{x.name}</div><div className="text-xs text-muted-foreground">{x.category}{x.fileName && ` · ${x.fileName}`}</div></div>
+            <li key={x.id} className="flex flex-wrap items-center justify-between gap-2 py-2"><div className="min-w-0"><div className="text-sm font-medium">{x.name}</div><div className="text-xs text-muted-foreground">{x.category}{x.fileName && ` · ${x.fileName}`}</div></div>
               <div className="flex items-center gap-2"><Badge>{statusLabel(x.status)}</Badge>{(x.status === "uploaded" || x.status === "in_review") && <><button className="btn-ghost py-1 text-xs" onClick={() => dispatch({ t: "docStatus", dealId: d.id, docId: x.id, status: "accepted" })}>Accept</button><button className="btn-ghost py-1 text-xs" onClick={() => dispatch({ t: "docStatus", dealId: d.id, docId: x.id, status: "rejected" })}>Reject</button></>}</div></li>))}</ul>
         </Section>
       )}

@@ -8,12 +8,13 @@ import { getSettings } from "@/lib/settings";
 type Job = (now: Date) => Promise<string>;
 
 async function purgeSessions(now: Date) {
-  const [sessions, codes, windows] = await Promise.all([
+  const [sessions, codes, links, windows] = await Promise.all([
     prisma.serverSession.deleteMany({ where: { expiresAt: { lt: now } } }),
     prisma.loginCode.deleteMany({ where: { expiresAt: { lt: now } } }),
+    prisma.passwordLink.deleteMany({ where: { expiresAt: { lt: now } } }),
     prisma.rateWindow.deleteMany({ where: { expiresAt: { lt: now } } }),
   ]);
-  return `removed ${sessions.count} expired sessions, ${codes.count} login codes, ${windows.count} rate windows`;
+  return `removed ${sessions.count} expired sessions, ${codes.count} login codes, ${links.count} password links, ${windows.count} rate windows`;
 }
 
 async function cleanRetention(now: Date) {

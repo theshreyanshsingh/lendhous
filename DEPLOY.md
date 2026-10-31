@@ -15,7 +15,7 @@ Lendhous will hold SSNs, credit reports and bank details, so it gets stricter is
 1. In Atlas, create the user above and allow Vercel to connect (`0.0.0.0/0` with a strong password, since Vercel has no fixed IP). Put `/lendhous` after the host in the connection string.
 2. In Vercel, import the repo. Framework preset: Next.js. Build command: `npm run build`.
 3. Set the required variables below for **Production** and **Preview**. A build without them fails closed.
-4. Deploy, then sign in at `https://<domain>/login` with `ADMIN_EMAIL` and `ADMIN_PASSWORD`, and set up an authenticator (owner-admins need two-factor).
+4. Deploy, then sign in at `https://<domain>/login` with `ADMIN_EMAIL` and `ADMIN_PASSWORD`. A six-digit code goes to `ADMIN_EMAIL`, so it must be an inbox you can read.
 5. Check `https://<domain>/api/health`: `db` is `ok`, `storage` is `s3` or `blob`, `encryption` is `keys`.
 
 `vercel.json` schedules `GET /api/cron` daily at 06:00 UTC. Vercel sends `Authorization: Bearer $CRON_SECRET`.
@@ -29,6 +29,9 @@ Lendhous will hold SSNs, credit reports and bank details, so it gets stricter is
 - refuses the demo auth secret, the development encryption key, `@lendhous.test` addresses, the demo password, a non-https origin, and `ALLOW_HTTP_SESSIONS`
 - syncs the MongoDB validators and indexes
 - creates one approved owner-admin in the lender-house organization, plus the settings row, and nothing else; it refuses a database that already holds demo seats
+- clears any authenticator secrets and recovery codes left from before sign-in codes moved to email
+
+Demo seats can't exist on a release database, so to see another role there, invite a second email address from the Members page with that role, sign in as it, and press **Load sample data**.
 
 `prisma/seed.ts` drops the database first, so it refuses to run when `NODE_ENV=production`, `VERCEL=1` or `LENDHOUS_RELEASE=1` is set.
 
@@ -43,8 +46,13 @@ Lendhous will hold SSNs, credit reports and bank details, so it gets stricter is
 | `ADMIN_EMAIL`, `ADMIN_PASSWORD` | The first owner-admin. Password at least 12 characters, applied only when the account is created |
 | `CRON_SECRET` | `openssl rand -base64 32` |
 | Storage | `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_ENDPOINT`, `S3_REGION=auto` (R2), or a private Vercel Blob store (`BLOB_READ_WRITE_TOKEN`) |
+| Mail | `RESEND_API_KEY` + `EMAIL_FROM`, or `SMTP_HOST` + `EMAIL_FROM`. Staff, partners and brokers sign in with a code sent this way |
 
-Optional: `ADMIN_NAME`, `LENDER_NAME`, `TEAM_EMAIL`, `RESEND_API_KEY` + `EMAIL_FROM` (or `SMTP_*`), `S3_PREFIX`, `RATE_LIMIT_STORE`.
+Optional: `ADMIN_NAME`, `LENDER_NAME`, `TEAM_EMAIL`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `S3_PREFIX`, `RATE_LIMIT_STORE`.
+
+## If mail stops working
+
+Nobody who needs a code can sign in. To let them in on their password alone until mail is back, set `requireStaffMfa` to `false` on the `PlatformSettings` document in Atlas. It takes effect within twenty seconds. Set it back to `true` afterwards, which also ends every session opened without a code.
 
 ## A plain server under pm2
 

@@ -11,8 +11,10 @@ const BASE = process.env.BASE_URL || "http://localhost:3000";
 const OUT = process.env.OUT_DIR || "screenshots";
 const CHROME = process.env.CHROME || (process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "/usr/bin/google-chrome");
 const PASSWORD = "Lendhous2026!";
-const SEATS = { borrower: "alex.sample@lendhous.test", staff: "olivia.owner@lendhous.test", partner: "pia.partner@lendhous.test" };
+const SEATS = { borrower: "alex.sample@lendhous.test", staff: "olivia.owner@lendhous.test", partner: "pia.partner@lendhous.test", buyer: "bella.buyer@lendhous.test", underwriter: "uma.underwriter@lendhous.test" };
 const NON_DEMO = "nora.nondemo@example.org";
+const INVITED = "ines.invited@example.org";
+const INVITED_PASSWORD = "a-long-test-password";
 const LEAD_NAME = "Smoke Test Lead";
 const LEAD_EMAIL = "smoke.lead@example.org";
 fs.mkdirSync(OUT, { recursive: true });
@@ -21,6 +23,8 @@ const prisma = new PrismaClient();
 // A run that crashed part-way can leave its test brief behind, and briefs are rate limited per connection.
 await prisma.lead.deleteMany({ where: { email: LEAD_EMAIL } });
 await prisma.rateWindow.deleteMany({ where: { key: { startsWith: "lead:" } } });
+await prisma.user.deleteMany({ where: { email: INVITED } });
+await prisma.rateWindow.deleteMany({ where: { key: { contains: INVITED } } });
 const browser = await chromium.launch({ executablePath: CHROME, args: ["--no-sandbox"] });
 const errors = [];
 const checks = [];
@@ -202,7 +206,136 @@ await page.goto(BASE + "/admin/partner/teasers/d1");
 ok("deal room unlocks for the winning partner", await page.getByTestId("deal-room-open").isVisible());
 await shot(page, "08-partner-deal-room-unlocked.png");
 
-// 6. A non-demo account in the same browser sees none of the demo data saved there
+// 6. Loan buyer seat: browses blind loans, prices one and makes an offer; staff sell it; the file unlocks
+const pathOf = (p) => new URL(p.url()).pathname;
+await actAs(SEATS.staff);
+await page.goto(BASE + "/admin");
+ok("the headline card says what it means", (await page.locator("main").innerText()).includes("Capital available") && !/\bGT\b/.test(await page.locator("main").innerText()));
+await page.waitForTimeout(300);
+const capitalBefore = parseFloat((await page.getByTestId("capital-available").innerText()).replace(/[^0-9.]/g, ""));
+await signIn(page, SEATS.buyer);
+ok("the buyer seat lands on loans for sale", pathOf(page) === "/admin/buyer");
+const market = await page.locator("main").innerText();
+ok(`the buyer sees the loans for sale (${await page.getByTestId("loan-for-sale").count()})`, (await page.getByTestId("loan-for-sale").count()) === 5);
+ok("the market hides street addresses and borrower names", !market.includes("410 Test Harbor Way") && !market.includes("Quinn Sample") && !market.includes("Quinn Flips"));
+await shot(page, "10-buyer-loans-for-sale.png");
+await page.goto(BASE + "/admin");
+ok("the buyer seat can't open the staff pipeline", pathOf(page) === "/admin/buyer");
+await page.goto(BASE + "/admin/members");
+ok("the buyer seat can't open the members page", pathOf(page) === "/admin/buyer");
+await page.goto(BASE + "/admin/partner");
+ok("the buyer seat can't open the partner feed", pathOf(page) === "/admin/buyer");
+await page.goto(BASE + "/admin/buyer/loans/s-d12");
+ok("a loan with draws left warns the buyer", (await page.getByTestId("holdback-warning").innerText()).includes("$420,000"));
+await page.goto(BASE + "/admin/buyer/loans/s-d9");
+const yieldAtAsk = parseFloat(await page.getByTestId("price-yield").innerText());
+await page.getByTestId("price-input").fill("96");
+ok("pricing a loan shows the dollars", (await page.getByTestId("price-dollars").innerText()) === "$345,600");
+ok("a lower price shows a higher yield", parseFloat(await page.getByTestId("price-yield").innerText()) > yieldAtAsk);
+ok("the blind loan page hides the address", !(await page.locator("main").innerText()).includes("410 Test Harbor Way"));
+await shot(page, "11-buyer-price-a-loan.png");
+await page.getByTestId("send-offer").click();
+ok("the offer is recorded", await page.getByTestId("my-offer").waitFor({ timeout: 5000 }).then(() => true, () => false));
+await page.goto(BASE + "/admin/buyer/portfolio");
+await page.getByTestId("my-offer-row").first().waitFor({ timeout: 5000 });
+ok("the buyer's page shows the loan they own and their offers", (await page.getByTestId("owned-loan").count()) === 1 && (await page.getByTestId("my-offer-row").count()) === 2);
+await shot(page, "12-buyer-portfolio.png");
+await page.goto(BASE + "/admin/buyer/loans/s-d14");
+ok("a loan the buyer owns shows its address and file", await page.getByTestId("file-open").waitFor({ timeout: 5000 }).then(() => true, () => false) && (await page.getByTestId("loan-heading").innerText()).includes("250 Sample Shore Dr"));
+
+await actAs(SEATS.staff);
+await page.goto(BASE + "/admin/loan-sales");
+const sale = page.getByTestId("sale-row").filter({ hasText: "LH-DEMO-1009" });
+await sale.getByTestId("offer-row").first().waitFor({ timeout: 5000 });
+ok("the buyer's offer reaches staff", (await sale.getByTestId("offer-row").filter({ hasText: "96.00" }).count()) === 1);
+await shot(page, "13-admin-loan-sales.png");
+await sale.getByTestId("accept-offer").click();
+ok("accepting an offer sells the loan", await page.getByTestId("sold-row").filter({ hasText: "LH-DEMO-1009" }).waitFor({ timeout: 5000 }).then(() => true, () => false));
+const ready = page.getByTestId("eligible-row").filter({ hasText: "LH-DEMO-1017" });
+await ready.getByTestId("ask-input").fill("99");
+await ready.getByTestId("list-loan").click();
+ok("staff can list another funded loan", await page.getByTestId("sale-row").filter({ hasText: "LH-DEMO-1017" }).waitFor({ timeout: 5000 }).then(() => true, () => false));
+await page.goto(BASE + "/admin");
+await page.waitForTimeout(300);
+const capitalAfter = parseFloat((await page.getByTestId("capital-available").innerText()).replace(/[^0-9.]/g, ""));
+ok(`selling a loan frees capital ($${capitalBefore}M to $${capitalAfter}M)`, capitalAfter > capitalBefore);
+await actAs(SEATS.buyer);
+await page.goto(BASE + "/admin/buyer/loans/s-d9");
+ok("after the sale the buyer gets the address and file", await page.getByTestId("file-open").waitFor({ timeout: 5000 }).then(() => true, () => false) && (await page.getByTestId("loan-heading").innerText()).includes("410 Test Harbor Way"));
+await page.goto(BASE + "/admin/buyer");
+ok("the newly listed loan appears for the buyer", await page.getByTestId("loan-for-sale").filter({ hasText: "N-1017" }).waitFor({ timeout: 5000 }).then(() => true, () => false));
+
+// 7. Members: the owner invites someone, who sets a password from the link and signs in; then changes and removes them
+await signIn(page, SEATS.underwriter);
+await page.goto(BASE + "/admin/members");
+ok("a non-owner can't open the members page", pathOf(page) === "/admin");
+ok("a non-owner has no Members link", (await page.getByRole("link", { name: "Members" }).count()) === 0);
+await actAs(SEATS.staff);
+await page.goto(BASE + "/admin/members");
+ok("the owner sees every member", (await page.getByTestId("member-row").count()) === 9);
+await shot(page, "14-admin-members.png");
+await page.getByTestId("invite-member").click();
+await page.getByTestId("member-name").fill("Ines Invited");
+await page.getByTestId("member-email").fill(INVITED);
+await page.getByTestId("role-PROCESSOR").click();
+await page.getByTestId("role-LOAN_BUYER").click();
+await page.getByRole("button", { name: "Send invitation" }).click();
+const link = await page.getByTestId("issued-link").innerText();
+ok("an invitation gives a one-time link", link.includes("/login/set-password?token="));
+ok("the owner is told the address takes no mail here", (await page.getByTestId("issued-mail").innerText()).includes("Share this link"));
+await page.getByRole("button", { name: "Done" }).click();
+const invitedRow = page.getByTestId("member-row").filter({ hasText: INVITED });
+ok("the invited person shows as invited", (await invitedRow.innerText()).includes("Invited") && (await invitedRow.innerText()).includes("Loan buyer"));
+
+const outsider = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+const op = await outsider.newPage();
+const linkPath = BASE + new URL(link).pathname + new URL(link).search;
+await op.goto(linkPath);
+ok("the link names the account", (await op.getByTestId("password-email").innerText()) === INVITED);
+await op.getByTestId("new-password").fill(INVITED_PASSWORD);
+await op.getByTestId("confirm-password").fill("a-different-password");
+await op.getByRole("button", { name: "Save password" }).click();
+ok("two different passwords are refused", await op.getByRole("alert").filter({ hasText: "don't match" }).waitFor({ timeout: 5000 }).then(() => true, () => false));
+await op.getByTestId("new-password").fill(INVITED_PASSWORD);
+await op.getByTestId("confirm-password").fill(INVITED_PASSWORD);
+await op.getByRole("button", { name: "Save password" }).click();
+await op.waitForURL("**/login?notice=password_set");
+ok("setting a password leads to sign-in", (await op.locator("main").innerText()).includes("Your password is set"));
+await op.goto(linkPath);
+ok("the link works only once", await op.getByTestId("password-link-dead").isVisible());
+await op.goto(BASE + "/login");
+await op.getByTestId("login-email").fill(INVITED);
+await op.getByTestId("login-password").fill(INVITED_PASSWORD);
+await op.getByRole("button", { name: "Sign in" }).click();
+await op.waitForURL("**/admin/buyer");
+ok("the invited buyer signs in to the buyer workspace, empty until it has records", await op.getByTestId("no-buyer-org").isVisible());
+await op.getByTestId("load-sample").click();
+ok("a real buyer account can load sample loans", await op.getByTestId("loan-for-sale").first().waitFor({ timeout: 5000 }).then(() => true, () => false));
+await op.reload();
+ok("sample data survives a reload", await op.getByTestId("loan-for-sale").first().waitFor({ timeout: 5000 }).then(() => true, () => false));
+await op.getByTestId("clear-sample").click();
+ok("sample data clears with one click", await op.getByTestId("no-buyer-org").waitFor({ timeout: 5000 }).then(() => true, () => false));
+
+await invitedRow.getByTestId("modify-member").click();
+await page.getByTestId("member-title").fill("Note desk");
+await page.getByTestId("perm-view_audit").click();
+await page.getByRole("button", { name: "Save changes" }).click();
+await page.getByTestId("member-form").waitFor({ state: "detached", timeout: 5000 });
+await invitedRow.getByText("Custom").waitFor({ timeout: 5000 });
+ok("changing one person's access is saved and flagged", (await invitedRow.innerText()).includes("Note desk") && (await invitedRow.innerText()).includes("Custom"));
+await invitedRow.getByTestId("remove-member").click();
+await page.getByRole("button", { name: "Remove member" }).click();
+ok("removing a member takes them off the list", await invitedRow.waitFor({ state: "detached", timeout: 5000 }).then(() => true, () => false));
+await op.goto(BASE + "/admin/buyer");
+ok("a removed member's session ends at once", pathOf(op).startsWith("/login"));
+await op.getByTestId("login-email").fill(INVITED);
+await op.getByTestId("login-password").fill(INVITED_PASSWORD);
+await op.getByRole("button", { name: "Sign in" }).click();
+ok("a removed member can't sign in", await op.getByRole("alert").filter({ hasText: "don't match" }).waitFor({ timeout: 5000 }).then(() => true, () => false));
+await outsider.close();
+ok("the owner can't remove their own account", await page.getByTestId("member-row").filter({ hasText: SEATS.staff }).getByTestId("remove-member").isDisabled());
+
+// 8. A non-demo account in the same browser sees none of the demo data saved there
 await prisma.user.deleteMany({ where: { email: NON_DEMO } });
 const nora = await prisma.user.create({ data: { email: NON_DEMO, name: "Nora Nondemo", passwordHash: await bcrypt.hash(PASSWORD, 10), accountStatus: "APPROVED", roles: { create: [{ role: "UNDERWRITER" }] } } });
 try {
@@ -214,11 +347,19 @@ try {
   ok("a non-demo account sees no demo capital sources", (await page.locator("main").innerText()).includes("No capital sources yet."));
   await page.goto(BASE + "/admin/deals/d1");
   ok("a non-demo account can't open a demo deal", (await page.locator("main").innerText()).includes("Deal not found"));
+  await page.goto(BASE + "/admin");
+  await page.getByTestId("load-sample").click();
+  ok("a non-demo account can load sample data", (await page.locator("main").innerText()).includes("LH-DEMO-1001") && (await page.getByTestId("capital-available").innerText()) !== "—");
+  ok("sample data is labeled as fake", (await page.getByTestId("sample-data-bar").innerText()).includes("FAKE"));
+  await page.getByTestId("clear-sample").click();
+  ok("clearing sample data empties the pipeline again", (await page.locator("main").innerText()).includes("No loans in the pipeline yet."));
 } finally {
   await prisma.serverSession.deleteMany({ where: { userId: nora.id } });
   await prisma.rateWindow.deleteMany({ where: { key: { contains: NON_DEMO } } });
   await prisma.user.delete({ where: { id: nora.id } });
   await prisma.lead.deleteMany({ where: { email: LEAD_EMAIL } });
+  await prisma.user.deleteMany({ where: { email: INVITED } });
+  await prisma.rateWindow.deleteMany({ where: { key: { contains: INVITED } } });
   await prisma.$disconnect();
 }
 
@@ -235,10 +376,27 @@ await mp.goto(BASE + "/admin/apply");
 await mp.getByTestId("next").click(); await mp.getByTestId("next").click();
 await mp.waitForTimeout(300);
 await shot(mp, "09-mobile-application.png", false);
+await m.close();
+
+// The sheets and the menu open over the page, so the phone-check script doesn't see them.
+const phone = await browser.newContext({ viewport: { width: 375, height: 760 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+await phone.addCookies(sessions[SEATS.staff]);
+const pp = await phone.newPage();
+const fits = () => pp.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth && [...document.querySelectorAll("[data-slot='sheet-content'] *")].every((el) => el.getBoundingClientRect().right <= document.documentElement.clientWidth + 1));
+await pp.goto(BASE + "/admin");
+await pp.getByRole("button", { name: "Open navigation" }).click();
+await pp.getByRole("link", { name: "Members" }).click();
+await pp.waitForURL("**/admin/members");
+ok("the phone menu reaches the members page", pathOf(pp) === "/admin/members");
+await pp.getByTestId("invite-member").click();
+await pp.getByTestId("member-name").waitFor();
+ok("the invite sheet fits a phone", await fits());
+await shot(pp, "15-mobile-invite-member.png", false);
+await phone.close();
 
 // cold load of every route in a fresh browser, as the seat that owns it: catches hydration mismatches that
 // client-side navigation hides
-const routes = [["/", null], ["/calculators", null], ["/start", null], ["/resources", null], ["/admin/apply", SEATS.borrower], ["/admin/borrower", SEATS.borrower], ["/admin/borrower/d2", SEATS.borrower], ["/admin", SEATS.staff], ["/admin/deals/d1", SEATS.staff], ["/admin/capital", SEATS.staff], ["/admin/partner", SEATS.partner], ["/admin/partner/teasers/d3", SEATS.partner]];
+const routes = [["/", null], ["/calculators", null], ["/start", null], ["/resources", null], ["/admin/apply", SEATS.borrower], ["/admin/borrower", SEATS.borrower], ["/admin/borrower/d2", SEATS.borrower], ["/admin", SEATS.staff], ["/admin/deals/d1", SEATS.staff], ["/admin/capital", SEATS.staff], ["/admin/loan-sales", SEATS.staff], ["/admin/members", SEATS.staff], ["/admin/buyer", SEATS.buyer], ["/admin/buyer/loans/s-d10", SEATS.buyer], ["/admin/buyer/portfolio", SEATS.buyer], ["/admin/partner", SEATS.partner], ["/admin/partner/teasers/d3", SEATS.partner]];
 for (const [r, seat] of routes) {
   const c = await browser.newContext(); if (seat) await c.addCookies(sessions[seat]); const p = await c.newPage(); const errs = [];
   p.on("pageerror", (e) => errs.push(e.message)); p.on("console", (msg) => { if (msg.type() === "error") errs.push(msg.text()); });

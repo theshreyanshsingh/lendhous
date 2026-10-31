@@ -1,21 +1,28 @@
 // Sessions on top of lib/session.ts, ported from UPB Capital's lib/auth.ts, plus what Spec v3 10.1 adds for Lendhous:
-// several roles per user, a 30-minute idle timeout for staff, and required two-factor for staff, partners and brokers.
+// several roles per user, a 30-minute idle timeout for staff, and a required emailed code for staff, partners and brokers.
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
 import type { RoleCode } from "@prisma/client";
 import { secureCookies } from "@/lib/deploy";
-import { can, homeFor, isStaff, needsMfa, viewFor, type Permission, type View } from "@/lib/permissions";
+import { can, homeFor, isStaff, loginCodeRequired, viewFor, type Permission, type View } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { requestMeta } from "@/lib/request-meta";
 import { PENDING_COOKIE, SESSION_COOKIE, SESSION_DAYS, signPending, signSession, verifyPending, verifySession } from "@/lib/session";
 import { getSettings } from "@/lib/settings";
 
-export async function setSession(user: { id: string; email: string; name: string; roles: { role: RoleCode }[] }) {
+export async function setSession(user: { id: string; email: string; name: string; roles: { role: RoleCode }[] }, options: { secondFactor?: boolean } = {}) {
   const sid = crypto.randomUUID();
   const meta = await requestMeta();
   await prisma.serverSession.create({
-    data: { id: sid, userId: user.id, expiresAt: new Date(Date.now() + SESSION_DAYS * 86_400_000), ipAddress: meta.ipAddress, userAgent: meta.userAgent },
+    data: {
+      id: sid,
+      userId: user.id,
+      expiresAt: new Date(Date.now() + SESSION_DAYS * 86_400_000),
+      secondFactorAt: options.secondFactor ? new Date() : undefined,
+      ipAddress: meta.ipAddress,
+      userAgent: meta.userAgent,
+    },
   });
   await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
   const token = await signSession({ sub: user.id, email: user.email, name: user.name, roles: user.roles.map((role) => role.role), sid });
@@ -69,7 +76,8 @@ export const getCurrentUser = cache(async () => {
     if (!row || row.userId !== session.sub || row.user.deletedAt) return null;
     const roles = row.user.roles.map((role) => role.role);
     const settings = await getSettings();
-    if (sessionExpired(row, isStaff(roles), settings.staffIdleMinutes)) {
+    // A session opened without a code ends once the role requires one, so its holder signs in again.
+    if (sessionExpired(row, isStaff(roles), settings.staffIdleMinutes) || (loginCodeRequired(roles, settings) && !row.secondFactorAt)) {
       await prisma.serverSession.deleteMany({ where: { id: row.id } });
       return null;
     }
@@ -86,13 +94,10 @@ export const getCurrentUser = cache(async () => {
 
 export type CurrentUser = NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>;
 
-export async function requireUser(options: { allowWithoutMfa?: boolean } = {}) {
+export async function requireUser() {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
   if (user.accountStatus !== "APPROVED") redirect("/login?error=" + encodeURIComponent("This account is not active yet."));
-  if (!options.allowWithoutMfa && needsMfa(user.roleCodes) && !user.totpEnabled && (await getSettings()).requireStaffMfa) {
-    redirect("/admin/account/security?notice=mfa_required");
-  }
   return user;
 }
 
@@ -103,9 +108,13 @@ export async function requireView(view: View) {
   return user;
 }
 
+export async function hasPermission(user: CurrentUser, permission: Permission, options: { amountCents?: number } = {}) {
+  const overrides = await prisma.rolePermission.findMany({ where: { role: { in: user.roleCodes }, permission } });
+  return can(user.roleCodes, permission, { amountCents: options.amountCents, overrides, member: user });
+}
+
 export async function requirePermission(permission: Permission, options: { amountCents?: number } = {}) {
   const user = await requireUser();
-  const overrides = await prisma.rolePermission.findMany({ where: { role: { in: user.roleCodes }, permission } });
-  if (!can(user.roleCodes, permission, { amountCents: options.amountCents, overrides })) redirect(`${homeFor(user.roleCodes)}?denied=${permission}`);
+  if (!(await hasPermission(user, permission, options))) redirect(`${homeFor(user.roleCodes)}?denied=${permission}`);
   return user;
 }

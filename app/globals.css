@@ -256,6 +256,58 @@
   .btn-ghost {
     @apply inline-flex h-10 items-center justify-center gap-2 rounded-[2px] border border-rule bg-transparent px-5 text-[13.5px] font-medium whitespace-nowrap text-foreground transition-colors hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40;
   }
+
+  /* Below the desktop layout a table becomes a stack of labelled rows, so nothing has to scroll sideways.
+     Give each cell a data-label; a cell without one takes the full width as the row's heading. */
+  @media (max-width: 1023px) {
+    .desk-input {
+      /* iPhones zoom the whole page into any input smaller than 16px and leave it zoomed. */
+      font-size: 16px;
+      height: 2.75rem;
+    }
+
+    .stack-table,
+    .stack-table tbody,
+    .stack-table tr {
+      display: block;
+      width: 100%;
+    }
+
+    .stack-table thead {
+      display: none;
+    }
+
+    .stack-table tr {
+      padding: 0.875rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .stack-table tr:last-child {
+      border-bottom: 0;
+    }
+
+    .stack-table td {
+      display: block;
+      padding: 0.25rem 0;
+      overflow-wrap: anywhere;
+    }
+
+    .stack-table td[data-label] {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 1rem;
+      text-align: right;
+    }
+
+    .stack-table td[data-label]::before {
+      content: attr(data-label);
+      flex: none;
+      font-size: 12px;
+      text-align: left;
+      color: var(--muted-foreground);
+    }
+  }
 }
 
 :focus-visible {

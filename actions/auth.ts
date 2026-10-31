@@ -4,7 +4,8 @@ import bcrypt from "bcryptjs";
 import { redirect } from "next/navigation";
 import { audit } from "@/lib/audit";
 import { clearSession, getCurrentUser, setPending, setSession } from "@/lib/auth";
-import { homeFor, needsMfa } from "@/lib/permissions";
+import { issueLoginCode, LOGIN_CODE_PAGE } from "@/lib/login-code";
+import { homeFor, loginCodeRequired } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import { requestMeta } from "@/lib/request-meta";
@@ -29,14 +30,13 @@ export async function login(_prev: { error: string }, formData: FormData) {
   }
   if (user.accountStatus === "PENDING") return { error: "This account is waiting for approval." };
   if (user.accountStatus !== "APPROVED") return { error: "This account is not active. Contact the Lendhous team." };
-  if (user.totpEnabled && user.totpSecretEnc) {
+  const roles = user.roles.map((role) => role.role);
+  if (user.emailCodeEnabled || loginCodeRequired(roles, await getSettings())) {
     await setPending(user.id);
-    redirect("/login/verify");
+    redirect(LOGIN_CODE_PAGE[await issueLoginCode(user)]);
   }
   await setSession(user);
   await audit({ actorId: user.id, action: "auth.login", entityType: "User", entityId: user.id });
-  const roles = user.roles.map((role) => role.role);
-  if (needsMfa(roles) && (await getSettings()).requireStaffMfa) redirect("/admin/account/security?notice=mfa_required");
   redirect(safeNext(String(formData.get("next") || ""), homeFor(roles)));
 }
 

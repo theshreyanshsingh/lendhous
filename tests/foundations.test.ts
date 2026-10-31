@@ -3,10 +3,9 @@ import { nextStep } from "@/lib/approvals";
 import { sessionExpired } from "@/lib/auth";
 import { decryptField, DEV_FIELD_KEY, encryptField, last4, needsRotation, parseFieldKeys } from "@/lib/crypto";
 import { assertMongoUrl, assertReleaseEnv, demoSeedBlocked, DEV_AUTH_SECRET, DEV_DEMO_PASSWORD, isDemoEmail, secureCookies } from "@/lib/deploy";
-import { can, grantFor, homeFor, needsMfa, viewFor } from "@/lib/permissions";
+import { accessChanges, accessError, accessFor, removeError } from "@/lib/member-rules";
+import { can, grantFor, homeFor, loginCodeRequired, needsMfa, viewFor } from "@/lib/permissions";
 import { rateLimit, resetRateLimits } from "@/lib/rate-limit";
-import { newRecoveryCodes, packHashes, takeRecoveryCode } from "@/lib/recovery";
-import { totpCode, verifyTotp } from "@/lib/totp";
 
 const key = (id: string, fill: number) => `${id}:${Buffer.alloc(32, fill).toString("base64")}`;
 
@@ -21,11 +20,18 @@ const release = {
   S3_BUCKET: "lendhous",
   S3_ACCESS_KEY_ID: "id",
   S3_SECRET_ACCESS_KEY: "secret",
+  RESEND_API_KEY: "re_key",
+  EMAIL_FROM: "LendHous <noreply@example.com>",
 };
 
 describe("release guard (ported from UPB, Lendhous rules added)", () => {
   it("accepts a complete production environment", () => {
     expect(() => assertReleaseEnv(release)).not.toThrow();
+  });
+  it("refuses a build with no way to mail sign-in codes", () => {
+    expect(() => assertReleaseEnv({ ...release, RESEND_API_KEY: "" })).toThrow(/RESEND_API_KEY/);
+    expect(() => assertReleaseEnv({ ...release, EMAIL_FROM: "" })).toThrow(/EMAIL_FROM/);
+    expect(() => assertReleaseEnv({ ...release, RESEND_API_KEY: "", SMTP_HOST: "smtp.example.com" })).not.toThrow();
   });
   it("names every missing variable, including the field-encryption keys", () => {
     expect(() => assertReleaseEnv({})).toThrow(/DATABASE_URL.*AUTH_SECRET.*FIELD_ENCRYPTION_KEYS.*S3_BUCKET/);
@@ -113,6 +119,9 @@ describe("permission matrix (Spec v3 Section 1)", () => {
     expect(needsMfa(["PARTNER_LENDER"])).toBe(true);
     expect(needsMfa(["BROKER"])).toBe(true);
     expect(needsMfa(["BORROWER", "GUARANTOR"])).toBe(false);
+    expect(loginCodeRequired(["UNDERWRITER"], { requireStaffMfa: true })).toBe(true);
+    expect(loginCodeRequired(["UNDERWRITER"], { requireStaffMfa: false })).toBe(false);
+    expect(loginCodeRequired(["BORROWER"], { requireStaffMfa: true })).toBe(false);
     expect(homeFor(["BORROWER"])).toBe("/admin/borrower");
     expect(homeFor(["PARTNER_LENDER"])).toBe("/admin/partner");
     expect(homeFor(["INSPECTOR"])).toBe("/admin");
@@ -148,7 +157,49 @@ describe("dual control rules (Spec v3 Section 1, 10.4)", () => {
   });
 });
 
-describe("sessions and two-factor (ported from UPB, idle timeout added)", () => {
+describe("loan buyers and per-person access", () => {
+  it("gives a loan buyer their own workspace and a required code", () => {
+    expect(viewFor(["LOAN_BUYER"])).toBe("buyer");
+    expect(homeFor(["LOAN_BUYER"])).toBe("/admin/buyer");
+    expect(needsMfa(["LOAN_BUYER"])).toBe(true);
+    expect(viewFor(["UNDERWRITER", "LOAN_BUYER"])).toBe("admin");
+  });
+  it("applies one person's changes on top of their role", () => {
+    expect(can(["PROCESSOR"], "view_audit", { member: { extraPermissions: ["view_audit"] } })).toBe(true);
+    expect(can(["PROCESSOR"], "view_pipeline", { member: { deniedPermissions: ["view_pipeline"] } })).toBe(false);
+    expect(can(["UNDERWRITER"], "issue_term_sheet", { amountCents: 200_000_000, member: { extraPermissions: ["issue_term_sheet"] } })).toBe(false);
+  });
+  it("stores only the differences from the role, and nothing for an owner", () => {
+    const ticked = [...accessFor(["PROCESSOR"]).filter((permission) => permission !== "manage_conditions"), "view_audit"];
+    expect(accessChanges(["PROCESSOR"], ticked)).toEqual({ extraPermissions: ["view_audit"], deniedPermissions: ["manage_conditions"] });
+    expect(accessChanges(["PROCESSOR"], accessFor(["PROCESSOR"]))).toEqual({ extraPermissions: [], deniedPermissions: [] });
+    expect(accessChanges(["ADMIN_OWNER"], [])).toEqual({ extraPermissions: [], deniedPermissions: [] });
+  });
+  it("won't let anyone raise their own access or give access they don't have", () => {
+    const owner = { id: "o", roleCodes: ["ADMIN_OWNER" as const] };
+    const manager = { id: "m", roleCodes: ["PROCESSOR" as const], extraPermissions: ["manage_users"] };
+    expect(accessError(owner, null, { roles: [] })).toMatch(/at least one role/);
+    expect(accessError(owner, null, { roles: ["ADMIN_OWNER"] })).toBeNull();
+    expect(accessError(owner, { id: "o", roles: ["ADMIN_OWNER"] }, { roles: ["UNDERWRITER"] })).toMatch(/your own access/);
+    expect(accessError(owner, { id: "o", roles: ["ADMIN_OWNER"] }, { roles: ["ADMIN_OWNER"] })).toBeNull();
+    expect(accessError(manager, null, { roles: ["ADMIN_OWNER"] })).toMatch(/Only an owner/);
+    expect(accessError(manager, { id: "x", roles: ["ADMIN_OWNER"] }, { roles: ["PROCESSOR"] })).toMatch(/Only an owner/);
+    expect(accessError(manager, null, { roles: ["UNDERWRITER"] })).toMatch(/don't have yourself/);
+    expect(accessError(manager, null, { roles: ["PROCESSOR"], extraPermissions: ["approve_funding"] })).toMatch(/don't have yourself/);
+    expect(accessError(manager, null, { roles: ["PROCESSOR"] })).toBeNull();
+    expect(accessError(manager, { id: "m", roles: ["PROCESSOR"], extraPermissions: ["manage_users"] }, { roles: ["PROCESSOR"], extraPermissions: ["manage_users", "view_audit"] })).toMatch(/your own access/);
+  });
+  it("won't let anyone remove themselves, or a non-owner remove an owner", () => {
+    const owner = { id: "o", roleCodes: ["ADMIN_OWNER" as const] };
+    const manager = { id: "m", roleCodes: ["PROCESSOR" as const] };
+    expect(removeError(owner, { id: "o", roles: ["ADMIN_OWNER"] })).toMatch(/your own/);
+    expect(removeError(manager, { id: "o", roles: ["ADMIN_OWNER"] })).toMatch(/Only an owner/);
+    expect(removeError(owner, { id: "x", roles: ["ADMIN_OWNER"] })).toBeNull();
+    expect(removeError(manager, { id: "x", roles: ["BROKER"] })).toBeNull();
+  });
+});
+
+describe("sessions and rate limits (ported from UPB, idle timeout added)", () => {
   const now = Date.UTC(2026, 9, 28, 12);
   const session = (idleMinutes: number) => ({ expiresAt: new Date(now + 86_400_000), lastSeenAt: new Date(now - idleMinutes * 60_000) });
   it("ends staff sessions after the idle window, not borrower sessions", () => {
@@ -157,17 +208,7 @@ describe("sessions and two-factor (ported from UPB, idle timeout added)", () => 
     expect(sessionExpired(session(600), false, 30, now)).toBe(false);
     expect(sessionExpired({ expiresAt: new Date(now - 1), lastSeenAt: new Date(now) }, false, 30, now)).toBe(true);
   });
-  it("accepts the current authenticator code and one step either side", () => {
-    const secret = "JBSWY3DPEHPK3PXP";
-    expect(verifyTotp(secret, totpCode(secret, now), now)).toBe(true);
-    expect(verifyTotp(secret, totpCode(secret, now - 30_000), now)).toBe(true);
-    expect(verifyTotp(secret, totpCode(secret, now - 120_000), now)).toBe(false);
-  });
-  it("recovery codes work once; the memory rate limiter caps attempts", () => {
-    const codes = newRecoveryCodes(2);
-    const left = takeRecoveryCode(packHashes(codes), codes[0]);
-    expect(left).not.toBeNull();
-    expect(takeRecoveryCode(left!, codes[0])).toBeNull();
+  it("the memory rate limiter caps attempts", () => {
     resetRateLimits();
     expect([1, 2, 3].map(() => rateLimit("k", 2, 1000, now))).toEqual([true, true, false]);
   });

@@ -1,6 +1,6 @@
 "use client";
 import type { Estimate, Product } from "@/lib/engine";
-import { RatioPill, GradeBadge, usd, pct, Stat } from "./ui";
+import { RatioPill, GradeBadge, usd, pct, Stat, ratioGrid } from "./ui";
 
 export default function EstimatePanel({ e, product, compact }: { e: Estimate; product: Product; compact?: boolean }) {
   return (
@@ -27,11 +27,11 @@ export default function EstimatePanel({ e, product, compact }: { e: Estimate; pr
             {e.financedReserve > 0 && <div className="flex justify-between"><span>Financed interest reserve</span><b>{usd(e.financedReserve)}</b></div>}
           </div>
         )}
-        <div className={`grid gap-2 ${e.ratios.length > 2 ? "grid-cols-3" : "grid-cols-2"}`}>
+        <div className={ratioGrid(e.ratios.length)}>
           {e.ratios.map((r) => <RatioPill key={r.key} label={r.label} value={r.actual} limit={r.limit} color={r.color} kind={r.kind} isMultiple={r.key === "dscr"} />)}
         </div>
         {e.flip && !compact && (
-          <div className="grid grid-cols-3 gap-2 rounded-lg border border-border p-3">
+          <div className="grid grid-cols-2 gap-2 rounded-lg border border-border p-3 sm:grid-cols-3">
             <Stat label="Est. profit" value={usd(e.flip.profit)} />
             <Stat label="Margin" value={pct(e.flip.margin)} />
             <Stat label="ROI on cash" value={pct(e.flip.roi, 0)} />

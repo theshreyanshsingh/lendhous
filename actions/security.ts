@@ -1,114 +1,59 @@
 "use server";
 
-// Two-factor sign-in, ported from UPB Capital's actions/security.ts. Differences: the authenticator secret and the
-// one-time recovery-code reveal are stored encrypted, and turning two-factor on or off is audited.
-import { createHash, randomInt } from "crypto";
+// The second factor: a six-digit code emailed at sign-in (lib/login-code.ts). Staff, partners and brokers always get one;
+// anyone else can turn it on from the security page.
+import bcrypt from "bcryptjs";
 import { redirect } from "next/navigation";
 import { audit } from "@/lib/audit";
 import { clearPending, pendingUserId, requireUser, setSession } from "@/lib/auth";
-import { encryptField } from "@/lib/crypto";
-import { notify } from "@/lib/email";
-import { homeFor } from "@/lib/permissions";
+import { issueLoginCode, LOGIN_CODE_PAGE, takeLoginCode } from "@/lib/login-code";
+import { homeFor, loginCodeRequired } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { consumeRateLimit } from "@/lib/rate-limit";
-import { newRecoveryCodes, packHashes, takeRecoveryCode } from "@/lib/recovery";
-import { generateTotpSecret, verifyTotp } from "@/lib/totp";
-import { revealContext, secretContext, totpSecretOf } from "@/lib/two-factor";
+import { getSettings } from "@/lib/settings";
 
-const fail = (path: string, message: string) => redirect(`${path}?error=${encodeURIComponent(message)}`);
-
-export async function beginTotp() {
-  const user = await requireUser({ allowWithoutMfa: true });
-  if (user.totpEnabled) redirect("/admin/account/security");
-  const secret = generateTotpSecret();
-  await prisma.user.update({ where: { id: user.id }, data: { totpSecretEnc: encryptField(secret, secretContext(user.id)), totpEnabled: false } });
-  redirect("/admin/account/security?notice=totp");
+function fail(path: string, message: string): never {
+  redirect(`${path}?error=${encodeURIComponent(message)}`);
 }
 
-export async function confirmTotp(formData: FormData) {
-  const user = await requireUser({ allowWithoutMfa: true });
-  const code = String(formData.get("code") || "");
-  if (!user.totpSecretEnc || !verifyTotp(totpSecretOf(user), code)) fail("/admin/account/security", "That code does not match the secret on this account.");
-  const codes = newRecoveryCodes();
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { totpEnabled: true, recoveryHashes: packHashes(codes), recoveryRevealEnc: encryptField(codes.join("\n"), revealContext(user.id)) },
-  });
-  await audit({ actorId: user.id, action: "security.totp_on", entityType: "User", entityId: user.id });
-  redirect("/admin/account/security?notice=codes");
-}
+const tooManyCodes = (userId: string) => consumeRateLimit(`login-code:${userId}`, 5, 15 * 60 * 1000).then((allowed) => !allowed);
 
-export async function acknowledgeRecovery() {
-  const user = await requireUser({ allowWithoutMfa: true });
-  await prisma.user.update({ where: { id: user.id }, data: { recoveryRevealEnc: "" } });
-  redirect("/admin/account/security?notice=totp_on");
-}
-
-export async function disableTotp(formData: FormData) {
-  const user = await requireUser({ allowWithoutMfa: true });
-  if (!(await consumeRateLimit(`totp:${user.id}`, 5, 15 * 60 * 1000))) fail("/admin/account/security", "Too many codes. Wait fifteen minutes and try again.");
-  const code = String(formData.get("code") || "");
-  const recovery = takeRecoveryCode(user.recoveryHashes, code);
-  const ok = (user.totpSecretEnc && verifyTotp(totpSecretOf(user), code)) || recovery != null;
-  if (!user.totpEnabled || !ok) fail("/admin/account/security", "Enter a current code or a recovery code to turn this off.");
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { totpEnabled: false, totpSecretEnc: "", recoveryHashes: "", recoveryRevealEnc: "", emailOtpFallback: false },
-  });
-  await audit({ actorId: user.id, action: "security.totp_off", entityType: "User", entityId: user.id });
-  redirect("/admin/account/security?notice=totp_off");
-}
-
-export async function setEmailFallback(formData: FormData) {
-  const user = await requireUser({ allowWithoutMfa: true });
-  if (!user.totpEnabled) redirect("/admin/account/security");
-  await prisma.user.update({ where: { id: user.id }, data: { emailOtpFallback: formData.get("enabled") === "yes" } });
-  redirect("/admin/account/security?notice=email_otp");
-}
-
-async function acceptSecondFactor(user: { id: string; totpSecretEnc: string; recoveryHashes: string }, code: string) {
-  if (user.totpSecretEnc && verifyTotp(totpSecretOf(user), code)) return true;
-  const remaining = takeRecoveryCode(user.recoveryHashes, code);
-  if (remaining != null) {
-    await prisma.user.update({ where: { id: user.id }, data: { recoveryHashes: remaining } });
-    return true;
+export async function setEmailCodes(formData: FormData) {
+  const user = await requireUser();
+  if (loginCodeRequired(user.roleCodes, await getSettings())) redirect("/admin/account/security");
+  const enabled = formData.get("enabled") === "yes";
+  // Turning codes off takes the password, so an unattended session can't remove them.
+  if (!enabled) {
+    if (await tooManyCodes(user.id)) fail("/admin/account/security", "Too many attempts. Wait fifteen minutes and try again.");
+    if (!(await bcrypt.compare(String(formData.get("password") || ""), user.passwordHash))) fail("/admin/account/security", "That password doesn't match this account.");
   }
-  const hash = createHash("sha256").update(code.replace(/\s/g, "")).digest("hex");
-  const row = await prisma.loginCode.findFirst({
-    where: { userId: user.id, codeHash: hash, usedAt: null, expiresAt: { gt: new Date() } },
-    orderBy: { createdAt: "desc" },
-  });
-  if (!row) return false;
-  await prisma.loginCode.update({ where: { id: row.id }, data: { usedAt: new Date() } });
-  return true;
+  await prisma.user.update({ where: { id: user.id }, data: { emailCodeEnabled: enabled } });
+  await audit({ actorId: user.id, action: enabled ? "security.login_code_on" : "security.login_code_off", entityType: "User", entityId: user.id });
+  redirect(`/admin/account/security?notice=${enabled ? "codes_on" : "codes_off"}`);
 }
 
-export async function verifyLoginTotp(formData: FormData) {
+async function pendingUser() {
   const userId = await pendingUserId();
   if (!userId) fail("/login", "Sign in again, then enter the code.");
-  const user = await prisma.user.findUnique({ where: { id: userId! }, include: { roles: true } });
-  if (!user || !user.totpEnabled) redirect("/login");
-  if (!(await consumeRateLimit(`totp:${user.id}`, 5, 15 * 60 * 1000))) fail("/login/verify", "Too many codes. Wait fifteen minutes and try again.");
-  const code = String(formData.get("code") || "");
-  if (!(await acceptSecondFactor(user, code))) {
+  const user = await prisma.user.findUnique({ where: { id: userId }, include: { roles: true } });
+  if (!user || user.deletedAt || user.accountStatus !== "APPROVED") redirect("/login");
+  return user;
+}
+
+export async function verifyLoginCode(formData: FormData) {
+  const user = await pendingUser();
+  if (await tooManyCodes(user.id)) fail("/login/verify", "Too many codes. Wait fifteen minutes and try again.");
+  if (!(await takeLoginCode(user.id, String(formData.get("code") || "")))) {
     await audit({ actorId: null, action: "auth.second_factor_failed", entityType: "User", entityId: user.id });
-    fail("/login/verify", "That code is not current.");
+    fail("/login/verify", "That code is wrong or has expired.");
   }
   await clearPending();
-  await setSession(user);
+  await setSession(user, { secondFactor: true });
   await audit({ actorId: user.id, action: "auth.login", entityType: "User", entityId: user.id, after: { secondFactor: true } });
   redirect(homeFor(user.roles.map((role) => role.role)));
 }
 
-export async function sendEmailCode() {
-  const userId = await pendingUserId();
-  if (!userId) redirect("/login");
-  const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (!user?.totpEnabled || !user.emailOtpFallback) fail("/login/verify", "Email codes are off for this account.");
-  if (!(await consumeRateLimit(`email-otp:${user!.id}`, 3, 10 * 60 * 1000))) fail("/login/verify", "Wait a few minutes before another email code.");
-  const code = String(randomInt(0, 1_000_000)).padStart(6, "0");
-  const codeHash = createHash("sha256").update(code).digest("hex");
-  await prisma.loginCode.create({ data: { userId: user!.id, codeHash, expiresAt: new Date(Date.now() + 10 * 60 * 1000) } });
-  await notify(user!.email, "Your Lendhous sign-in code", `Your code is ${code}. It expires in ten minutes.`, { legal: true, eventCode: "security.login_code" });
-  redirect("/login/verify?notice=email_sent");
+export async function resendLoginCode() {
+  const user = await pendingUser();
+  redirect(LOGIN_CODE_PAGE[await issueLoginCode(user)]);
 }

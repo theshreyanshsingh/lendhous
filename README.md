@@ -5,7 +5,7 @@ GT's private lending platform, built from Product Spec v3 (`product-spec-v3.pdf`
 Three layers live here today:
 
 - **The public site.** The landing page at `/`, plus loan programs, investor guides, calculators, the deal-brief form, about and disclosures, under `app/(site)`. No page needs an account. It was rebuilt from the LendHous marketing site's export, on the brand kit's colors and fonts. Its styles are in `app/(site)/site.css`, scoped under `.site` so they never reach the panel. The Let's talk form saves each brief, alerts the team (every owner-admin, plus `TEAM_EMAIL`), and lists it for staff at `/admin/leads`.
-- **The panel.** Portal login on the site opens `/login`, and signing in opens the panel under `/admin`: the staff pipeline at `/admin`, `/admin/capital` and `/admin/deals`, `/admin/leads`, then `/admin/borrower`, `/admin/apply`, `/admin/partner` and `/admin/account/security`. Every page needs a signed-in account, and the account's role decides which section it opens. Their records still live in the browser. Demo seats (`@lendhous.test`) get a shared book of FAKE demo records. Every other account starts empty until B1 to B4 move the records into the database. The rates in `lib/pricing-config.ts` are still placeholders.
+- **The panel.** Portal login on the site opens `/login`, and signing in opens the panel under `/admin`: the staff pipeline at `/admin`, `/admin/capital` and `/admin/deals`, `/admin/leads`, then `/admin/borrower`, `/admin/apply`, `/admin/partner` and `/admin/account/security`. Every page needs a signed-in account, and the account's role decides which section it opens. Their records still live in the browser. Demo seats (`@lendhous.test`) get a shared book of FAKE demo records. Every other account starts empty until B1 to B4 move the records into the database, and can load the same FAKE book for itself with **Load sample data**. That copy stays with that account in that browser. Members and website leads are real database records. The rates in `lib/pricing-config.ts` are still placeholders.
 - **Milestone B0, the backend foundations.** Sign-in, two-factor, roles and permissions, field encryption, dual control, audit, storage, mail, jobs, health, and the release guard. Later milestones (B1 to B4) move the workspaces' records onto this backend one at a time.
 
 ## Run
@@ -42,18 +42,20 @@ The password for every seat is `Lendhous2026!`. They exist only in a seeded data
 | Borrower | alex.sample@lendhous.test |
 | Partner lender | pia.partner@lendhous.test (Demo Partner Capital A) |
 | Broker | bea.broker@lendhous.test |
+| Loan buyer | bella.buyer@lendhous.test |
 
 Each seat opens its own role's section of the panel. The demo records appear only for these seats, and seats share them in one browser, so a teaser sent as the owner reaches the partner seat. **Reset demo data** in the sidebar restores them. The broker seat has no workspace yet, so it opens the security page.
 
-Spec v3 10.1 requires two-factor for staff, partner and broker users. The demo seed turns that off (`PlatformSettings.requireStaffMfa = false`) so the seats sign in quickly; production keeps it on. Set up an authenticator at `/admin/account/security`.
+Spec v3 10.1 requires two-factor for staff, partner and broker users. They get a six-digit code by email at each sign-in. The demo seed turns that off (`PlatformSettings.requireStaffMfa = false`) so the seats sign in quickly; production keeps it on. Anyone else can turn codes on at `/admin/account/security`. Demo addresses take no mail, so their codes print in the server log.
 
 ## Tests
 
 ```bash
-npm test                        # 88 tests: pricing engine (Spec worked examples A–I), foundations, public site calculators and briefs, and MongoDB integration
+npm test                        # 119 tests: pricing engine (Spec worked examples A–I), foundations, loan buyer arithmetic, public site calculators and briefs, and MongoDB integration
 npm run build && npm start      # then, with the server up:
-npm run screenshots             # site and panel smoke test (62 checks: the public site, each demo seat and a temporary non-demo account) + screenshots into ./screenshots
-npm run smoke:auth              # sign-in, two-factor, recovery codes, rate limit, audit, cron, health (18 checks; needs db:seed)
+npm run screenshots             # site and panel smoke test (111 checks: the public site, each demo seat, the loan sale and members journeys, and a temporary non-demo account) + screenshots into ./screenshots
+npm run smoke:auth              # sign-in, emailed codes, the role requirement, rate limits, audit, cron, health (25 checks; needs db:seed)
+npm run phone:check             # every page at 320, 375, 430 and 768px wide: nothing sticks out and nothing scrolls sideways (needs db:seed)
 ```
 
 The integration tests start their own MongoDB 7.0 replica set (`mongodb-memory-server`), so they need no running database. The smoke scripts use Google Chrome; set `CHROME=/path/to/chrome` if it isn't in the default macOS or Linux location.
@@ -67,8 +69,10 @@ The integration tests start their own MongoDB 7.0 replica set (`mongodb-memory-s
 | `lib/pricing-config.ts`, `lib/engine.ts` | The pricing and underwriting engine and its one editable config file |
 | `lib/store.tsx`, `lib/mockData.ts` | The workspaces' browser state, and the FAKE demo book loaded only for demo seats |
 | `prisma/schema.prisma` | Data model: users, organizations, roles, permission overrides, sessions, audit, notifications, documents, approvals, settings, jobs |
-| `lib/auth.ts`, `lib/session.ts`, `actions/auth.ts`, `actions/security.ts` | Sessions (revocable, 30-minute staff idle timeout), sign-in, two-factor (ported from UPB) |
-| `lib/permissions.ts` | The 13 roles, permission keys with dollar limits, the default matrix. `RolePermission` rows override cells |
+| `lib/auth.ts`, `lib/session.ts`, `lib/login-code.ts`, `actions/auth.ts`, `actions/security.ts` | Sessions (revocable, 30-minute staff idle timeout), sign-in, emailed sign-in codes |
+| `lib/permissions.ts` | The 14 roles, permission keys with dollar limits, the default matrix. `RolePermission` rows override cells, and a person's `extraPermissions` and `deniedPermissions` override their roles |
+| `lib/members.ts`, `lib/member-rules.ts`, `actions/members.ts`, `app/admin/(staff)/members` | The members page: invite, change access, remove, and the one-time password link |
+| `lib/loan-sale.ts`, `app/admin/buyer`, `app/admin/(staff)/loan-sales` | Selling funded loans: the blind loan tape and yield math, the buyer's workspace, and the staff side |
 | `lib/crypto.ts` | AES-256-GCM field encryption with key ids for rotation, bound to field and row |
 | `lib/approvals.ts`, `lib/mongo-validators.ts` | Dual control: app rules, plus a MongoDB validator that rejects the same mistakes |
 | `lib/audit.ts` | Append-only audit events with before/after values, IP and request id; secrets are redacted |

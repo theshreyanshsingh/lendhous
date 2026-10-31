@@ -1,6 +1,7 @@
 // Release guard, ported from UPB Capital's lib/deploy.ts. A production build refuses to start on demo values,
 // a missing variable, or a database that belongs to another of GT's apps.
 import { parseFieldKeys, DEV_FIELD_KEY } from "./crypto";
+import { resolveMailTransport } from "./mail-config";
 
 export const DEMO_DOMAIN = "lendhous.test";
 export const DEV_AUTH_SECRET = "dev-only-lendhous-secret-change-me-2026";
@@ -13,6 +14,7 @@ export const DEMO_LOGINS = [
   { role: "Capital manager", email: `cam.capital@${DEMO_DOMAIN}` },
   { role: "Borrower", email: `alex.sample@${DEMO_DOMAIN}` },
   { role: "Partner lender", email: `pia.partner@${DEMO_DOMAIN}` },
+  { role: "Loan buyer", email: `bella.buyer@${DEMO_DOMAIN}` },
   { role: "Broker", email: `bea.broker@${DEMO_DOMAIN}` },
   { role: "Draw inspector", email: `ivan.inspector@${DEMO_DOMAIN}` },
 ];
@@ -80,6 +82,8 @@ export function assertReleaseEnv(env: Record<string, string | undefined>) {
     if (!env[key]) missing.push(key);
   }
   if (!remoteStorageConfigured(env)) missing.push("S3_BUCKET + S3_ACCESS_KEY_ID + S3_SECRET_ACCESS_KEY, or BLOB_READ_WRITE_TOKEN");
+  // Staff can't sign in without their emailed code, so mail isn't optional here.
+  if (resolveMailTransport(env) === "log") missing.push("RESEND_API_KEY + EMAIL_FROM, or SMTP_HOST + EMAIL_FROM");
   if (missing.length) throw new Error(`Production build is missing ${missing.join(", ")}.`);
   assertMongoUrl(env.DATABASE_URL);
   if ((env.AUTH_SECRET || "").length < 32 || env.AUTH_SECRET === DEV_AUTH_SECRET) {

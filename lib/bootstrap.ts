@@ -33,3 +33,11 @@ export async function bootstrapProduction(env: Record<string, string | undefined
   }
   await prisma.platformSettings.upsert({ where: { id: "default" }, create: { id: "default" }, update: {} });
 }
+
+/** Sign-in codes moved to email, so nothing reads the old authenticator secrets and recovery codes. Safe to run again. */
+export async function dropAuthenticatorData() {
+  await prisma.$runCommandRaw({
+    update: "User",
+    updates: [{ q: { totpSecretEnc: { $exists: true } }, u: { $unset: { totpSecretEnc: "", totpEnabled: "", recoveryHashes: "", recoveryRevealEnc: "" } }, multi: true }],
+  });
+}

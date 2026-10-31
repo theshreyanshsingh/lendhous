@@ -25,6 +25,7 @@ enum RoleCode {
   DRAW_ADMIN
   INSPECTOR
   PARTNER_LENDER
+  LOAN_BUYER
   BROKER
   CLOSING_AGENT
   AUDITOR
@@ -103,16 +104,16 @@ model User {
   passwordHash     String
   name             String
   phone            String        @default("")
+  title            String?
+  // Per-person changes to what the roles allow, set on the members page (lib/permissions.ts `can`).
+  extraPermissions  String[]
+  deniedPermissions String[]
   accountStatus    AccountStatus @default(PENDING)
   // Staff, partner, broker and title users belong to an organization; borrowers and guarantors do not.
   organizationId   String?
   organization     Organization? @relation(fields: [organizationId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  // Encrypted with lib/crypto.ts (UPB stores its TOTP secret in plain text; Lendhous does not).
-  totpSecretEnc    String        @default("")
-  totpEnabled      Boolean       @default(false)
-  recoveryHashes   String        @default("")
-  recoveryRevealEnc String       @default("")
-  emailOtpFallback Boolean       @default(false)
+  // Emailed sign-in codes are required for the roles in MFA_ROLES. This turns them on for anyone else.
+  emailCodeEnabled Boolean       @default(false) @map("emailOtpFallback")
   notifyEmail      Boolean       @default(true)
   notifyInApp      Boolean       @default(true)
   lastLoginAt      DateTime?
@@ -122,6 +123,7 @@ model User {
   roles            UserRole[]
   sessions         ServerSession[]
   loginCodes       LoginCode[]
+  passwordLinks    PasswordLink[]
   notifications    Notification[]
 }
 
@@ -158,6 +160,8 @@ model ServerSession {
   expiresAt  DateTime
   // Staff sessions end after the idle window in PlatformSettings (Spec v3 10.1, placeholder 30 minutes).
   lastSeenAt DateTime @default(now())
+  // Set when this session passed an emailed code. lib/auth.ts ends a session without one when the role requires it.
+  secondFactorAt DateTime?
   ipAddress  String   @default("")
   userAgent  String   @default("")
   createdAt  DateTime @default(now())
@@ -165,14 +169,28 @@ model ServerSession {
   @@index([expiresAt])
 }
 
+// One row per emailed code, deleted as soon as it is used (lib/login-code.ts).
 model LoginCode {
-  id        String    @id @default(uuid()) @map("_id")
+  id        String   @id @default(uuid()) @map("_id")
   userId    String
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   codeHash  String
   expiresAt DateTime
-  usedAt    DateTime?
-  createdAt DateTime  @default(now())
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// The one-time link a new member uses to set a password (lib/members.ts). Only the hash is stored.
+model PasswordLink {
+  id        String   @id @default(uuid()) @map("_id")
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
 }
 
 model RateWindow {

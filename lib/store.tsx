@@ -1,9 +1,9 @@
 "use client";
 import React, { createContext, useContext, useEffect, useMemo, useReducer } from "react";
 import { evaluate, capitalAvailable, type Application, type Estimate } from "./engine";
-import { seedDeals, seedBids, capitalSources, partners as seedPartners, BORROWER_ID, DEMO_PARTNER_ID, type Deal, type Bid, type Partner, type DocStatus, type CapitalSource } from "./mockData";
+import { seedDeals, seedBids, seedLoanSales, seedLoanOffers, capitalSources, partners as seedPartners, loanBuyers, BORROWER_ID, DEMO_PARTNER_ID, DEMO_BUYER_ID, type Deal, type Bid, type Partner, type DocStatus, type CapitalSource, type LoanBuyer, type LoanOffer, type LoanSale } from "./mockData";
 
-interface State { partnerId: string; deals: Deal[]; bids: Bid[]; partners: Partner[]; sources: CapitalSource[]; audit: { at: string; text: string }[] }
+interface State { partnerId: string; buyerId: string; deals: Deal[]; bids: Bid[]; partners: Partner[]; buyers: LoanBuyer[]; sales: LoanSale[]; offers: LoanOffer[]; sources: CapitalSource[]; audit: { at: string; text: string }[]; sample?: boolean }
 
 type Action =
   | { t: "submitApp"; app: Application; address: string; city: string; zip: string; entityName: string; exitStrategy: string }
@@ -15,11 +15,20 @@ type Action =
   | { t: "acceptBid"; bidId: string }
   | { t: "commit"; dealId: string }
   | { t: "signNda"; partnerId: string }
+  | { t: "signBuyerNda"; buyerId: string }
+  | { t: "listLoan"; dealId: string; askPct: number; paymentsMade: number }
+  | { t: "unlistLoan"; saleId: string }
+  | { t: "offerLoan"; saleId: string; buyerId: string; pricePct: number; note: string; atAsk: boolean }
+  | { t: "decideOffer"; offerId: string; accept: boolean }
+  | { t: "loadSample" }
+  | { t: "clearSample" }
   | { t: "reset" };
 
 const now = () => new Date().toISOString();
 // Demo seats share one demo book in the browser, so a bid placed as the partner seat shows up for the staff seats.
-const KEY = "lendhous-demo-v1";
+const KEY = "lendhous-demo-v2";
+// Any other account can load the same book for itself. It stays with that account, in that browser.
+const sampleKey = (accountId: string) => `lendhous-sample-v1:${accountId}`;
 /** Fixed, not now(): /admin is prerendered, so a load-time stamp would not match the server HTML (hydration error). */
 const SEED_AT = "2026-10-18T09:00:00-07:00";
 
@@ -28,17 +37,19 @@ function demoBook(): State {
     const e = evaluate(d.app);
     return { ...d, allocations: d.allocations.map((a) => ({ ...a, amount: a.amount || e.noteAmount })) };
   });
-  return { partnerId: DEMO_PARTNER_ID, deals, bids: seedBids, partners: seedPartners, sources: capitalSources, audit: [{ at: SEED_AT, text: "Demo data loaded (all records are FAKE)" }] };
+  return { partnerId: DEMO_PARTNER_ID, buyerId: DEMO_BUYER_ID, deals, bids: seedBids, partners: seedPartners, buyers: loanBuyers, sales: seedLoanSales, offers: seedLoanOffers, sources: capitalSources, audit: [{ at: SEED_AT, text: "Demo data loaded (all records are FAKE)" }] };
 }
 
-/** What a non-demo account sees until its records come from the database: nothing. */
-const emptyBook = (): State => ({ partnerId: "", deals: [], bids: [], partners: [], sources: [], audit: [] });
+/** What a non-demo account sees until its records come from the database, or it loads the sample book: nothing. */
+const emptyBook = (): State => ({ partnerId: "", buyerId: "", deals: [], bids: [], partners: [], buyers: [], sales: [], offers: [], sources: [], audit: [] });
 
 function reducer(s: State, a: Action): State {
   const log = (text: string) => [{ at: now(), text }, ...s.audit].slice(0, 50);
   const upd = (id: string, f: (d: Deal) => Deal) => s.deals.map((d) => (d.id === id ? f(d) : d));
   switch (a.t) {
     case "reset": return demoBook();
+    case "loadSample": return { ...demoBook(), sample: true };
+    case "clearSample": return emptyBook();
     case "submitApp": {
       const n = s.deals.length + 1;
       const d: Deal = { id: `d${Date.now()}`, loanNumber: `LH-DEMO-${1000 + n}`, borrowerId: BORROWER_ID, borrowerName: "Alex Sample (FAKE)", entityName: a.entityName || "Sample Flips LLC (FAKE)", address: a.address || "100 New Demo St", city: a.city || "Hollywood", zip: a.zip || "33020", app: a.app, status: "submitted", daysInStage: 0, capitalStatus: "not_started", allocations: [], teaserSentTo: [], source: "web_quote",
@@ -58,7 +69,7 @@ function reducer(s: State, a: Action): State {
       const inH = a.route === "in_house" ? L : a.route === "partner" ? 0 : Math.min(L, Math.max(0, a.inHouseAmount));
       const allocations = inH > 0 ? [{ sourceId: "gt-main", amount: inH }] : [];
       const capitalStatus = a.route === "in_house" ? "reserved" : deal.teaserSentTo.length ? deal.capitalStatus : "recommended";
-      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, route: a.route, allocations, capitalStatus })), audit: log(`${deal.loanNumber}: route set to ${a.route}${a.route === "split" ? ` (GT $${inH.toLocaleString()})` : ""}`) };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, route: a.route, allocations, capitalStatus })), audit: log(`${deal.loanNumber}: route set to ${a.route}${a.route === "split" ? ` (in-house $${inH.toLocaleString()})` : ""}`) };
     }
     case "sendTeaser": return { ...s, deals: upd(a.dealId, (d) => ({ ...d, teaserSentTo: Array.from(new Set([...d.teaserSentTo, ...a.partnerIds])), capitalStatus: d.capitalStatus === "not_started" || d.capitalStatus === "recommended" ? "teaser_out" : d.capitalStatus })), audit: log(`Blind teaser sent to ${a.partnerIds.length} partner(s)`) };
     case "bid": {
@@ -77,22 +88,52 @@ function reducer(s: State, a: Action): State {
     }
     case "commit": return { ...s, deals: upd(a.dealId, (d) => ({ ...d, capitalStatus: "committed" })), audit: log(`Capital committed (required before clear to close)`) };
     case "signNda": return { ...s, partners: s.partners.map((p) => (p.id === a.partnerId ? { ...p, ndaSigned: true } : p)), audit: log(`NDA / Non-Circumvention e-signed by ${a.partnerId} (demo)`) };
+    case "signBuyerNda": return { ...s, buyers: s.buyers.map((b) => (b.id === a.buyerId ? { ...b, ndaSigned: true } : b)), audit: log(`Loan buyer NDA e-signed by ${a.buyerId} (demo)`) };
+    case "listLoan": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      // A loan can be listed again after a withdrawal, so the sale's id has to be new each time.
+      const sale: LoanSale = { id: `s-${a.dealId}-${Date.now()}`, dealId: a.dealId, askPct: a.askPct, paymentsMade: a.paymentsMade, status: "listed", listedAt: now().slice(0, 10) };
+      return { ...s, sales: [sale, ...s.sales], audit: log(`${deal.loanNumber}: listed for sale at ${a.askPct}% of balance`) };
+    }
+    case "unlistLoan": {
+      const sale = s.sales.find((x) => x.id === a.saleId)!; const deal = s.deals.find((d) => d.id === sale.dealId)!;
+      return { ...s, sales: s.sales.map((x) => (x.id === a.saleId ? { ...x, status: "withdrawn" } : x)), offers: s.offers.map((o) => (o.saleId === a.saleId && o.status === "submitted" ? { ...o, status: "declined" } : o)), audit: log(`${deal.loanNumber}: sale withdrawn; open offers declined`) };
+    }
+    case "offerLoan": {
+      const sale = s.sales.find((x) => x.id === a.saleId)!; const deal = s.deals.find((d) => d.id === sale.dealId)!;
+      const offer: LoanOffer = { id: `offer${Date.now()}`, saleId: a.saleId, buyerId: a.buyerId, pricePct: a.pricePct, note: a.note, atAsk: a.atAsk, status: "submitted", at: now() };
+      return { ...s, offers: [offer, ...s.offers], audit: log(`${deal.loanNumber}: offer of ${a.pricePct}% from ${a.buyerId}`) };
+    }
+    case "decideOffer": {
+      const offer = s.offers.find((o) => o.id === a.offerId)!; const sale = s.sales.find((x) => x.id === offer.saleId)!; const deal = s.deals.find((d) => d.id === sale.dealId)!;
+      if (!a.accept) return { ...s, offers: s.offers.map((o) => (o.id === offer.id ? { ...o, status: "declined" } : o)), audit: log(`${deal.loanNumber}: offer from ${offer.buyerId} declined`) };
+      return { ...s,
+        offers: s.offers.map((o) => (o.id === offer.id ? { ...o, status: "accepted" } : o.saleId === offer.saleId && o.status === "submitted" ? { ...o, status: "declined" } : o)),
+        sales: s.sales.map((x) => (x.id === sale.id ? { ...x, status: "sold", soldTo: offer.buyerId, soldPct: offer.pricePct, soldAt: now().slice(0, 10) } : x)),
+        // The note leaves LendHous's books, which frees that capital to lend again.
+        deals: upd(deal.id, (d) => ({ ...d, allocations: [{ sourceId: `buyer:${offer.buyerId}`, amount: evaluate(d.app).noteAmount }] })),
+        audit: log(`${deal.loanNumber}: sold to ${offer.buyerId} at ${offer.pricePct}% of balance; other offers declined`) };
+    }
   }
 }
 
 const Ctx = createContext<{ s: State; dispatch: React.Dispatch<Action>; demo: boolean; viewerName: string } | null>(null);
 type Outer = Action | { t: "hydrate"; state: State };
 function outer(s: State, a: Outer): State { return a.t === "hydrate" ? a.state : reducer(s, a); }
-export function StoreProvider({ demo, viewerName, children }: { demo: boolean; viewerName: string; children: React.ReactNode }) {
+export function StoreProvider({ demo, accountId, viewerName, children }: { demo: boolean; accountId: string; viewerName: string; children: React.ReactNode }) {
   const [s, dispatch] = useReducer(outer, demo, (isDemo: boolean) => (isDemo ? demoBook() : emptyBook()));
   const [hydrated, setHydrated] = React.useState(false);
-  // Only demo seats read or write the saved demo book; any other account never sees it, even in the same browser.
+  // Demo seats share the saved demo book. Any other account never sees it, even in the same browser, and keeps only
+  // the sample book it loaded for itself.
+  const key = demo ? KEY : sampleKey(accountId);
   useEffect(() => {
-    if (!demo) return;
-    try { const raw = localStorage.getItem(KEY); if (raw) dispatch({ t: "hydrate", state: JSON.parse(raw) as State }); } catch {}
+    try { const raw = localStorage.getItem(key); if (raw) dispatch({ t: "hydrate", state: JSON.parse(raw) as State }); } catch {}
     setHydrated(true);
-  }, [demo]);
-  useEffect(() => { if (demo && hydrated) try { localStorage.setItem(KEY, JSON.stringify(s)); } catch {} }, [s, demo, hydrated]);
+  }, [key]);
+  useEffect(() => {
+    if (!hydrated) return;
+    try { if (demo || s.sample) localStorage.setItem(key, JSON.stringify(s)); else localStorage.removeItem(key); } catch {}
+  }, [s, demo, key, hydrated]);
   const value = useMemo(() => ({ s, dispatch: dispatch as React.Dispatch<Action>, demo, viewerName }), [s, demo, viewerName]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

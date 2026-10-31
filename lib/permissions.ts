@@ -14,6 +14,7 @@ export const ROLE_LABEL: Record<RoleCode, string> = {
   DRAW_ADMIN: "Draw admin",
   INSPECTOR: "Draw inspector",
   PARTNER_LENDER: "Partner lender",
+  LOAN_BUYER: "Loan buyer",
   BROKER: "Broker",
   CLOSING_AGENT: "Title / closing agent",
   AUDITOR: "Auditor (read-only)",
@@ -21,7 +22,8 @@ export const ROLE_LABEL: Record<RoleCode, string> = {
 
 export const STAFF_ROLES: ReadonlySet<RoleCode> = new Set(["ADMIN_OWNER", "UNDERWRITER", "PROCESSOR", "CAPITAL_MANAGER", "SERVICER", "DRAW_ADMIN", "INSPECTOR", "AUDITOR"]);
 // Spec v3 10.1: required for all staff, partner, and broker users. Closing agents use a magic link plus a code instead.
-export const MFA_ROLES: ReadonlySet<RoleCode> = new Set([...STAFF_ROLES, "PARTNER_LENDER", "BROKER"]);
+// Loan buyers see loan files and wire money, so they count with the partners.
+export const MFA_ROLES: ReadonlySet<RoleCode> = new Set([...STAFF_ROLES, "PARTNER_LENDER", "LOAN_BUYER", "BROKER"]);
 
 export const PERMISSIONS = {
   view_pipeline: "See every deal in the pipeline",
@@ -76,23 +78,30 @@ export function grantFor(roles: readonly RoleCode[], permission: Permission, ove
   return best;
 }
 
-export function can(roles: readonly RoleCode[], permission: Permission, options: { amountCents?: number; overrides?: Parameters<typeof grantFor>[2] } = {}) {
+/** One person's changes to what their roles allow, from the members page. */
+export type MemberAccess = { extraPermissions?: readonly string[]; deniedPermissions?: readonly string[] };
+
+export function can(roles: readonly RoleCode[], permission: Permission, options: { amountCents?: number; overrides?: Parameters<typeof grantFor>[2]; member?: MemberAccess } = {}) {
+  if (options.member?.deniedPermissions?.includes(permission)) return false;
   const grant = grantFor(roles, permission, options.overrides);
-  if (!grant.enabled) return false;
+  // A permission given to one person has no dollar limit of its own. A limit from their role still applies below.
+  if (!grant.enabled) return Boolean(options.member?.extraPermissions?.includes(permission));
   if (options.amountCents !== undefined && grant.limitCents != null) return options.amountCents <= grant.limitCents;
   return true;
 }
 
 export const isStaff = (roles: readonly RoleCode[]) => roles.some((role) => STAFF_ROLES.has(role));
 export const needsMfa = (roles: readonly RoleCode[]) => roles.some((role) => MFA_ROLES.has(role));
+export const loginCodeRequired = (roles: readonly RoleCode[], settings: { requireStaffMfa: boolean }) => needsMfa(roles) && settings.requireStaffMfa;
 
-export type View = "admin" | "partner" | "borrower";
-const VIEW_HOME: Record<View, string> = { admin: "/admin", partner: "/admin/partner", borrower: "/admin/borrower" };
+export type View = "admin" | "partner" | "buyer" | "borrower";
+export const VIEW_HOME: Record<View, string> = { admin: "/admin", partner: "/admin/partner", buyer: "/admin/buyer", borrower: "/admin/borrower" };
 
-/** The workspace an account opens. Staff outrank partner lenders, who outrank borrowers. */
+/** The workspace an account opens. Staff outrank partner lenders, then loan buyers, then borrowers. */
 export function viewFor(roles: readonly RoleCode[]): View | null {
   if (isStaff(roles)) return "admin";
   if (roles.includes("PARTNER_LENDER")) return "partner";
+  if (roles.includes("LOAN_BUYER")) return "buyer";
   if (roles.includes("BORROWER")) return "borrower";
   return null;
 }
