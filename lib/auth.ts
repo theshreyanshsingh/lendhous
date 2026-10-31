@@ -91,7 +91,7 @@ export async function requireUser(options: { allowWithoutMfa?: boolean } = {}) {
   if (!user) redirect("/login");
   if (user.accountStatus !== "APPROVED") redirect("/login?error=" + encodeURIComponent("This account is not active yet."));
   if (!options.allowWithoutMfa && needsMfa(user.roleCodes) && !user.totpEnabled && (await getSettings()).requireStaffMfa) {
-    redirect("/account/security?notice=mfa_required");
+    redirect("/admin/account/security?notice=mfa_required");
   }
   return user;
 }

@@ -113,8 +113,8 @@ describe("permission matrix (Spec v3 Section 1)", () => {
     expect(needsMfa(["PARTNER_LENDER"])).toBe(true);
     expect(needsMfa(["BROKER"])).toBe(true);
     expect(needsMfa(["BORROWER", "GUARANTOR"])).toBe(false);
-    expect(homeFor(["BORROWER"])).toBe("/borrower");
-    expect(homeFor(["PARTNER_LENDER"])).toBe("/partner");
+    expect(homeFor(["BORROWER"])).toBe("/admin/borrower");
+    expect(homeFor(["PARTNER_LENDER"])).toBe("/admin/partner");
     expect(homeFor(["INSPECTOR"])).toBe("/admin");
   });
   it("opens one workspace per account: staff before partner before borrower, none for brokers yet", () => {
@@ -122,7 +122,7 @@ describe("permission matrix (Spec v3 Section 1)", () => {
     expect(viewFor(["BORROWER", "PARTNER_LENDER"])).toBe("partner");
     expect(viewFor(["BORROWER"])).toBe("borrower");
     expect(viewFor(["BROKER"])).toBeNull();
-    expect(homeFor(["BROKER"])).toBe("/account/security");
+    expect(homeFor(["BROKER"])).toBe("/admin/account/security");
   });
   it("only the reserved demo domain counts as a demo account", () => {
     expect(isDemoEmail("Alex.Sample@LendHous.test")).toBe(true);

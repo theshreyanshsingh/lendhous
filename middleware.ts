@@ -17,5 +17,6 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/", "/apply/:path*", "/borrower/:path*", "/admin/:path*", "/partner/:path*", "/account/:path*"],
+  // The public site needs no account; everything signed-in lives under /admin.
+  matcher: ["/admin/:path*"],
 };

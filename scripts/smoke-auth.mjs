@@ -35,8 +35,8 @@ const page = await (await browser.newContext()).newPage();
 const errors = [];
 page.on("pageerror", (e) => errors.push(e.message));
 
-await page.goto(`${BASE}/account/security`);
-ok("security page sends a signed-out visitor to sign-in", page.url().includes("/login?next=%2Faccount%2Fsecurity"));
+await page.goto(`${BASE}/admin/account/security`);
+ok("security page sends a signed-out visitor to sign-in", page.url().includes("/login?next=%2Fadmin%2Faccount%2Fsecurity"));
 
 const signIn = async (password = PASSWORD) => {
   await page.goto(`${BASE}/login`);
@@ -52,7 +52,7 @@ await page.waitForURL("**/admin");
 ok("an underwriter lands on the pipeline", page.url().endsWith("/admin"));
 ok("the sidebar shows who is signed in", (await page.getByTestId("signed-in-as").innerText()).includes("Uma Underwriter"));
 
-await page.goto(`${BASE}/account/security`);
+await page.goto(`${BASE}/admin/account/security`);
 await page.getByRole("button", { name: "Set up authenticator" }).click();
 await page.waitForURL("**notice=totp");
 const secret = (await page.getByTestId("totp-secret").innerText()).trim();
@@ -70,7 +70,7 @@ const signOut = async () => {
   await page.waitForURL("**/login?notice=signed_out");
 };
 await signOut();
-ok("sign-out ends the session", (await page.goto(`${BASE}/account/security`), page.url().includes("/login")));
+ok("sign-out ends the session", (await page.goto(`${BASE}/admin/account/security`), page.url().includes("/login")));
 
 await signIn();
 await page.waitForURL("**/login/verify");

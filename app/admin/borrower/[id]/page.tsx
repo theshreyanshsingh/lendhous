@@ -14,7 +14,7 @@ export default function BorrowerLoan() {
   const { id } = useParams<{ id: string }>(); const { s, dispatch } = useStore();
   const d = s.deals.find((x) => x.id === id);
   const fileRef = useRef<HTMLInputElement>(null); const [target, setTarget] = useState<string | null>(null); const [drag, setDrag] = useState<string | null>(null);
-  if (!d) return <div className="glass p-6">Loan not found. <Link className="underline" href="/borrower">Back</Link></div>;
+  if (!d) return <div className="glass p-6">Loan not found. <Link className="underline" href="/admin/borrower">Back</Link></div>;
   const e = est(d.app); const funded = ["servicing_current", "servicing_delinquent", "funded", "matured"].includes(d.status);
   const b = fundedBalances(e, d.app, d.disbursedDraws);
   const keyRatios = e.ratios.filter((r) => ["ltc", "ltarv", "ltv", "dscr"].includes(r.key)); // flip: LTC/LTARV · bridge: LTV · DSCR: LTV/DSCR
@@ -22,7 +22,7 @@ export default function BorrowerLoan() {
   const cats = Array.from(new Set(d.docs.map((x) => x.category)));
   return (
     <div className="space-y-4">
-      <Link href="/borrower" className="text-sm text-link">← My loans</Link>
+      <Link href="/admin/borrower" className="text-sm text-link">← My loans</Link>
       <div className="glass p-5">
         <div className="flex flex-wrap items-start justify-between gap-2"><div><div className="text-xs text-muted-foreground">{d.loanNumber} · {productLabel[d.app.product]} · {d.entityName}</div><h1 className="text-xl font-normal tracking-tight">{d.address}, {d.city} {d.zip}</h1></div><Badge tone={funded ? "green" : "blue"}>{statusLabel(d.status)}</Badge></div>
         <div className="mt-4"><Tracker status={d.status} /></div>

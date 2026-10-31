@@ -36,7 +36,7 @@ export async function login(_prev: { error: string }, formData: FormData) {
   await setSession(user);
   await audit({ actorId: user.id, action: "auth.login", entityType: "User", entityId: user.id });
   const roles = user.roles.map((role) => role.role);
-  if (needsMfa(roles) && (await getSettings()).requireStaffMfa) redirect("/account/security?notice=mfa_required");
+  if (needsMfa(roles) && (await getSettings()).requireStaffMfa) redirect("/admin/account/security?notice=mfa_required");
   redirect(safeNext(String(formData.get("next") || ""), homeFor(roles)));
 }
 

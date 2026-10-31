@@ -8,3 +8,6 @@ screenshots
 .DS_Store
 .mongo-data
 storage
+# Brand and marketing-site reference copies; the app carries what it uses
+LendHous-Brand-Portfolio/
+LendHous-Netlify-Original-Favicon/

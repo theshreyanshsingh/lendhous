@@ -2,9 +2,10 @@
 
 GT's private lending platform, built from Product Spec v3 (`product-spec-v3.pdf`, kept outside this repo). It runs on the same stack and infrastructure as UPB Capital (`../upb-capital-source`): Next.js 15, React 19, TypeScript, Tailwind 4 and shadcn, Prisma on MongoDB, signed-cookie sessions, R2 or Vercel Blob for files, and Resend or SMTP for mail. The look follows the LendHous brand board: cream `#FAFBF8`, dark green `#202B28` and sage `#677D67`, Georgia for headings and Verdana for text, with near-square corners from the marketing site. The tokens are in `app/globals.css`; the browser and home-screen icons (`app/icon.png`, `app/apple-icon.png`) are the brand's "L" mark.
 
-Two layers live here today:
+Three layers live here today:
 
-- **The workspaces.** The borrower, staff and partner screens under `app/(app)`. Every one needs a signed-in account, and the account's role decides which workspace it opens. Their records still live in the browser. Demo seats (`@lendhous.test`) get a shared book of FAKE demo records. Every other account starts empty until B1 to B4 move the records into the database. The rates in `lib/pricing-config.ts` are still placeholders.
+- **The public site.** The landing page at `/`, plus loan programs, investor guides, calculators, the deal-brief form, about and disclosures, under `app/(site)`. No page needs an account. It was rebuilt from the LendHous marketing site's export, on the brand kit's colors and fonts. Its styles are in `app/(site)/site.css`, scoped under `.site` so they never reach the panel. The deal brief stays in the visitor's browser: nothing is sent to LendHous yet.
+- **The panel.** Portal login on the site opens `/login`, and signing in opens the panel under `/admin`: the staff pipeline at `/admin`, `/admin/capital` and `/admin/deals`, then `/admin/borrower`, `/admin/apply`, `/admin/partner` and `/admin/account/security`. Every page needs a signed-in account, and the account's role decides which section it opens. Their records still live in the browser. Demo seats (`@lendhous.test`) get a shared book of FAKE demo records. Every other account starts empty until B1 to B4 move the records into the database. The rates in `lib/pricing-config.ts` are still placeholders.
 - **Milestone B0, the backend foundations.** Sign-in, two-factor, roles and permissions, field encryption, dual control, audit, storage, mail, jobs, health, and the release guard. Later milestones (B1 to B4) move the workspaces' records onto this backend one at a time.
 
 ## Run
@@ -22,7 +23,7 @@ Then:
 cp .env.example .env          # local defaults work as is; set CRON_SECRET to try /api/cron
 npm install                   # postinstall runs prisma generate
 npm run db:seed               # drops the local database, syncs validators and indexes, adds the demo seats
-npm run dev                   # http://localhost:3000, sign in at /login
+npm run dev                   # http://localhost:3000 is the public site; Portal login opens /login
 ```
 
 `npm run db:indexes` syncs the MongoDB validators and indexes. It is safe to run again; the seed and release builds both run it. There are no migrations. As in UPB, never use `prisma db push`.
@@ -42,16 +43,16 @@ The password for every seat is `Lendhous2026!`. They exist only in a seeded data
 | Partner lender | pia.partner@lendhous.test (Demo Partner Capital A) |
 | Broker | bea.broker@lendhous.test |
 
-Each seat opens its own role's workspace. The demo records appear only for these seats, and seats share them in one browser, so a teaser sent as the owner reaches the partner seat. **Reset demo data** in the sidebar restores them. The broker seat has no workspace yet, so it opens the security page.
+Each seat opens its own role's section of the panel. The demo records appear only for these seats, and seats share them in one browser, so a teaser sent as the owner reaches the partner seat. **Reset demo data** in the sidebar restores them. The broker seat has no workspace yet, so it opens the security page.
 
-Spec v3 10.1 requires two-factor for staff, partner and broker users. The demo seed turns that off (`PlatformSettings.requireStaffMfa = false`) so the seats sign in quickly; production keeps it on. Set up an authenticator at `/account/security`.
+Spec v3 10.1 requires two-factor for staff, partner and broker users. The demo seed turns that off (`PlatformSettings.requireStaffMfa = false`) so the seats sign in quickly; production keeps it on. Set up an authenticator at `/admin/account/security`.
 
 ## Tests
 
 ```bash
-npm test                        # 75 tests: pricing engine (Spec worked examples A–I), foundations, and MongoDB integration
+npm test                        # 82 tests: pricing engine (Spec worked examples A–I), foundations, public site calculators, and MongoDB integration
 npm run build && npm start      # then, with the server up:
-npm run screenshots             # workspace smoke test (34 checks, as each demo seat and a temporary non-demo account) + screenshots into ./screenshots
+npm run screenshots             # site and panel smoke test (52 checks: the public site, each demo seat and a temporary non-demo account) + screenshots into ./screenshots
 npm run smoke:auth              # sign-in, two-factor, recovery codes, rate limit, audit, cron, health (18 checks; needs db:seed)
 ```
 
@@ -61,6 +62,8 @@ The integration tests start their own MongoDB 7.0 replica set (`mongodb-memory-s
 
 | Path | What |
 |---|---|
+| `app/(site)`, `lib/site-content.ts`, `lib/site-calculators.ts` | The public site: its pages, copy and educational calculators |
+| `app/admin` | The signed-in panel; each section's `layout.tsx` checks the role |
 | `lib/pricing-config.ts`, `lib/engine.ts` | The pricing and underwriting engine and its one editable config file |
 | `lib/store.tsx`, `lib/mockData.ts` | The workspaces' browser state, and the FAKE demo book loaded only for demo seats |
 | `prisma/schema.prisma` | Data model: users, organizations, roles, permission overrides, sessions, audit, notifications, documents, approvals, settings, jobs |

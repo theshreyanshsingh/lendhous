@@ -36,7 +36,7 @@ export default function Apply() {
   useEffect(() => { window.scrollTo({ top: 0 }); }, [step]);
   const ownerOcc = a.occupancy === "owner_occupied";
   const canNext = step !== 1 || !ownerOcc;
-  const submit = () => { dispatch({ t: "submitApp", app: a, address: addr.address, city: addr.city, zip: addr.zip, entityName: addr.entityName, exitStrategy: addr.exit }); router.push("/borrower"); };
+  const submit = () => { dispatch({ t: "submitApp", app: a, address: addr.address, city: addr.city, zip: addr.zip, entityName: addr.entityName, exitStrategy: addr.exit }); router.push("/admin/borrower"); };
 
   return (
     <div className="grid gap-5 pb-16 lg:grid-cols-[1fr_380px] lg:pb-0">

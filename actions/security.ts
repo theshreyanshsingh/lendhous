@@ -19,51 +19,51 @@ const fail = (path: string, message: string) => redirect(`${path}?error=${encode
 
 export async function beginTotp() {
   const user = await requireUser({ allowWithoutMfa: true });
-  if (user.totpEnabled) redirect("/account/security");
+  if (user.totpEnabled) redirect("/admin/account/security");
   const secret = generateTotpSecret();
   await prisma.user.update({ where: { id: user.id }, data: { totpSecretEnc: encryptField(secret, secretContext(user.id)), totpEnabled: false } });
-  redirect("/account/security?notice=totp");
+  redirect("/admin/account/security?notice=totp");
 }
 
 export async function confirmTotp(formData: FormData) {
   const user = await requireUser({ allowWithoutMfa: true });
   const code = String(formData.get("code") || "");
-  if (!user.totpSecretEnc || !verifyTotp(totpSecretOf(user), code)) fail("/account/security", "That code does not match the secret on this account.");
+  if (!user.totpSecretEnc || !verifyTotp(totpSecretOf(user), code)) fail("/admin/account/security", "That code does not match the secret on this account.");
   const codes = newRecoveryCodes();
   await prisma.user.update({
     where: { id: user.id },
     data: { totpEnabled: true, recoveryHashes: packHashes(codes), recoveryRevealEnc: encryptField(codes.join("\n"), revealContext(user.id)) },
   });
   await audit({ actorId: user.id, action: "security.totp_on", entityType: "User", entityId: user.id });
-  redirect("/account/security?notice=codes");
+  redirect("/admin/account/security?notice=codes");
 }
 
 export async function acknowledgeRecovery() {
   const user = await requireUser({ allowWithoutMfa: true });
   await prisma.user.update({ where: { id: user.id }, data: { recoveryRevealEnc: "" } });
-  redirect("/account/security?notice=totp_on");
+  redirect("/admin/account/security?notice=totp_on");
 }
 
 export async function disableTotp(formData: FormData) {
   const user = await requireUser({ allowWithoutMfa: true });
-  if (!(await consumeRateLimit(`totp:${user.id}`, 5, 15 * 60 * 1000))) fail("/account/security", "Too many codes. Wait fifteen minutes and try again.");
+  if (!(await consumeRateLimit(`totp:${user.id}`, 5, 15 * 60 * 1000))) fail("/admin/account/security", "Too many codes. Wait fifteen minutes and try again.");
   const code = String(formData.get("code") || "");
   const recovery = takeRecoveryCode(user.recoveryHashes, code);
   const ok = (user.totpSecretEnc && verifyTotp(totpSecretOf(user), code)) || recovery != null;
-  if (!user.totpEnabled || !ok) fail("/account/security", "Enter a current code or a recovery code to turn this off.");
+  if (!user.totpEnabled || !ok) fail("/admin/account/security", "Enter a current code or a recovery code to turn this off.");
   await prisma.user.update({
     where: { id: user.id },
     data: { totpEnabled: false, totpSecretEnc: "", recoveryHashes: "", recoveryRevealEnc: "", emailOtpFallback: false },
   });
   await audit({ actorId: user.id, action: "security.totp_off", entityType: "User", entityId: user.id });
-  redirect("/account/security?notice=totp_off");
+  redirect("/admin/account/security?notice=totp_off");
 }
 
 export async function setEmailFallback(formData: FormData) {
   const user = await requireUser({ allowWithoutMfa: true });
-  if (!user.totpEnabled) redirect("/account/security");
+  if (!user.totpEnabled) redirect("/admin/account/security");
   await prisma.user.update({ where: { id: user.id }, data: { emailOtpFallback: formData.get("enabled") === "yes" } });
-  redirect("/account/security?notice=email_otp");
+  redirect("/admin/account/security?notice=email_otp");
 }
 
 async function acceptSecondFactor(user: { id: string; totpSecretEnc: string; recoveryHashes: string }, code: string) {

@@ -32,7 +32,7 @@ export default function PartnerFeed() {
           const won = myBid?.status === "accepted"; const lost = !won && s.bids.some((b) => b.dealId === d.id && b.status === "accepted");
           const m = matchPartner(me.buyBox, { product: d.app.product, state: d.app.state, noteAmount: t.noteAmount, ltarv: t.ratios.find((r) => r.key === "ltarv")?.actual, ltv: t.ratios.find((r) => r.key === "ltv")?.actual, fico: d.app.fico, tier: t.tier, rate: t.rate });
           return (
-            <Link key={d.id} href={`/partner/teasers/${d.id}`} className="glass block p-5 transition-colors hover:border-faint" data-testid="teaser-card">
+            <Link key={d.id} href={`/admin/partner/teasers/${d.id}`} className="glass block p-5 transition-colors hover:border-faint" data-testid="teaser-card">
               <div className="flex items-start justify-between"><div><div className="text-xs text-muted-foreground">{t.teaserId} · {productLabel[t.product]}</div><div className="text-lg font-semibold">{t.county} County · ZIP {t.zip3}</div></div><GradeBadge grade={t.grade} score={t.score} /></div>
               <div className="mt-1 text-2xl font-semibold tracking-tight text-foreground">{usd(t.noteAmount)}</div>
               <div className="text-sm text-muted-foreground">Lender yield {t.lenderYieldOffered.toFixed(2)}% · {t.termMonths} mo · exit: {t.exit}</div>

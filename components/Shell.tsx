@@ -16,11 +16,11 @@ type NavItem = { href: string; label: string; icon: LucideIcon; section?: string
 // Layout follows UPB Capital's AppShell: fixed left sidebar on desktop, a sheet on mobile. The signed-in
 // account's role picks the workspace; there is no switching between them.
 const nav: Record<View, NavItem[]> = {
-  borrower: [{ href: "/borrower", label: "My loans", icon: LayoutDashboard }, { href: "/apply", label: "New application", icon: FilePlus }],
+  borrower: [{ href: "/admin/borrower", label: "My loans", icon: LayoutDashboard }, { href: "/admin/apply", label: "New application", icon: FilePlus }],
   admin: [{ href: "/admin", label: "Pipeline", icon: ClipboardList }, { href: "/admin/capital", label: "Capital", icon: Landmark, section: "Money" }],
-  partner: [{ href: "/partner", label: "Deal feed", icon: BookOpen }],
+  partner: [{ href: "/admin/partner", label: "Deal feed", icon: BookOpen }],
 };
-const home: Record<View, string> = { borrower: "/borrower", admin: "/admin", partner: "/partner" };
+const home: Record<View, string> = { borrower: "/admin/borrower", admin: "/admin", partner: "/admin/partner" };
 
 function active(path: string, href: string) {
   if (href === "/admin") return path === "/admin" || path.startsWith("/admin/deals");
@@ -33,8 +33,8 @@ export default function Shell({ children, account, view }: { children: React.Rea
   const path = usePathname();
   const [open, setOpen] = useState(false);
   useEffect(() => setOpen(false), [path]);
-  const items: NavItem[] = [...(view ? nav[view] : []), { href: "/account/security", label: "Security", icon: Lock, section: "Account" }];
-  const logoHref = view ? home[view] : "/account/security";
+  const items: NavItem[] = [...(view ? nav[view] : []), { href: "/admin/account/security", label: "Security", icon: Lock, section: "Account" }];
+  const logoHref = view ? home[view] : "/admin/account/security";
   return (
     <div className="min-h-screen">
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-72 flex-col border-r border-sidebar-border bg-sidebar px-3 pt-3.5 pb-3 md:flex">

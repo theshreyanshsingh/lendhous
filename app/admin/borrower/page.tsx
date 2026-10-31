@@ -15,7 +15,7 @@ export default function BorrowerHome() {
     <div className="space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-2">
         <PageIntro eyebrow="Welcome back" title={viewerName} lede="Your applications and funded loans. Open one to see its next step and upload documents." />
-        <Link href="/apply" className="btn-primary mb-6">+ Start a new loan</Link>
+        <Link href="/admin/apply" className="btn-primary mb-6">+ Start a new loan</Link>
       </div>
       {tasks.length > 0 && <div className="glass border-warn/30 bg-warn/12 p-4 text-sm text-warn"><b>{tasks.length} document{tasks.length > 1 ? "s" : ""} needed</b> across your loans. Open a loan to upload.</div>}
       {mine.length === 0 && <div className="glass p-6 text-sm text-muted-foreground" data-testid="no-loans">No loans yet. Start an application to get an instant estimate.</div>}
@@ -25,7 +25,7 @@ export default function BorrowerHome() {
           const open = d.docs.filter((x) => x.status === "requested" || x.status === "rejected").length;
           const b = fundedBalances(e, d.app, d.disbursedDraws);
           return (
-            <Link key={d.id} href={`/borrower/${d.id}`} className="glass block p-5 transition-colors hover:border-faint" data-testid="borrower-loan-card">
+            <Link key={d.id} href={`/admin/borrower/${d.id}`} className="glass block p-5 transition-colors hover:border-faint" data-testid="borrower-loan-card">
               <div className="flex items-start justify-between gap-2">
                 <div><div className="text-xs text-muted-foreground">{d.loanNumber} · {productLabel[d.app.product]}</div><div className="text-lg font-semibold">{d.address}, {d.city}</div></div>
                 <Badge tone={funded ? "green" : "blue"}>{statusLabel(d.status)}</Badge>

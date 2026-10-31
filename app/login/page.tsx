@@ -1,14 +1,20 @@
+import { redirect } from "next/navigation";
 import { LoginPanel } from "@/components/auth-forms";
 import { Logo } from "@/components/logo";
 import { Notice } from "@/components/notice";
+import { getCurrentUser } from "@/lib/auth";
 import { DEMO_EMAILS, DEMO_LOGINS, DEV_DEMO_PASSWORD, showDemoDesk } from "@/lib/deploy";
 import { q } from "@/lib/format";
+import { homeFor } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 
 export const metadata = { title: "Sign in" };
 export const dynamic = "force-dynamic";
 
 export default async function LoginPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
+  // Portal login on the public site goes straight to the panel for someone who is already signed in.
+  const user = await getCurrentUser();
+  if (user?.accountStatus === "APPROVED") redirect(homeFor(user.roleCodes));
   const params = await searchParams;
   const demoAccounts = await prisma.user.count({ where: { email: { in: DEMO_EMAILS } } }).catch(() => 0);
   const demo = showDemoDesk(process.env, demoAccounts) ? { password: DEV_DEMO_PASSWORD, accounts: DEMO_LOGINS } : undefined;
