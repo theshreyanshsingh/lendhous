@@ -57,6 +57,12 @@ pm2 start node_modules/.bin/tsx --name lendhous-jobs --cron-restart "0 6 * * *" 
 pm2 save
 ```
 
+To update it later. The build regenerates the database client and syncs the indexes, so schema changes need no extra step. Use `npm ci` first if `package.json` changed.
+
+```bash
+git pull && LENDHOUS_RELEASE=1 npm run build && pm2 restart lendhous
+```
+
 Session cookies are https-only in production. Only on an internal server reached over plain http, set `ALLOW_HTTP_SESSIONS="1"` (release builds refuse it).
 
 ## Still outside this repo
