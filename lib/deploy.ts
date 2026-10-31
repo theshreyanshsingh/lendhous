@@ -82,7 +82,7 @@ export function assertReleaseEnv(env: Record<string, string | undefined>) {
     if (!env[key]) missing.push(key);
   }
   if (!remoteStorageConfigured(env)) missing.push("S3_BUCKET + S3_ACCESS_KEY_ID + S3_SECRET_ACCESS_KEY, or BLOB_READ_WRITE_TOKEN");
-  // Staff can't sign in without their emailed code, so mail isn't optional here.
+  // Without mail, forgot-password links would land in the server log, so mail isn't optional here.
   if (resolveMailTransport(env) === "log") missing.push("RESEND_API_KEY + EMAIL_FROM, or SMTP_HOST + EMAIL_FROM");
   if (missing.length) throw new Error(`Production build is missing ${missing.join(", ")}.`);
   assertMongoUrl(env.DATABASE_URL);

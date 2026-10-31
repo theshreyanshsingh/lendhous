@@ -3,7 +3,6 @@
 import { SignJWT, jwtVerify } from "jose";
 
 export const SESSION_COOKIE = "lh_session";
-export const PENDING_COOKIE = "lh_2fa";
 export const SESSION_DAYS = 14;
 
 export type SessionToken = {
@@ -27,25 +26,6 @@ export async function signSession(payload: SessionToken) {
     .setIssuedAt()
     .setExpirationTime(`${SESSION_DAYS}d`)
     .sign(secret());
-}
-
-export async function signPending(sub: string) {
-  return new SignJWT({ purpose: "2fa" })
-    .setProtectedHeader({ alg: "HS256" })
-    .setSubject(sub)
-    .setIssuedAt()
-    .setExpirationTime("10m")
-    .sign(secret());
-}
-
-export async function verifyPending(token: string) {
-  try {
-    const { payload } = await jwtVerify(token, secret());
-    if (payload.purpose !== "2fa" || !payload.sub) return null;
-    return payload.sub;
-  } catch {
-    return null;
-  }
 }
 
 export async function verifySession(token: string): Promise<SessionToken | null> {

@@ -78,12 +78,11 @@ describe("soft delete and team alerts", () => {
   });
 });
 
-describe("emailed sign-in codes", () => {
+describe("mailing a password link", () => {
   type Sent = { url: string; to: string[]; from: string; text: string };
+  const LINK = "https://portal.example.com/login/set-password?token=live-token";
   let sent: Sent[];
-  let login: typeof import("@/lib/login-code");
-  let user: { id: string; email: string };
-  const lastCode = () => sent.at(-1)!.text.match(/\b\d{6}\b/)![0];
+  let email: typeof import("@/lib/email");
   const stubResend = (status: number) =>
     vi.stubGlobal("fetch", async (url: string, init: { body: string }) => {
       sent.push({ url, ...JSON.parse(init.body) });
@@ -91,17 +90,13 @@ describe("emailed sign-in codes", () => {
     });
 
   beforeAll(async () => {
-    process.env.AUTH_SECRET = "x".repeat(40);
-    login = await import("@/lib/login-code");
-    user = await prisma.user.create({ data: { email: "uma@lendhous.com", name: "Uma", passwordHash: "x", accountStatus: "APPROVED" } });
+    email = await import("@/lib/email");
   });
-  beforeEach(async () => {
+  beforeEach(() => {
     process.env.RESEND_API_KEY = "re_test";
     process.env.EMAIL_FROM = "LendHous <noreply@synergifund.com>";
     sent = [];
     stubResend(200);
-    (await import("@/lib/rate-limit")).resetRateLimits();
-    await prisma.loginCode.deleteMany();
   });
   afterEach(() => {
     delete process.env.RESEND_API_KEY;
@@ -110,59 +105,51 @@ describe("emailed sign-in codes", () => {
     vi.restoreAllMocks();
   });
 
-  it("mails the code through Resend, and the code works once", async () => {
-    expect(await login.issueLoginCode(user)).toBe("sent");
+  it("mails it through Resend and keeps it out of the notifications", async () => {
+    expect(await email.sendPasswordLink("uma@lendhous.com", LINK, "self")).toBe("sent");
     expect(sent[0]).toMatchObject({ url: "https://api.resend.com/emails", to: ["uma@lendhous.com"], from: "LendHous <noreply@synergifund.com>" });
-    expect(await login.takeLoginCode(user.id, ` ${lastCode().slice(0, 3)} ${lastCode().slice(3)} `)).toBe(true);
-    expect(await login.takeLoginCode(user.id, lastCode())).toBe(false);
-    expect(await prisma.notification.count({ where: { toEmail: user.email } })).toBe(0);
+    expect(sent[0].text).toContain(LINK);
+    expect(await prisma.notification.count({ where: { toEmail: "uma@lendhous.com" } })).toBe(0);
   });
-  it("refuses a wrong code, another account's code and an expired code", async () => {
-    await login.issueLoginCode(user);
-    const code = lastCode();
-    expect(await login.takeLoginCode(user.id, code === "000000" ? "000001" : "000000")).toBe(false);
-    expect(await login.takeLoginCode("someone-else", code)).toBe(false);
-    await prisma.loginCode.updateMany({ where: { userId: user.id }, data: { expiresAt: new Date(Date.now() - 1) } });
-    expect(await login.takeLoginCode(user.id, code)).toBe(false);
-  });
-  it("using a code retires the others sent to that account", async () => {
-    await login.issueLoginCode(user);
-    const first = lastCode();
-    await login.issueLoginCode(user);
-    expect(await login.takeLoginCode(user.id, lastCode())).toBe(true);
-    expect(await login.takeLoginCode(user.id, first)).toBe(false);
-  });
-  it("when Resend refuses, says so, keeps no code and logs no code", async () => {
+  it("when Resend refuses, says so and logs no link", async () => {
     stubResend(401);
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
-    expect(await login.issueLoginCode(user)).toBe("failed");
-    expect(await prisma.loginCode.count({ where: { userId: user.id } })).toBe(0);
+    expect(await email.sendPasswordLink("uma@lendhous.com", LINK, "self")).toBe("failed");
     expect(error).toHaveBeenCalled();
-    expect(JSON.stringify([...error.mock.calls, ...info.mock.calls], (_key, value) => (value instanceof Error ? value.message : value))).not.toContain(lastCode());
+    expect(JSON.stringify([...error.mock.calls, ...info.mock.calls], (_key, value) => (value instanceof Error ? value.message : value))).not.toContain("live-token");
   });
-  it("stops mailing after five codes in ten minutes", async () => {
-    for (let i = 0; i < 5; i++) expect(await login.issueLoginCode(user)).toBe("sent");
-    expect(await login.issueLoginCode(user)).toBe("limited");
-    expect(sent).toHaveLength(5);
-  });
-  it("leaves a demo address's code in the server log, not with Resend", async () => {
+  it("leaves a demo address's link in the server log, not with Resend", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
-    expect(await login.issueLoginCode({ id: user.id, email: "uma.underwriter@lendhous.test" })).toBe("sent");
+    expect(await email.sendPasswordLink("uma.underwriter@lendhous.test", LINK, "self")).toBe("logged");
     expect(sent).toHaveLength(0);
-    expect(String(info.mock.calls[0][0])).toMatch(/sign-in code is \d{6}/);
+    expect(String(info.mock.calls[0][0])).toContain("live-token");
   });
-  it("the release build clears old authenticator data and keeps the sign-in code setting", async () => {
-    const { dropAuthenticatorData } = await import("@/lib/bootstrap");
-    await prisma.user.update({ where: { id: user.id }, data: { emailCodeEnabled: true } });
-    await prisma.$runCommandRaw({ update: "User", updates: [{ q: { _id: user.id }, u: { $set: { totpSecretEnc: "enc", totpEnabled: true, recoveryHashes: "h", recoveryRevealEnc: "r" } } }] });
-    await dropAuthenticatorData();
-    await dropAuthenticatorData();
-    const raw = (await prisma.$runCommandRaw({ find: "User", filter: { _id: user.id } })) as { cursor: { firstBatch: Record<string, unknown>[] } };
-    const doc = raw.cursor.firstBatch[0];
-    for (const field of ["totpSecretEnc", "totpEnabled", "recoveryHashes", "recoveryRevealEnc"]) expect(doc).not.toHaveProperty(field);
-    expect(doc.emailOtpFallback).toBe(true);
-    expect((await prisma.user.findUniqueOrThrow({ where: { id: user.id } })).emailCodeEnabled).toBe(true);
+});
+
+describe("the release build's cleanup", () => {
+  const rawDoc = async (collection: string, id: string) => ((await prisma.$runCommandRaw({ find: collection, filter: { _id: id } })) as { cursor: { firstBatch: Record<string, unknown>[] } }).cursor.firstBatch[0];
+  it("clears what two-factor left behind, runs twice, and leaves people signed in", async () => {
+    const { dropSecondFactorData } = await import("@/lib/bootstrap");
+    const user = await prisma.user.create({ data: { email: "signed.in@lendhous.com", name: "Signed In", passwordHash: "x", accountStatus: "APPROVED" } });
+    await prisma.serverSession.create({ data: { id: "open-session", userId: user.id, expiresAt: new Date(Date.now() + 60_000) } });
+    await prisma.platformSettings.upsert({ where: { id: "default" }, create: { id: "default" }, update: {} });
+    await prisma.$runCommandRaw({ update: "User", updates: [{ q: { _id: user.id }, u: { $set: { totpSecretEnc: "enc", totpEnabled: true, recoveryHashes: "h", recoveryRevealEnc: "r", emailOtpFallback: true } } }] });
+    await prisma.$runCommandRaw({ update: "ServerSession", updates: [{ q: { _id: "open-session" }, u: { $set: { secondFactorAt: { $date: new Date().toISOString() } } } }] });
+    await prisma.$runCommandRaw({ update: "PlatformSettings", updates: [{ q: { _id: "default" }, u: { $set: { requireStaffMfa: true } } }] });
+    await prisma.$runCommandRaw({ insert: "LoginCode", documents: [{ _id: "old-code", userId: user.id, codeHash: "h" }] });
+
+    await dropSecondFactorData();
+    await dropSecondFactorData();
+
+    const account = await rawDoc("User", user.id);
+    for (const field of ["totpSecretEnc", "totpEnabled", "recoveryHashes", "recoveryRevealEnc", "emailOtpFallback"]) expect(account).not.toHaveProperty(field);
+    expect(account.email).toBe("signed.in@lendhous.com");
+    expect(await rawDoc("ServerSession", "open-session")).not.toHaveProperty("secondFactorAt");
+    expect(await prisma.serverSession.count({ where: { id: "open-session" } })).toBe(1);
+    expect(await rawDoc("PlatformSettings", "default")).not.toHaveProperty("requireStaffMfa");
+    const collections = (await prisma.$runCommandRaw({ listCollections: 1, filter: { name: "LoginCode" } })) as { cursor: { firstBatch: unknown[] } };
+    expect(collections.cursor.firstBatch).toHaveLength(0);
   });
 });
 

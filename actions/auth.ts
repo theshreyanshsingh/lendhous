@@ -3,16 +3,15 @@
 import bcrypt from "bcryptjs";
 import { redirect } from "next/navigation";
 import { audit } from "@/lib/audit";
-import { clearSession, getCurrentUser, setPending, setSession } from "@/lib/auth";
-import { issueLoginCode, LOGIN_CODE_PAGE } from "@/lib/login-code";
-import { homeFor, loginCodeRequired } from "@/lib/permissions";
+import { clearSession, getCurrentUser, setSession } from "@/lib/auth";
+import { homeFor } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import { requestMeta } from "@/lib/request-meta";
-import { getSettings } from "@/lib/settings";
 
+// Browsers read a backslash as a slash and drop tabs and newlines, so any of these can turn a path into another site.
 function safeNext(value: string, fallback: string) {
-  if (value.startsWith("/") && !value.startsWith("//")) return value;
+  if (value.startsWith("/") && !value.startsWith("//") && !/[\\\s]/.test(value)) return value;
   return fallback;
 }
 
@@ -30,14 +29,9 @@ export async function login(_prev: { error: string }, formData: FormData) {
   }
   if (user.accountStatus === "PENDING") return { error: "This account is waiting for approval." };
   if (user.accountStatus !== "APPROVED") return { error: "This account is not active. Contact the Lendhous team." };
-  const roles = user.roles.map((role) => role.role);
-  if (user.emailCodeEnabled || loginCodeRequired(roles, await getSettings())) {
-    await setPending(user.id);
-    redirect(LOGIN_CODE_PAGE[await issueLoginCode(user)]);
-  }
   await setSession(user);
   await audit({ actorId: user.id, action: "auth.login", entityType: "User", entityId: user.id });
-  redirect(safeNext(String(formData.get("next") || ""), homeFor(roles)));
+  redirect(safeNext(String(formData.get("next") || ""), homeFor(user.roles.map((role) => role.role))));
 }
 
 export async function logout() {

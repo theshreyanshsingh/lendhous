@@ -47,9 +47,7 @@ async function main() {
       },
     });
   }
-  // Demo convenience only: staff and partner seats can sign in without an emailed code. Production bootstrap
-  // leaves the default (required). Turn it back on in the demo with requireStaffMfa: true.
-  await prisma.platformSettings.create({ data: { id: "default", requireStaffMfa: false } });
+  await prisma.platformSettings.create({ data: { id: "default" } });
   await prisma.lead.createMany({
     data: [
       { name: "Dana Sample (FAKE)", email: "dana.sample@example.org", phone: "(555) 010-0142", strategy: "Fix & flip", experience: "3 to 5 projects", city: "Dallas", state: "TX", propertyValueCents: 31_500_000, renovationCents: 8_000_000, requestedLoanCents: 29_000_000, targetClosing: "Within 30 days", notes: "Three-bed in Oak Cliff. Cosmetic rehab, then sell." },

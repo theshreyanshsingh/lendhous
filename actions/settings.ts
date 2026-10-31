@@ -16,14 +16,13 @@ export async function saveSettings(formData: FormData) {
   const actor = await requirePermission("manage_roles");
   const before = await getSettings();
   const data = {
-    requireStaffMfa: formData.get("requireStaffMfa") === "on",
     offerSampleData: formData.get("offerSampleData") === "on",
     staffIdleMinutes: clamp(formData.get("staffIdleMinutes"), 5, 480, before.staffIdleMinutes),
     retentionYears: clamp(formData.get("retentionYears"), 1, 30, before.retentionYears),
   };
   await prisma.platformSettings.upsert({ where: { id: "default" }, create: { id: "default", ...data }, update: data });
   resetSettingsCache();
-  await audit({ actorId: actor.id, action: "settings.updated", entityType: "PlatformSettings", entityId: "default", before: { requireStaffMfa: before.requireStaffMfa, offerSampleData: before.offerSampleData, staffIdleMinutes: before.staffIdleMinutes, retentionYears: before.retentionYears }, after: data });
+  await audit({ actorId: actor.id, action: "settings.updated", entityType: "PlatformSettings", entityId: "default", before: { offerSampleData: before.offerSampleData, staffIdleMinutes: before.staffIdleMinutes, retentionYears: before.retentionYears }, after: data });
   revalidatePath("/admin", "layout");
   redirect("/admin/settings?notice=settings_saved");
 }

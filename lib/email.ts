@@ -55,7 +55,7 @@ export async function notify(toEmail: string, subject: string, body: string, opt
 }
 
 /**
- * For mail that carries something live, a sign-in code or a password link. It skips notify(), so the secret never sits
+ * For mail that carries something live, a password link. It skips notify(), so the secret never sits
  * in the notifications table or, when delivery fails, in the log. Returns how it went so the screen can say so.
  */
 async function sendSecret(toEmail: string, subject: string, body: string): Promise<"sent" | "logged" | "failed"> {
@@ -71,11 +71,6 @@ async function sendSecret(toEmail: string, subject: string, body: string): Promi
     console.error(`[lendhous-mail] ${transport} failed for ${toEmail}:`, error);
     return "failed";
   }
-}
-
-export async function sendLoginCode(toEmail: string, code: string) {
-  const outcome = await sendSecret(toEmail, "Your LendHous sign-in code", `Your LendHous sign-in code is ${code}. It expires in ten minutes.\n\nIf you didn't try to sign in, someone may have your password. Contact your LendHous administrator.`);
-  return outcome !== "failed";
 }
 
 export function sendPasswordLink(toEmail: string, link: string, reason: { invitedBy: string; roles: string } | "admin" | "self") {

@@ -20,10 +20,6 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
       <Notice notice={q(params, "notice")} error={q(params, "error")} />
       <form action={saveSettings} className="glass min-w-0 space-y-5 p-5" data-testid="settings-form">
         <label className="flex items-start gap-3 text-sm">
-          <input type="checkbox" name="requireStaffMfa" data-testid="setting-mfa" className="mt-1" defaultChecked={settings.requireStaffMfa} />
-          <span><b className="font-medium">Require emailed sign-in codes</b><small className="block text-xs text-muted-foreground">For staff, partners, brokers and loan buyers. Turn this off only if mail is down. Turning it back on ends every session opened without a code.</small></span>
-        </label>
-        <label className="flex items-start gap-3 text-sm">
           <input type="checkbox" name="offerSampleData" data-testid="setting-sample" className="mt-1" defaultChecked={settings.offerSampleData !== false} />
           <span><b className="font-medium">Offer sample data</b><small className="block text-xs text-muted-foreground">Accounts with no loans see a button to load fake data in their browser. Turn this off before real clients sign in.</small></span>
         </label>

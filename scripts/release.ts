@@ -16,9 +16,9 @@ async function main() {
   const validators = await syncValidators(prisma);
   const indexes = await syncIndexes(prisma);
   console.log(`Validators in sync: ${validators}. Indexes in sync: ${indexes.indexes} declared, ${indexes.created} created or rebuilt.`);
-  const { bootstrapProduction, dropAuthenticatorData } = await import("../lib/bootstrap");
+  const { bootstrapProduction, dropSecondFactorData } = await import("../lib/bootstrap");
   await bootstrapProduction(process.env);
-  await dropAuthenticatorData();
+  await dropSecondFactorData();
   await prisma.$disconnect();
 }
 

@@ -4,7 +4,7 @@ import { sessionExpired } from "@/lib/auth";
 import { decryptField, DEV_FIELD_KEY, encryptField, last4, needsRotation, parseFieldKeys } from "@/lib/crypto";
 import { assertMongoUrl, assertReleaseEnv, demoSeedBlocked, DEV_AUTH_SECRET, DEV_DEMO_PASSWORD, isDemoEmail, secureCookies } from "@/lib/deploy";
 import { accessChanges, accessError, accessFor, removeError } from "@/lib/member-rules";
-import { can, grantFor, homeFor, loginCodeRequired, needsMfa, viewFor } from "@/lib/permissions";
+import { can, grantFor, homeFor, viewFor } from "@/lib/permissions";
 import { rateLimit, resetRateLimits } from "@/lib/rate-limit";
 
 const key = (id: string, fill: number) => `${id}:${Buffer.alloc(32, fill).toString("base64")}`;
@@ -28,7 +28,7 @@ describe("release guard (ported from UPB, Lendhous rules added)", () => {
   it("accepts a complete production environment", () => {
     expect(() => assertReleaseEnv(release)).not.toThrow();
   });
-  it("refuses a build with no way to mail sign-in codes", () => {
+  it("refuses a build with no way to mail password links", () => {
     expect(() => assertReleaseEnv({ ...release, RESEND_API_KEY: "" })).toThrow(/RESEND_API_KEY/);
     expect(() => assertReleaseEnv({ ...release, EMAIL_FROM: "" })).toThrow(/EMAIL_FROM/);
     expect(() => assertReleaseEnv({ ...release, RESEND_API_KEY: "", SMTP_HOST: "smtp.example.com" })).not.toThrow();
@@ -114,14 +114,7 @@ describe("permission matrix (Spec v3 Section 1)", () => {
     expect(grantFor(["UNDERWRITER", "ADMIN_OWNER"], "issue_term_sheet")).toEqual({ enabled: true });
     expect(can(["PROCESSOR", "UNDERWRITER"], "view_credit")).toBe(true);
   });
-  it("requires two-factor for staff, partners and brokers, not borrowers", () => {
-    expect(needsMfa(["UNDERWRITER"])).toBe(true);
-    expect(needsMfa(["PARTNER_LENDER"])).toBe(true);
-    expect(needsMfa(["BROKER"])).toBe(true);
-    expect(needsMfa(["BORROWER", "GUARANTOR"])).toBe(false);
-    expect(loginCodeRequired(["UNDERWRITER"], { requireStaffMfa: true })).toBe(true);
-    expect(loginCodeRequired(["UNDERWRITER"], { requireStaffMfa: false })).toBe(false);
-    expect(loginCodeRequired(["BORROWER"], { requireStaffMfa: true })).toBe(false);
+  it("sends each role to its own home", () => {
     expect(homeFor(["BORROWER"])).toBe("/admin/borrower");
     expect(homeFor(["PARTNER_LENDER"])).toBe("/admin/partner");
     expect(homeFor(["INSPECTOR"])).toBe("/admin");
@@ -161,10 +154,9 @@ describe("dual control rules (Spec v3 Section 1, 10.4)", () => {
 });
 
 describe("loan buyers and per-person access", () => {
-  it("gives a loan buyer their own workspace and a required code", () => {
+  it("gives a loan buyer their own workspace", () => {
     expect(viewFor(["LOAN_BUYER"])).toBe("buyer");
     expect(homeFor(["LOAN_BUYER"])).toBe("/admin/buyer");
-    expect(needsMfa(["LOAN_BUYER"])).toBe(true);
     expect(viewFor(["UNDERWRITER", "LOAN_BUYER"])).toBe("admin");
   });
   it("applies one person's changes on top of their role", () => {

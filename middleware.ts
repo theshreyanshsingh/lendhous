@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { SESSION_COOKIE, verifySession } from "@/lib/session";
 
-// Coarse gate only, as in UPB Capital: is there a valid session cookie at all. Roles, permissions, idle timeouts
-// and two-factor are checked on the server against the database (lib/auth.ts and each workspace's layout).
+// Coarse gate only, as in UPB Capital: is there a valid session cookie at all. Roles, permissions and idle timeouts
+// are checked on the server against the database (lib/auth.ts and each workspace's layout).
 export async function middleware(request: NextRequest) {
   const token = request.cookies.get(SESSION_COOKIE)?.value;
   const session = token ? await verifySession(token) : null;

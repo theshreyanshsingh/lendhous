@@ -84,7 +84,6 @@ export async function removeMember(actor: Actor, id: string): Promise<{ error: s
   await prisma.user.update({ where: { id }, data: { deletedAt: new Date() } });
   await Promise.all([
     prisma.serverSession.deleteMany({ where: { userId: id } }),
-    prisma.loginCode.deleteMany({ where: { userId: id } }),
     prisma.passwordLink.deleteMany({ where: { userId: id } }),
   ]);
   await audit({ actorId: actor.id, action: "member.removed", entityType: "User", entityId: id, before: { email: target.email, roles } });

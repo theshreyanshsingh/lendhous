@@ -112,8 +112,6 @@ model User {
   // Staff, partner, broker and title users belong to an organization; borrowers and guarantors do not.
   organizationId   String?
   organization     Organization? @relation(fields: [organizationId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  // Emailed sign-in codes are required for the roles in MFA_ROLES. This turns them on for anyone else.
-  emailCodeEnabled Boolean       @default(false) @map("emailOtpFallback")
   notifyEmail      Boolean       @default(true)
   notifyInApp      Boolean       @default(true)
   lastLoginAt      DateTime?
@@ -122,7 +120,6 @@ model User {
   deletedAt        DateTime?
   roles            UserRole[]
   sessions         ServerSession[]
-  loginCodes       LoginCode[]
   passwordLinks    PasswordLink[]
   notifications    Notification[]
 }
@@ -160,25 +157,11 @@ model ServerSession {
   expiresAt  DateTime
   // Staff sessions end after the idle window in PlatformSettings (Spec v3 10.1, placeholder 30 minutes).
   lastSeenAt DateTime @default(now())
-  // Set when this session passed an emailed code. lib/auth.ts ends a session without one when the role requires it.
-  secondFactorAt DateTime?
   ipAddress  String   @default("")
   userAgent  String   @default("")
   createdAt  DateTime @default(now())
 
   @@index([expiresAt])
-}
-
-// One row per emailed code, deleted as soon as it is used (lib/login-code.ts).
-model LoginCode {
-  id        String   @id @default(uuid()) @map("_id")
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  codeHash  String
-  expiresAt DateTime
-  createdAt DateTime @default(now())
-
-  @@index([userId])
 }
 
 // The loan book: one row per record (a loan, a bid, a draw, a message and so on), its shape set by lib/book.ts.
@@ -304,8 +287,6 @@ model PlatformSettings {
   id                            String   @id @map("_id")
   retentionYears                Int      @default(7)
   staffIdleMinutes              Int      @default(30)
-  // Spec v3 10.1: required for staff, partner and broker users. Only the demo seed turns it off.
-  requireStaffMfa               Boolean  @default(true)
   // Offers real accounts the fake sample book. Unset counts as on; turn it off before real clients sign in.
   offerSampleData               Boolean?
   // Spec v3 Section 1 placeholders: second approver above these amounts.

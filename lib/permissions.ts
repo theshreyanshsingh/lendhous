@@ -21,9 +21,6 @@ export const ROLE_LABEL: Record<RoleCode, string> = {
 };
 
 export const STAFF_ROLES: ReadonlySet<RoleCode> = new Set(["ADMIN_OWNER", "UNDERWRITER", "PROCESSOR", "CAPITAL_MANAGER", "SERVICER", "DRAW_ADMIN", "INSPECTOR", "AUDITOR"]);
-// Spec v3 10.1: required for all staff, partner, and broker users. Closing agents use a magic link plus a code instead.
-// Loan buyers see loan files and wire money, so they count with the partners.
-export const MFA_ROLES: ReadonlySet<RoleCode> = new Set([...STAFF_ROLES, "PARTNER_LENDER", "LOAN_BUYER", "BROKER"]);
 
 export const PERMISSIONS = {
   view_pipeline: "See every deal in the pipeline",
@@ -91,8 +88,6 @@ export function can(roles: readonly RoleCode[], permission: Permission, options:
 }
 
 export const isStaff = (roles: readonly RoleCode[]) => roles.some((role) => STAFF_ROLES.has(role));
-export const needsMfa = (roles: readonly RoleCode[]) => roles.some((role) => MFA_ROLES.has(role));
-export const loginCodeRequired = (roles: readonly RoleCode[], settings: { requireStaffMfa: boolean }) => needsMfa(roles) && settings.requireStaffMfa;
 
 export type View = "admin" | "partner" | "buyer" | "broker" | "borrower";
 export const VIEW_HOME: Record<View, string> = { admin: "/admin", partner: "/admin/partner", buyer: "/admin/buyer", broker: "/admin/broker", borrower: "/admin/borrower" };

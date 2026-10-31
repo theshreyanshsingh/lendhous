@@ -1,17 +1,17 @@
 // Sessions on top of lib/session.ts, ported from UPB Capital's lib/auth.ts, plus what Spec v3 10.1 adds for Lendhous:
-// several roles per user, a 30-minute idle timeout for staff, and a required emailed code for staff, partners and brokers.
+// several roles per user and a 30-minute idle timeout for staff.
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
 import type { RoleCode } from "@prisma/client";
 import { secureCookies } from "@/lib/deploy";
-import { can, homeFor, isStaff, loginCodeRequired, viewFor, type Permission, type View } from "@/lib/permissions";
+import { can, homeFor, isStaff, viewFor, type Permission, type View } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { requestMeta } from "@/lib/request-meta";
-import { PENDING_COOKIE, SESSION_COOKIE, SESSION_DAYS, signPending, signSession, verifyPending, verifySession } from "@/lib/session";
+import { SESSION_COOKIE, SESSION_DAYS, signSession, verifySession } from "@/lib/session";
 import { getSettings } from "@/lib/settings";
 
-export async function setSession(user: { id: string; email: string; name: string; roles: { role: RoleCode }[] }, options: { secondFactor?: boolean } = {}) {
+export async function setSession(user: { id: string; email: string; name: string; roles: { role: RoleCode }[] }) {
   const sid = crypto.randomUUID();
   const meta = await requestMeta();
   await prisma.serverSession.create({
@@ -19,7 +19,6 @@ export async function setSession(user: { id: string; email: string; name: string
       id: sid,
       userId: user.id,
       expiresAt: new Date(Date.now() + SESSION_DAYS * 86_400_000),
-      secondFactorAt: options.secondFactor ? new Date() : undefined,
       ipAddress: meta.ipAddress,
       userAgent: meta.userAgent,
     },
@@ -40,24 +39,6 @@ export async function clearSession() {
   jar.delete(SESSION_COOKIE);
 }
 
-export async function setPending(sub: string) {
-  const token = await signPending(sub);
-  const jar = await cookies();
-  jar.set(PENDING_COOKIE, token, { httpOnly: true, sameSite: "lax", secure: secureCookies(), path: "/", maxAge: 60 * 10 });
-}
-
-export async function clearPending() {
-  const jar = await cookies();
-  jar.delete(PENDING_COOKIE);
-}
-
-export async function pendingUserId() {
-  const jar = await cookies();
-  const token = jar.get(PENDING_COOKIE)?.value;
-  if (!token) return null;
-  return verifyPending(token);
-}
-
 /** Pure idle check so it can be tested: staff sessions end after the idle window; others only at expiry. */
 export function sessionExpired(session: { expiresAt: Date; lastSeenAt: Date }, staff: boolean, idleMinutes: number, now = Date.now()) {
   if (session.expiresAt.getTime() < now) return true;
@@ -76,8 +57,7 @@ export const getCurrentUser = cache(async () => {
     if (!row || row.userId !== session.sub || row.user.deletedAt) return null;
     const roles = row.user.roles.map((role) => role.role);
     const settings = await getSettings();
-    // A session opened without a code ends once the role requires one, so its holder signs in again.
-    if (sessionExpired(row, isStaff(roles), settings.staffIdleMinutes) || (loginCodeRequired(roles, settings) && !row.secondFactorAt)) {
+    if (sessionExpired(row, isStaff(roles), settings.staffIdleMinutes)) {
       await prisma.serverSession.deleteMany({ where: { id: row.id } });
       return null;
     }

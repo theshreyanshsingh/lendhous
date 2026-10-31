@@ -36,7 +36,7 @@ export default async function NotificationsPage() {
         <form action={saveNoticePreferences} className="mt-3 space-y-2 text-sm">
           <label className="flex items-center gap-2"><input type="checkbox" name="email" data-testid="pref-email" defaultChecked={user.notifyEmail} /> Email me</label>
           <label className="flex items-center gap-2"><input type="checkbox" name="inApp" data-testid="pref-app" defaultChecked={user.notifyInApp} /> Keep them here</label>
-          <p className="text-xs text-muted-foreground">Legal notices and sign-in codes are always sent.</p>
+          <p className="text-xs text-muted-foreground">Legal notices and password links are always sent.</p>
           <SubmitButton variant="outline" className="mt-1 h-10 text-[13px] font-medium" pendingLabel="Saving…">Save</SubmitButton>
         </form>
       </section>

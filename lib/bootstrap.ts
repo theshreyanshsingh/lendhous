@@ -34,10 +34,18 @@ export async function bootstrapProduction(env: Record<string, string | undefined
   await prisma.platformSettings.upsert({ where: { id: "default" }, create: { id: "default" }, update: {} });
 }
 
-/** Sign-in codes moved to email, so nothing reads the old authenticator secrets and recovery codes. Safe to run again. */
-export async function dropAuthenticatorData() {
-  await prisma.$runCommandRaw({
-    update: "User",
-    updates: [{ q: { totpSecretEnc: { $exists: true } }, u: { $unset: { totpSecretEnc: "", totpEnabled: "", recoveryHashes: "", recoveryRevealEnc: "" } }, multi: true }],
-  });
+const SECOND_FACTOR_FIELDS = {
+  User: { totpSecretEnc: "", totpEnabled: "", recoveryHashes: "", recoveryRevealEnc: "", emailOtpFallback: "" },
+  ServerSession: { secondFactorAt: "" },
+  PlatformSettings: { requireStaffMfa: "" },
+};
+
+/** Sign-in is password only now, so this clears what two-factor left behind. Sessions stay open. Safe to run again. */
+export async function dropSecondFactorData() {
+  for (const [collection, fields] of Object.entries(SECOND_FACTOR_FIELDS)) {
+    await prisma.$runCommandRaw({ update: collection, updates: [{ q: {}, u: { $unset: fields }, multi: true }] });
+  }
+  // Older MongoDB versions refuse to drop a collection that isn't there, so look first.
+  const found = (await prisma.$runCommandRaw({ listCollections: 1, filter: { name: "LoginCode" } })) as { cursor: { firstBatch: unknown[] } };
+  if (found.cursor.firstBatch.length) await prisma.$runCommandRaw({ drop: "LoginCode" });
 }

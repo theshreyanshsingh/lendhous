@@ -5,7 +5,6 @@ const DEFAULTS: Omit<PlatformSettings, "updatedAt"> = {
   id: "default",
   retentionYears: 7,
   staffIdleMinutes: 30,
-  requireStaffMfa: true,
   offerSampleData: true,
   dualApprovalDrawCents: 5_000_000,
   dualApprovalDistributionCents: 25_000_000,
