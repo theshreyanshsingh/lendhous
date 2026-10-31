@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { markLeadContacted } from "@/actions/leads";
 import { PageIntro } from "@/components/page-intro";
 import { requirePermission } from "@/lib/auth";
@@ -47,14 +48,21 @@ export default async function Leads() {
                   </td>
                   <td className="text-[13px] whitespace-pre-wrap lg:max-w-[320px]">{lead.notes}</td>
                   <td data-label="Status" className="lg:whitespace-nowrap">
-                    {lead.contactedAt ? (
-                      <span className="text-xs text-muted-foreground">Contacted {when(lead.contactedAt)}</span>
-                    ) : (
-                      <form action={markLeadContacted}>
-                        <input type="hidden" name="id" value={lead.id} />
-                        <button type="submit" className="btn-ghost h-8! px-3! text-xs!">Mark contacted</button>
-                      </form>
-                    )}
+                    <div className="flex flex-col items-end gap-1 lg:items-start">
+                      {lead.contactedAt ? (
+                        <span className="text-xs text-muted-foreground">Contacted {when(lead.contactedAt)}</span>
+                      ) : (
+                        <form action={markLeadContacted}>
+                          <input type="hidden" name="id" value={lead.id} />
+                          <button type="submit" className="btn-ghost h-8! px-3! text-xs!">Mark contacted</button>
+                        </form>
+                      )}
+                      {lead.loanId ? (
+                        <Link href={`/admin/deals/${lead.loanId}`} className="text-xs text-link underline underline-offset-2" data-testid="lead-loan">Open the loan</Link>
+                      ) : (
+                        <Link href={`/admin/new-loan?lead=${lead.id}`} className="text-xs text-link underline underline-offset-2" data-testid="start-loan">Start a loan</Link>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

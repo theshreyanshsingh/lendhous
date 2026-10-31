@@ -9,15 +9,16 @@ const CHROME = process.env.CHROME || (process.platform === "darwin" ? "/Applicat
 const PASSWORD = "Lendhous2026!";
 const WIDTHS = [320, 375, 430, 768];
 
-const PUBLIC = ["/", "/programs", "/programs/fix-flip", "/programs/dscr", "/programs/bridge", "/programs/construction", "/programs/portfolio", "/about", "/resources", "/resources/first-investment", "/resources/leverage", "/resources/dscr-explained", "/resources/draws", "/resources/interest-only", "/calculators", "/start", "/disclosures", "/login"];
+const PUBLIC = ["/", "/programs", "/programs/fix-flip", "/programs/dscr", "/programs/bridge", "/programs/construction", "/programs/portfolio", "/about", "/resources", "/resources/first-investment", "/resources/leverage", "/resources/dscr-explained", "/resources/draws", "/resources/interest-only", "/calculators", "/start", "/disclosures", "/login", "/login/forgot"];
 const SEATS = {
-  "olivia.owner@lendhous.test": ["/admin", "/admin/deals/d1", "/admin/deals/d3", "/admin/deals/d4", "/admin/capital", "/admin/loan-sales", "/admin/leads", "/admin/members", "/admin/account/security"],
-  "alex.sample@lendhous.test": ["/admin/borrower", "/admin/borrower/d1", "/admin/borrower/d2", "/admin/apply"],
+  "olivia.owner@lendhous.test": ["/admin", "/admin/deals/d1", "/admin/deals/d3", "/admin/deals/d4", "/admin/capital", "/admin/loan-sales", "/admin/draws", "/admin/servicing", "/admin/leads", "/admin/members", "/admin/audit", "/admin/partners", "/admin/settings", "/admin/new-loan", "/admin/account/notifications", "/admin/account/security"],
+  "alex.sample@lendhous.test": ["/admin/borrower", "/admin/borrower/d1", "/admin/borrower/d2", "/admin/borrower/d18", "/admin/apply"],
+  "bea.broker@lendhous.test": ["/admin/broker", "/admin/broker/new", "/admin/broker/deals/d3"],
   "pia.partner@lendhous.test": ["/admin/partner", "/admin/partner/teasers/d3"],
   "bella.buyer@lendhous.test": ["/admin/buyer", "/admin/buyer/loans/s-d9", "/admin/buyer/portfolio"],
 };
 // Tabs and steps that only render after a click.
-const CLICKS = { "/admin/deals/d3": ["tab-Score & Flags", "tab-Capital Routing", "tab-Documents"] };
+const CLICKS = { "/admin/deals/d3": ["tab-Score & Flags", "tab-Capital Routing", "tab-Documents", "tab-Messages"], "/admin/borrower/d2": ["request-draw"] };
 
 // Reads the page in the browser: anything past the right edge, and anything that scrolls sideways.
 const measure = () => {

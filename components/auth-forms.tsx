@@ -1,6 +1,7 @@
 "use client";
 
 // Ported from UPB Capital's components/auth-forms.tsx (sign-in panel and the demo-seat list).
+import Link from "next/link";
 import { useActionState, useState } from "react";
 import { login } from "@/actions/auth";
 import { SubmitButton } from "@/components/submit-button";
@@ -25,6 +26,7 @@ export function LoginPanel({ next, demo }: { next?: string; demo?: DemoDesk }) {
         </label>
         {state.error && <p className="text-sm text-bad" role="alert">{state.error}</p>}
         <SubmitButton className="h-11 w-full text-[13.5px] font-medium" pendingLabel="Checking…">Sign in</SubmitButton>
+        <Link href="/login/forgot" className="block text-center text-sm text-muted-foreground underline underline-offset-2" data-testid="forgot-password">Forgot your password?</Link>
       </form>
       {demo && (
         <aside>

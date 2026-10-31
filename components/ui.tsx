@@ -42,6 +42,9 @@ export function Section({ title, children, right }: { title: string; children: R
 export const statGrid = "grid grid-cols-2 gap-3 sm:grid-cols-4";
 /** Ratio pills are wide for their content, so three across waits for a bigger screen. */
 export const ratioGrid = (count: number) => `grid gap-2 ${count > 2 ? "grid-cols-2 sm:grid-cols-3" : "grid-cols-2"}`;
+/** A fixed time zone, so the server's first render and the browser's match. */
+export const shortDate = (at: string) => new Date(at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/Los_Angeles" });
+export const points = (n = 0) => `${n} ${n === 1 ? "point" : "points"}`;
 export const statusLabel = (s: string) => s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 export const productLabel: Record<string, string> = { fix_flip: "Fix & Flip", bridge: "Bridge", ground_up: "Ground-Up", dscr: "DSCR Rental" };
 export const capTone = (c: string) => (c === "funded" || c === "committed" ? "green" : c === "reserved" ? "blue" : c === "bids_in" ? "violet" : c === "teaser_out" ? "amber" : "slate") as "green";

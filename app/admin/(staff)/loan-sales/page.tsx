@@ -7,12 +7,6 @@ import { useStore } from "@/lib/store";
 import { PageIntro } from "@/components/page-intro";
 import { Badge, Section, Stat, k, productLabel, usd } from "@/components/ui";
 
-// A funded loan's payments so far, for listing it: whole months between its closing and the listing date.
-function paymentsSince(closingDate: string, today: Date) {
-  const [year, month] = closingDate.split("-").map(Number);
-  return Math.max(0, (today.getFullYear() - year) * 12 + today.getMonth() + 1 - month);
-}
-
 export default function LoanSales() {
   const { s, dispatch } = useStore();
   const tapeFor = (sale: LoanSale) => tapeOf(s.deals.find((deal) => deal.id === sale.dealId)!, sale);
@@ -63,7 +57,7 @@ export default function LoanSales() {
       </Section>
       <Section title={`Ready to list (${eligible.length})`}>
         {eligible.length === 0 && <p className="text-sm text-muted-foreground">No other funded loans.</p>}
-        <ul className="divide-y divide-border">{eligible.map((deal) => <ListRow key={deal.id} deal={deal} onList={(askPct) => dispatch({ t: "listLoan", dealId: deal.id, askPct, paymentsMade: paymentsSince(deal.closingDate, new Date()) })} />)}</ul>
+        <ul className="divide-y divide-border">{eligible.map((deal) => <ListRow key={deal.id} deal={deal} onList={(askPct) => dispatch({ t: "listLoan", dealId: deal.id, askPct })} />)}</ul>
       </Section>
       <Section title={`Sold (${sold.length})`}>
         {sold.length === 0 && <p className="text-sm text-muted-foreground">No loans sold yet.</p>}

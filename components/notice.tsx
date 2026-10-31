@@ -5,6 +5,8 @@ const COPY: Record<string, string> = {
   email_sent: "A code is on its way to your email.",
   signed_out: "You are signed out.",
   password_set: "Your password is set. Sign in to continue.",
+  password_link_sent: "A link to change your password is on its way to your email.",
+  settings_saved: "Settings saved.",
 };
 
 export function Notice({ notice, error }: { notice?: string; error?: string }) {

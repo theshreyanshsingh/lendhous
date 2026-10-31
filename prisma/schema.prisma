@@ -181,6 +181,23 @@ model LoginCode {
   @@index([userId])
 }
 
+// The loan book: one row per record (a loan, a bid, a draw, a message and so on), its shape set by lib/book.ts.
+// The version row makes each change all-or-nothing against the latest book (lib/book-store.ts).
+model BookRecord {
+  id        String   @id @map("_id")
+  kind      String
+  data      Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([kind])
+}
+
+model BookVersion {
+  id      String @id @map("_id")
+  version Int    @default(0)
+}
+
 // The one-time link a new member uses to set a password (lib/members.ts). Only the hash is stored.
 model PasswordLink {
   id        String   @id @default(uuid()) @map("_id")
@@ -289,6 +306,8 @@ model PlatformSettings {
   staffIdleMinutes              Int      @default(30)
   // Spec v3 10.1: required for staff, partner and broker users. Only the demo seed turns it off.
   requireStaffMfa               Boolean  @default(true)
+  // Offers real accounts the fake sample book. Unset counts as on; turn it off before real clients sign in.
+  offerSampleData               Boolean?
   // Spec v3 Section 1 placeholders: second approver above these amounts.
   dualApprovalDrawCents         Int      @default(5000000)
   dualApprovalDistributionCents Int      @default(25000000)
@@ -312,6 +331,8 @@ model Lead {
   targetClosing      String    @default("")
   notes              String
   contactedAt        DateTime?
+  // The loan started from this brief, once staff start one.
+  loanId             String?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
   deletedAt          DateTime?

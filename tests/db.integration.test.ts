@@ -258,10 +258,38 @@ describe("members and password links", () => {
     expect(row.id).toBe(user.id);
     expect(row.roles.map((item) => item.role)).toEqual(["BROKER"]);
   });
+  it("a forgotten-password link goes only to an active account", async () => {
+    await issue("forgetful@example.com");
+    await prisma.passwordLink.deleteMany({ where: { user: { email: "forgetful@example.com" } } });
+    await members.sendSelfServiceLink("forgetful@example.com");
+    expect(await prisma.passwordLink.count({ where: { user: { email: "forgetful@example.com" } } })).toBe(1);
+    const before = await prisma.passwordLink.count();
+    await expect(members.sendSelfServiceLink("nobody@example.com")).resolves.toBeUndefined();
+    const user = await prisma.user.findUniqueOrThrow({ where: { email: "forgetful@example.com" } });
+    await members.removeMember(owner, user.id);
+    await members.sendSelfServiceLink("forgetful@example.com");
+    expect(await prisma.passwordLink.count()).toBe(before - 1);
+  });
   it("reads an account saved before these fields existed", async () => {
     await prisma.$runCommandRaw({ insert: "User", documents: [{ _id: "old-account", email: "old@example.com", name: "Old", passwordHash: "x", phone: "", accountStatus: "APPROVED", emailOtpFallback: false, notifyEmail: true, notifyInApp: true, createdAt: { $date: new Date().toISOString() }, updatedAt: { $date: new Date().toISOString() } }] });
     const old = await prisma.user.findUniqueOrThrow({ where: { id: "old-account" } });
     expect(old).toMatchObject({ extraPermissions: [], deniedPermissions: [], title: null });
+  });
+});
+
+describe("in-app notifications", () => {
+  it("counts unread notices that never had readAt written, and marks them read", async () => {
+    const { markAllRead, recentNotices, unreadCount } = await import("@/lib/notifications");
+    const person = await prisma.user.create({ data: { email: "reader@example.com", name: "Reader", passwordHash: "x", accountStatus: "APPROVED" } });
+    const other = { id: "someone-else", email: "other@example.com" };
+    await prisma.notification.create({ data: { toEmail: person.email, userId: person.id, subject: "First", body: "One" } });
+    await prisma.notification.create({ data: { toEmail: person.email, subject: "Second", body: "Two" } });
+    await prisma.notification.create({ data: { toEmail: other.email, subject: "Not yours", body: "Three" } });
+    expect(await unreadCount(person)).toBe(2);
+    expect((await recentNotices(person)).map((notice) => notice.subject).sort()).toEqual(["First", "Second"]);
+    await markAllRead(person);
+    expect(await unreadCount(person)).toBe(0);
+    expect(await unreadCount(other)).toBe(1);
   });
 });
 

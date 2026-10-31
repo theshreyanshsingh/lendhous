@@ -130,8 +130,11 @@ describe("permission matrix (Spec v3 Section 1)", () => {
     expect(viewFor(["BORROWER", "UNDERWRITER"])).toBe("admin");
     expect(viewFor(["BORROWER", "PARTNER_LENDER"])).toBe("partner");
     expect(viewFor(["BORROWER"])).toBe("borrower");
-    expect(viewFor(["BROKER"])).toBeNull();
-    expect(homeFor(["BROKER"])).toBe("/admin/account/security");
+    expect(viewFor(["BROKER"])).toBe("broker");
+    expect(homeFor(["BROKER"])).toBe("/admin/broker");
+    expect(viewFor(["AUDITOR"])).toBe("admin");
+    expect(viewFor(["CLOSING_AGENT"])).toBeNull();
+    expect(homeFor(["CLOSING_AGENT"])).toBe("/admin/account/security");
   });
   it("only the reserved demo domain counts as a demo account", () => {
     expect(isDemoEmail("Alex.Sample@LendHous.test")).toBe(true);

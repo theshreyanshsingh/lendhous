@@ -57,7 +57,7 @@ export async function inviteMember(actor: Actor & { name: string; organizationId
     : await prisma.user.create({ data: { ...details, email: input.email, roles: { create: input.roles.map((role) => ({ role, createdById: actor.id })) } } });
   await audit({ actorId: actor.id, action: "member.invited", entityType: "User", entityId: user.id, after: { email: user.email, roles: input.roles, ...changes } });
   const link = await newLink(user.id);
-  const mail = await sendPasswordLink(user.email, link, { by: actor.name, roles: roleWords(input.roles) });
+  const mail = await sendPasswordLink(user.email, link, { invitedBy: actor.name, roles: roleWords(input.roles) });
   return { issued: { name: user.name, email: user.email, link, mail, invited: true } };
 }
 
@@ -98,9 +98,17 @@ export async function reissueLink(actor: Actor, id: string): Promise<{ error: st
   // Whoever holds this link can sign in as the member, so it needs the same standing as giving them that access.
   if (accessError(actor, { id, ...access }, access)) return { error: "You can't reset the password of someone with more access than you." };
   const link = await newLink(id);
-  const mail = await sendPasswordLink(target.email, link, null);
+  const mail = await sendPasswordLink(target.email, link, "admin");
   await audit({ actorId: actor.id, action: "member.password_link_sent", entityType: "User", entityId: id });
   return { issued: { name: target.name, email: target.email, link, mail, invited: false } };
+}
+
+/** "Forgot password", or a signed-in person changing theirs. Quietly does nothing for an address with no active account. */
+export async function sendSelfServiceLink(email: string) {
+  const user = await prisma.user.findUnique({ where: { email } });
+  if (!user || user.deletedAt || user.accountStatus !== "APPROVED") return;
+  await sendPasswordLink(user.email, await newLink(user.id), "self");
+  await audit({ actorId: null, action: "auth.password_link_requested", entityType: "User", entityId: user.id });
 }
 
 /** Who a link belongs to, for the set-password page. Null when it is unknown or expired. */

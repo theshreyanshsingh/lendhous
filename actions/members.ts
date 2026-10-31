@@ -2,8 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { requirePermission } from "@/lib/auth";
-import { inviteMember, parseMember, reissueLink, removeMember, updateMember, usePasswordLink, type Issued } from "@/lib/members";
+import { requirePermission, requireUser } from "@/lib/auth";
+import { inviteMember, parseMember, reissueLink, removeMember, sendSelfServiceLink, updateMember, usePasswordLink, type Issued } from "@/lib/members";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import { requestMeta } from "@/lib/request-meta";
 
@@ -40,6 +40,25 @@ export async function sendNewLink(_prev: MemberFormState, formData: FormData): P
   const result = await reissueLink(actor, String(formData.get("id") || ""));
   if ("error" in result) return { error: result.error };
   return { issued: result.issued };
+}
+
+// The reply is the same whether or not the address has an account. So is the time it takes: sending mail would
+// otherwise give away which addresses are real.
+const FORGOT_REPLY_MS = 1_500;
+
+export async function requestPasswordLink(formData: FormData) {
+  const email = String(formData.get("email") || "").trim().toLowerCase();
+  const meta = await requestMeta();
+  const allowed = (await consumeRateLimit(`forgot-ip:${meta.ipAddress}`, 10, 60 * 60 * 1000)) && (await consumeRateLimit(`forgot:${email}`, 3, 60 * 60 * 1000));
+  await Promise.all([allowed ? sendSelfServiceLink(email) : null, new Promise((resolve) => setTimeout(resolve, FORGOT_REPLY_MS))]);
+  redirect("/login/forgot?sent=1");
+}
+
+export async function emailMyPasswordLink() {
+  const user = await requireUser();
+  if (!(await consumeRateLimit(`forgot:${user.email}`, 3, 60 * 60 * 1000))) redirect(`/admin/account/security?error=${encodeURIComponent("Too many password links. Wait an hour and try again.")}`);
+  await sendSelfServiceLink(user.email);
+  redirect("/admin/account/security?notice=password_link_sent");
 }
 
 /** Open to anyone holding a link, so it is rate limited by connection. */

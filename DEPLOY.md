@@ -8,7 +8,7 @@ Lendhous will hold SSNs, credit reports and bank details, so it gets stricter is
 
 1. **Database.** Use a separate Atlas project or cluster for Lendhous, not SynergyFund's shared cluster. Create a database user whose only role is `readWrite` on the `lendhous` database. Do not reuse SynergyFund's or UPB's user.
 2. **Field-encryption keys.** Generate `FIELD_ENCRYPTION_KEYS="k1:$(openssl rand -base64 32)"` and keep a copy in the password manager; losing it loses every encrypted field. Before real SSNs arrive, move to AWS KMS envelope keys (pre-launch item, Spec v3 10.2).
-3. **Files.** Use Lendhous's own private R2 bucket. Only S3/R2 can issue the five-minute signed links. Malware scanning on upload is still open (Spec v3 10.2).
+3. **Files.** Borrowers upload bank statements and IDs here, so use Lendhous's own private bucket, not one shared with another app. Only S3/R2 can issue the five-minute signed links. Malware scanning on upload is still open (Spec v3 10.2).
 
 ## Checklist (Vercel + Atlas)
 
@@ -31,7 +31,7 @@ Lendhous will hold SSNs, credit reports and bank details, so it gets stricter is
 - creates one approved owner-admin in the lender-house organization, plus the settings row, and nothing else; it refuses a database that already holds demo seats
 - clears any authenticator secrets and recovery codes left from before sign-in codes moved to email
 
-Demo seats can't exist on a release database, so to see another role there, invite a second email address from the Members page with that role, sign in as it, and press **Load sample data**.
+Demo seats can't exist on a release database, so to see another role there, invite a second email address from the Members page with that role, sign in as it, and press **Load sample data**. Turn **Offer sample data** off in Settings before real clients sign in.
 
 `prisma/seed.ts` drops the database first, so it refuses to run when `NODE_ENV=production`, `VERCEL=1` or `LENDHOUS_RELEASE=1` is set.
 
@@ -52,7 +52,7 @@ Optional: `ADMIN_NAME`, `LENDER_NAME`, `TEAM_EMAIL`, `SMTP_PORT`, `SMTP_USER`, `
 
 ## If mail stops working
 
-Nobody who needs a code can sign in. To let them in on their password alone until mail is back, set `requireStaffMfa` to `false` on the `PlatformSettings` document in Atlas. It takes effect within twenty seconds. Set it back to `true` afterwards, which also ends every session opened without a code.
+Nobody who needs a code can sign in. To let them in on their password alone until mail is back, set `requireStaffMfa` to `false` on the `PlatformSettings` document in Atlas. It takes effect within twenty seconds. Set it back to `true` afterwards, from Settings or in Atlas, which also ends every session opened without a code.
 
 ## A plain server under pm2
 

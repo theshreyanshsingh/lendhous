@@ -94,14 +94,15 @@ export const isStaff = (roles: readonly RoleCode[]) => roles.some((role) => STAF
 export const needsMfa = (roles: readonly RoleCode[]) => roles.some((role) => MFA_ROLES.has(role));
 export const loginCodeRequired = (roles: readonly RoleCode[], settings: { requireStaffMfa: boolean }) => needsMfa(roles) && settings.requireStaffMfa;
 
-export type View = "admin" | "partner" | "buyer" | "borrower";
-export const VIEW_HOME: Record<View, string> = { admin: "/admin", partner: "/admin/partner", buyer: "/admin/buyer", borrower: "/admin/borrower" };
+export type View = "admin" | "partner" | "buyer" | "broker" | "borrower";
+export const VIEW_HOME: Record<View, string> = { admin: "/admin", partner: "/admin/partner", buyer: "/admin/buyer", broker: "/admin/broker", borrower: "/admin/borrower" };
 
-/** The workspace an account opens. Staff outrank partner lenders, then loan buyers, then borrowers. */
+/** The workspace an account opens. Staff outrank partner lenders, then loan buyers, brokers and borrowers. */
 export function viewFor(roles: readonly RoleCode[]): View | null {
   if (isStaff(roles)) return "admin";
   if (roles.includes("PARTNER_LENDER")) return "partner";
   if (roles.includes("LOAN_BUYER")) return "buyer";
+  if (roles.includes("BROKER")) return "broker";
   if (roles.includes("BORROWER")) return "borrower";
   return null;
 }

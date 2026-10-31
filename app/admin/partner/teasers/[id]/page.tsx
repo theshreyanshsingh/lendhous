@@ -28,7 +28,7 @@ export default function TeaserDetail() {
             {t.affiliatedContractor && <p className="mt-3 rounded-md bg-bad/10 p-2 text-xs text-bad">Disclosure: the contractor on this project is affiliated with the originator. Independent third-party inspections apply.</p>}
           </Section>
           <Section title={won ? "Full deal room (unlocked)" : "Full deal room (locked)"}>
-            {won ? <div data-testid="deal-room-open" className="space-y-2 text-sm"><p>Address, borrower identity, appraisal, title and documents are now visible to {me.name}. Every view is logged and downloads are watermarked “{me.name} · {new Date().toLocaleDateString("en-US")}”.</p><ul className="list-disc pl-5 text-muted-foreground">{d.docs.filter((x) => x.status === "accepted").map((x) => <li key={x.id}>{x.name} <span className="text-faint">(view-only, watermarked)</span></li>)}</ul></div>
+            {won ? <div data-testid="deal-room-open" className="space-y-2 text-sm"><p>Address, borrower identity, appraisal, title and documents are now visible to {me.name}. Every file you open is logged.</p><ul className="list-disc pl-5 text-muted-foreground">{d.docs.filter((x) => x.status === "accepted").map((x) => <li key={x.id}>{x.documentId ? <a className="text-link underline underline-offset-2" href={`/api/documents/${x.documentId}`}>{x.name}</a> : x.name}</li>)}</ul></div>
               : <p className="text-sm text-muted-foreground">🔒 Opens only after LendHous accepts your bid and you e-sign the binding commitment. NDA on file: ✔.</p>}
           </Section>
         </div>

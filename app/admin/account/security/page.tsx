@@ -1,3 +1,4 @@
+import { emailMyPasswordLink } from "@/actions/members";
 import { setEmailCodes } from "@/actions/security";
 import { Notice } from "@/components/notice";
 import { PageIntro } from "@/components/page-intro";
@@ -35,6 +36,11 @@ export default async function SecurityPage({ searchParams }: { searchParams: Pro
           <SubmitButton className="h-11 text-[13px] font-medium">Turn on sign-in codes</SubmitButton>
         </form>
       )}
+      <section className="mt-8 rounded-xl border border-border p-5">
+        <p className="eyebrow">Password</p>
+        <p className="mt-2 text-sm text-muted-foreground">To change your password, we&apos;ll email you a one-time link.</p>
+        <form action={emailMyPasswordLink} className="mt-3"><SubmitButton variant="outline" className="h-11 text-[13px] font-medium" pendingLabel="Sending…">Email me a password link</SubmitButton></form>
+      </section>
     </div>
   );
 }

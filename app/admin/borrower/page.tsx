@@ -2,14 +2,13 @@
 import Link from "next/link";
 import { useStore, est } from "@/lib/store";
 import { fundedBalances } from "@/lib/engine";
-import { BORROWER_ID } from "@/lib/mockData";
 import Tracker from "@/components/Tracker";
 import { PageIntro } from "@/components/page-intro";
 import { Badge, usd, productLabel, statusLabel, Stat } from "@/components/ui";
 
 export default function BorrowerHome() {
   const { s, viewerName } = useStore();
-  const mine = s.deals.filter((d) => d.borrowerId === BORROWER_ID);
+  const mine = s.deals.filter((d) => d.borrowerId === s.borrowerId);
   const tasks = mine.flatMap((d) => d.docs.filter((x) => x.status === "requested" || x.status === "rejected").map((x) => ({ d, x })));
   return (
     <div className="space-y-5">

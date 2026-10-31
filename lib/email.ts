@@ -78,9 +78,10 @@ export async function sendLoginCode(toEmail: string, code: string) {
   return outcome !== "failed";
 }
 
-export function sendPasswordLink(toEmail: string, link: string, invite: { by: string; roles: string } | null) {
-  const opening = invite ? `${invite.by} added you to LendHous as ${invite.roles}.` : "Your LendHous administrator sent you a new password link.";
-  return sendSecret(toEmail, invite ? "You're invited to LendHous" : "Set a new LendHous password", `${opening}\n\nSet your password here:\n${link}\n\nThe link works once and expires in seven days. If you weren't expecting this, you can ignore it.`);
+export function sendPasswordLink(toEmail: string, link: string, reason: { invitedBy: string; roles: string } | "admin" | "self") {
+  const invited = typeof reason === "object";
+  const opening = invited ? `${reason.invitedBy} added you to LendHous as ${reason.roles}.` : reason === "admin" ? "Your LendHous administrator sent you a new password link." : "Someone asked to reset the password on your LendHous account.";
+  return sendSecret(toEmail, invited ? "You're invited to LendHous" : "Set a new LendHous password", `${opening}\n\nSet your password here:\n${link}\n\nThe link works once and expires in seven days. If you weren't expecting this, ignore it and nothing changes.`);
 }
 
 /** Team alerts go to every approved owner-admin, and to TEAM_EMAIL when it is set. */

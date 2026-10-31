@@ -10,6 +10,7 @@
     "screenshots": "node scripts/screenshots.mjs",
     "smoke:auth": "node scripts/smoke-auth.mjs",
     "phone:check": "node scripts/phone-check.mjs",
+    "smoke:real": "node scripts/smoke-real.mjs",
     "db:dev": "tsx scripts/dev-db.ts",
     "db:indexes": "tsx scripts/db-indexes.ts",
     "db:seed": "prisma db seed",

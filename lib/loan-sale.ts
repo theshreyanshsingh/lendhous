@@ -2,6 +2,7 @@
 // 98 is a 2% discount. Like a partner teaser, the tape names no street, borrower or entity until the sale closes.
 import { evaluate, fundedBalances, maturityDate } from "./engine";
 import type { Deal, LoanSale } from "./mockData";
+import { balanceOf, paymentsMade } from "./servicing";
 
 /** Kept by LendHous as servicer, the same placeholder 1% strip as partner teasers (Spec 6.6). */
 export const SERVICING_STRIP_PCT = 1;
@@ -38,13 +39,6 @@ export function yieldAtPrice(note: Note, pricePct: number, stripPct = SERVICING_
   return round2(((low + high) / 2) * 12 * 100);
 }
 
-/** The balance after some payments on an amortizing loan. */
-function amortizedBalance(amount: number, ratePct: number, monthlyPayment: number, payments: number) {
-  let left = amount;
-  for (let month = 0; month < payments; month++) left -= monthlyPayment - (left * ratePct) / 100 / 12;
-  return Math.max(0, left);
-}
-
 export const pricePaid = (balance: number, pricePct: number) => round2((balance * pricePct) / 100);
 
 /** The loan tape: everything a buyer needs to price the loan, and nothing that identifies the borrower. */
@@ -52,8 +46,9 @@ export function tapeOf(deal: Deal, sale: LoanSale) {
   const e = evaluate(deal.app);
   const amortizing = deal.app.product === "dscr";
   const funded = fundedBalances(e, deal.app, deal.disbursedDraws);
-  const balance = round2(amortizing ? amortizedBalance(e.noteAmount, e.rate, e.monthlyPayment, sale.paymentsMade) : funded.disbursed);
-  const monthsLeft = Math.max(1, e.termMonths - sale.paymentsMade);
+  const made = paymentsMade(deal);
+  const balance = balanceOf(deal);
+  const monthsLeft = Math.max(1, e.termMonths - made);
   const note: Note = { balance, ratePct: e.rate, months: monthsLeft, monthlyPayment: amortizing ? e.monthlyPayment : undefined };
   const band = Math.floor(deal.app.fico / 20) * 20;
   const paymentsLate = deal.paymentsLate ?? 0;
@@ -73,7 +68,7 @@ export function tapeOf(deal: Deal, sale: LoanSale) {
     termMonths: e.termMonths,
     monthsLeft,
     maturity: maturityDate(deal.closingDate, e.termMonths),
-    paymentsMade: sale.paymentsMade,
+    paymentsMade: made,
     paymentsLate,
     current: paymentsLate === 0,
     monthlyIncome: round2(cashFlows(note)[0]),

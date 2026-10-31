@@ -5,14 +5,22 @@ import { useMemo, useState } from "react";
 import { useStore, est, inHouseAvailable, capitalSummary } from "@/lib/store";
 import { evaluate, recommendRoute, matchPartner, fullBoatReserve, dutchReserve, evenDraws, type Application } from "@/lib/engine";
 import { pricingConfig } from "@/lib/pricing-config";
+import { canAdvance, nextStage } from "@/lib/loan-stages";
 import { teaserOf } from "@/lib/teaser";
-import { Badge, GradeBadge, RatioPill, Section, Stat, usd, pct, k, productLabel, statusLabel, capTone, ratioGrid, statGrid } from "@/components/ui";
+import { inviteBorrower } from "@/actions/book";
+import { DocUpload } from "@/components/loan/DocUpload";
+import { LoanMessages } from "@/components/loan/LoanMessages";
+import { ScopeOfWork } from "@/components/loan/ScopeOfWork";
+import { TermSheetCard } from "@/components/loan/TermSheetCard";
+import { Badge, GradeBadge, RatioPill, Section, Stat, usd, pct, k, productLabel, statusLabel, capTone, points, ratioGrid, statGrid } from "@/components/ui";
 
-const tabs = ["Numbers & Ratios", "Score & Flags", "Capital Routing", "Documents"] as const;
+const tabs = ["Numbers & Ratios", "Score & Flags", "Capital Routing", "Documents", "Messages"] as const;
 
 export default function DealWorkspace() {
-  const { id } = useParams<{ id: string }>(); const { s, dispatch } = useStore();
+  const { id } = useParams<{ id: string }>(); const { s, dispatch, applyReply, local, viewerName } = useStore();
   const d = s.deals.find((x) => x.id === id);
+  const [invite, setInvite] = useState("");
+  const [request, setRequest] = useState({ name: "", category: "Property" });
   const [tab, setTab] = useState<(typeof tabs)[number]>("Numbers & Ratios");
   const [ov, setOv] = useState<Partial<Application>>({});
   const [routeSel, setRouteSel] = useState<"in_house" | "partner" | "split" | null>(null);
@@ -36,6 +44,11 @@ export default function DealWorkspace() {
       {ov[key] !== undefined && ov[key] !== d.app[key] && <span className="text-[11px] text-warn">borrower said {Number(d.app[key] ?? 0).toLocaleString()}</span>}
     </label>);
   const holdMonths = pricingConfig.assumptions.holdMonths;
+  const stage = nextStage(d, orig);
+  const funding = stage?.to === "funded";
+  const unlinked = !local && d.borrowerId.startsWith("client-");
+  const locked = !["submitted", "initial_review", "underwriting", "term_sheet_issued", "term_sheet_accepted", "conditions"].includes(d.status);
+  const broker = s.brokers.find((item) => item.id === d.brokerId);
 
   return (
     <div className="space-y-4">
@@ -44,10 +57,30 @@ export default function DealWorkspace() {
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0"><div className="text-xs text-muted-foreground">{d.loanNumber} · {productLabel[d.app.product]} · source: {d.source.replace("_", " ")}</div>
             <h1 className="text-xl font-normal tracking-tight">{d.address}, {d.city} {d.zip} <span className="font-normal text-faint">({d.app.county})</span></h1>
-            <div className="text-sm text-muted-foreground">{d.borrowerName} · {d.entityName} · FICO {d.app.fico} · Tier {e.tier}</div></div>
+            <div className="text-sm text-muted-foreground">{d.borrowerName} · {d.entityName} · FICO {d.app.fico} · Tier {e.tier}</div>
+            {broker && <div className="text-sm text-muted-foreground" data-testid="deal-broker">Broker: {broker.name} · {points(d.brokerPoints)} ({usd((orig.noteAmount * (d.brokerPoints ?? 0)) / 100)})</div>}</div>
           <div className="flex flex-wrap items-center gap-2"><GradeBadge grade={e.score.grade} score={e.score.score} /><Badge tone="blue">{statusLabel(d.status)}</Badge><Badge tone={capTone(d.capitalStatus)}>capital: {statusLabel(d.capitalStatus)}</Badge></div>
         </div>
         {d.contractorIsGtAffiliate && <div className="mt-3 rounded-lg bg-bad/10 p-3 text-sm text-bad" data-testid="coi-banner"><b>Conflict of interest:</b> LendHous&apos;s affiliated construction company is the contractor. Draw inspections must be by an independent third party, a second approver outside the construction company is required, and partners must be told.</div>}
+        {unlinked && (
+          <div className="mt-4 flex flex-wrap items-end gap-2 rounded-[2px] border border-border p-3" data-testid="invite-borrower">
+            <label className="block min-w-0 flex-1 basis-56"><span className="label">{d.borrowerName} has no portal account. Invite them to follow this loan:</span><input type="email" data-testid="invite-email" className="desk-input" placeholder="Their email" value={invite} onChange={(ev) => setInvite(ev.target.value)} /></label>
+            <button className="btn-ghost" data-testid="send-invite" disabled={!invite.trim()} onClick={async () => { applyReply(await inviteBorrower(d.id, invite)); setInvite(""); }}>Send invitation</button>
+          </div>
+        )}
+        {stage && (
+          <div className="mt-4 rounded-[2px] border border-border p-3" data-testid="stage-panel">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="min-w-0 text-sm"><span className="text-muted-foreground">Next step:</span> <b>{stage.borrowerStep ? stage.action : statusLabel(stage.to)}</b></div>
+              <div className="flex w-full flex-wrap gap-2 sm:w-auto">
+                {funding && !d.fundingApprovers?.includes(viewerName) && (d.fundingApprovers?.length ?? 0) < 2 && <button className="btn-ghost flex-1 sm:flex-none" data-testid="approve-funding" onClick={() => dispatch({ t: "approveFunding", dealId: d.id, by: viewerName })}>Approve funding</button>}
+                {!stage.borrowerStep && <button className="btn-primary flex-1 sm:flex-none" data-testid="advance-loan" disabled={!canAdvance(stage)} onClick={() => dispatch({ t: "advanceLoan", dealId: d.id })}>{stage.action}</button>}
+              </div>
+            </div>
+            {funding && d.fundingApprovers?.length ? <p className="mt-1 text-xs text-muted-foreground" data-testid="funding-approvers">Approved by {d.fundingApprovers.join(" and ")}.</p> : null}
+            {stage.blockers.length > 0 && <ul className="mt-2 space-y-0.5 text-xs text-warn" data-testid="stage-blockers">{stage.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>}
+          </div>
+        )}
         <div className="mt-4 grid grid-cols-2 border-b border-border sm:flex sm:gap-1">
           {tabs.map((t) => <button key={t} data-testid={`tab-${t}`} onClick={() => setTab(t)} className={`border-b-2 px-3 py-2 text-left text-sm font-semibold sm:whitespace-nowrap ${tab === t ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>{t}</button>)}
         </div>
@@ -55,14 +88,14 @@ export default function DealWorkspace() {
 
       {tab === "Numbers & Ratios" && (
         <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
-          <Section title="Underwritten inputs" right={Object.keys(ov).length > 0 ? <button className="text-xs text-link underline" onClick={() => setOv({})}>reset</button> : undefined}>
+          <Section title="Underwritten inputs" right={Object.keys(ov).length > 0 ? <span className="flex items-center gap-3">{!locked && <button className="text-xs font-semibold text-link underline" data-testid="save-numbers" onClick={async () => { if (await dispatch({ t: "updateDealNumbers", dealId: d.id, changes: ov })) setOv({}); }}>Save</button>}<button className="text-xs text-link underline" onClick={() => setOv({})}>reset</button></span> : undefined}>
             <div className="space-y-3">
               {num("purchasePrice", d.app.product === "ground_up" ? "Land value" : "Purchase / as-is")}
               {num("appraisedAsIs", "Appraised as-is (optional)")}
               {d.app.product !== "bridge" && d.app.product !== "dscr" && <>{num("rehab", "Rehab / construction budget")}{num("arv", "ARV (selected valuation)")}</>}
               {d.app.product === "dscr" && <>{num("monthlyRent", "Qualifying rent / mo")}{num("taxesAnnual", "Taxes / yr")}{num("insuranceAnnual", "Insurance / yr")}</>}
               {num("fico", "FICO (pulled)")}{num("verifiedDeals", "Verified deals (36 mo)")}{num("liquidity", "Verified liquidity")}
-              <p className="text-[11px] text-faint">Edits are a live what-if. Original application values are kept.</p>
+              <p className="text-[11px] text-faint">{locked ? "Edits are a live what-if. These numbers are locked once a loan clears to close." : "Edits are a live what-if until you save them."}</p>
             </div>
           </Section>
           <div className="min-w-0 space-y-4">
@@ -163,13 +196,27 @@ export default function DealWorkspace() {
         </div>
       )}
 
-      {tab === "Documents" && (
+      {tab === "Messages" && (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <LoanMessages dealId={d.id} side="team" hint="Nothing yet. The borrower and their broker see this thread." />
+          <LoanMessages dealId={d.id} side="internal" title="Team notes" hint="Only your team sees these." />
+        </div>
+      )}
+
+      {tab === "Documents" && (<div className="space-y-4">
+        <TermSheetCard deal={d} canSign={false} />
+        <ScopeOfWork deal={d} editable={false} />
         <Section title="Documents">
           <ul className="divide-y divide-border">{d.docs.map((x) => (
-            <li key={x.id} className="flex flex-wrap items-center justify-between gap-2 py-2"><div className="min-w-0"><div className="text-sm font-medium">{x.name}</div><div className="text-xs text-muted-foreground">{x.category}{x.fileName && ` · ${x.fileName}`}</div></div>
-              <div className="flex items-center gap-2"><Badge>{statusLabel(x.status)}</Badge>{(x.status === "uploaded" || x.status === "in_review") && <><button className="btn-ghost py-1 text-xs" onClick={() => dispatch({ t: "docStatus", dealId: d.id, docId: x.id, status: "accepted" })}>Accept</button><button className="btn-ghost py-1 text-xs" onClick={() => dispatch({ t: "docStatus", dealId: d.id, docId: x.id, status: "rejected" })}>Reject</button></>}</div></li>))}</ul>
+            <li key={x.id} className="flex flex-wrap items-center justify-between gap-2 py-2"><div className="min-w-0"><div className="text-sm font-medium">{x.name}</div><div className="text-xs text-muted-foreground">{x.category}{x.fileName && !x.documentId && ` · ${x.fileName}`}{x.documentId && <> · <a className="text-link underline underline-offset-2" href={`/api/documents/${x.documentId}`} data-testid="doc-file">{x.fileName}</a></>}</div></div>
+              <div className="flex flex-wrap items-center gap-2"><Badge>{statusLabel(x.status)}</Badge><DocUpload dealId={d.id} doc={x} />{(x.status === "uploaded" || x.status === "in_review") && <><button className="btn-ghost py-1 text-xs" onClick={() => dispatch({ t: "docStatus", dealId: d.id, docId: x.id, status: "accepted" })}>Accept</button><button className="btn-ghost py-1 text-xs" onClick={() => dispatch({ t: "docStatus", dealId: d.id, docId: x.id, status: "rejected" })}>Reject</button></>}{x.status === "requested" && <button className="btn-ghost py-1 text-xs" data-testid={`waive-${x.id}`} onClick={() => dispatch({ t: "docStatus", dealId: d.id, docId: x.id, status: "waived" })}>Waive</button>}</div></li>))}</ul>
+          <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-border pt-3" data-testid="request-doc">
+            <label className="block min-w-0 flex-1 basis-48"><span className="label">Ask for another document</span><input data-testid="request-doc-name" className="desk-input" placeholder="e.g. Updated insurance binder" value={request.name} onChange={(ev) => setRequest({ ...request, name: ev.target.value })} /></label>
+            <label className="block"><span className="label">Category</span><select className="desk-input w-auto!" value={request.category} onChange={(ev) => setRequest({ ...request, category: ev.target.value })}>{["Identity", "Entity", "Property", "Liquidity", "Closing", "Experience"].map((category) => <option key={category}>{category}</option>)}</select></label>
+            <button className="btn-ghost" data-testid="request-doc-send" disabled={!request.name.trim()} onClick={async () => { if (await dispatch({ t: "addDocRequest", dealId: d.id, name: request.name.trim(), category: request.category })) setRequest({ ...request, name: "" }); }}>Ask</button>
+          </div>
         </Section>
-      )}
+      </div>)}
     </div>
   );
 }

@@ -69,7 +69,7 @@ function Detail({ me }: { me: LoanBuyer }) {
           </Section>
           <Section title={owned ? "The file (unlocked)" : "The file (locked)"}>
             {owned ? (
-              <ul className="list-disc space-y-1 pl-5 text-sm" data-testid="file-open">{deal.docs.filter((doc) => doc.status === "accepted").map((doc) => <li key={doc.id}>{doc.name}</li>)}<li>Note, mortgage and assignment</li><li>Title policy and pay history</li></ul>
+              <ul className="list-disc space-y-1 pl-5 text-sm" data-testid="file-open">{deal.docs.filter((doc) => doc.status === "accepted").map((doc) => <li key={doc.id}>{doc.documentId ? <a className="text-link underline underline-offset-2" href={`/api/documents/${doc.documentId}`}>{doc.name}</a> : doc.name}</li>)}<li>Note, mortgage and assignment</li><li>Title policy and pay history</li></ul>
             ) : (
               <p className="text-sm text-muted-foreground">🔒 The note, mortgage, title policy, appraisal and full pay history open once LendHous accepts your offer and you sign the loan sale agreement.</p>
             )}

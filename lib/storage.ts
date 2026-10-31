@@ -21,7 +21,7 @@ export function safeBasename(name: string) {
   return name.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 80) || "file";
 }
 
-const ALLOWED = new Set(["pdf", "png", "jpg", "jpeg", "webp", "csv", "xls", "xlsx", "doc", "docx", "txt"]);
+const ALLOWED = new Set(["pdf", "png", "jpg", "jpeg", "webp", "heic", "csv", "xls", "xlsx", "doc", "docx", "txt"]);
 
 export function extensionOf(name: string) {
   const ext = name.split(".").pop()?.toLowerCase() ?? "";
@@ -35,6 +35,7 @@ export function mimeFor(ext: string, fallback: string) {
     jpg: "image/jpeg",
     jpeg: "image/jpeg",
     webp: "image/webp",
+    heic: "image/heic",
     csv: "text/csv",
     xls: "application/vnd.ms-excel",
     xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

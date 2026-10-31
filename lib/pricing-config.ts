@@ -107,6 +107,8 @@ export const pricingConfig = {
   },
   colorBands: { yellowWithin: 0.025, dscrYellowWithin: 0.1 },
 
+  // PLACEHOLDER, like the rest of this file. 10% matches the Spec's worked draw example.
+  draws: { retainagePct: 0.1, secondApproverAbove: 50_000 },
   routing: { dualApprovalFundingAlways: true, splitEnabled: true /* prototype demo; Spec: off until M8 */ },
 };
 export type PricingConfig = typeof pricingConfig;

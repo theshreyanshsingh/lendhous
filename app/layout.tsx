@@ -7,7 +7,7 @@ export const metadata: Metadata = {
   title: { default: "LendHous", template: "%s · LendHous" },
   description: "LendHous private lending for real estate investors.",
 };
-export const viewport: Viewport = { width: "device-width", initialScale: 1 };
+export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#202B28" };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
