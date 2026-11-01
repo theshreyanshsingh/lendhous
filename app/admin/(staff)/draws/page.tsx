@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { DRAW_STATUS, drawTotal } from "@/components/loan/DrawPanel";
+import { PhotoRequests } from "@/components/loan/PhotoRequests";
 import { PageIntro } from "@/components/page-intro";
 import { Badge, Section, Stat, k, shortDate, usd } from "@/components/ui";
 import { approvalError, approversNeeded, reviewDraw } from "@/lib/draws";
@@ -75,6 +76,7 @@ function DrawCard({ draw, deal }: { draw: DrawRequest; deal: Deal }) {
           })}
         </tbody>
       </table>
+      <div className="mt-3 border-t border-border pt-3"><PhotoRequests deal={deal} draw={draw} /></div>
       {draw.status === "inspected" && (
         <p className="mt-3 text-sm" data-testid="draw-review"><b>{usd(review.approved)}</b> supported of {usd(drawTotal(draw))} requested, after retainage.{needed > 1 ? ` Needs two approvers${draw.approvers.length ? `; ${draw.approvers[0]} has approved` : ""}.` : ""}{review.blocked ? ` ${review.blocked}.` : ""}</p>
       )}

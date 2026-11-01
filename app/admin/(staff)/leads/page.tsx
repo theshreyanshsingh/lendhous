@@ -2,6 +2,7 @@ import Link from "next/link";
 import { markLeadContacted } from "@/actions/leads";
 import { PageIntro } from "@/components/page-intro";
 import { requirePermission } from "@/lib/auth";
+import { openLead } from "@/lib/lead-store";
 import { notDeleted, prisma } from "@/lib/prisma";
 
 export const metadata = { title: "Website leads" };
@@ -12,7 +13,7 @@ const when = (date: Date) => date.toLocaleDateString("en-US", { month: "short", 
 
 export default async function Leads() {
   await requirePermission("view_pipeline");
-  const leads = await prisma.lead.findMany({ where: notDeleted, orderBy: { createdAt: "desc" }, take: 200 });
+  const leads = (await prisma.lead.findMany({ where: notDeleted, orderBy: { createdAt: "desc" }, take: 200 })).map(openLead);
   return (
     <div className="space-y-4">
       <PageIntro eyebrow="Website" title="Website leads" lede="Project briefs sent from the public site's Let's talk form. These are conversations, not applications: no credit has been pulled." />

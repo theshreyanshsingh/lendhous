@@ -3,10 +3,10 @@
 import { evaluate, type Application, type BuyBox } from "./engine";
 import { approversNeeded, approvalError, defaultScope, drawRequestError, releaseToScope, reviewDraw } from "./draws";
 import { canAdvance, nextStage } from "./loan-stages";
-import { seedDeals, seedBids, seedDraws, seedLoanSales, seedLoanOffers, seedMessages, capitalSources, partners as seedPartners, brokers as seedBrokers, loanBuyers, BORROWER_ID, DEMO_PARTNER_ID, DEMO_BUYER_ID, DEMO_BROKER_ID, type Broker, type Deal, type Bid, type DrawRequest, type DrawRequestLine, type LoanMessage, type Partner, type PayoffRequest, type DocStatus, type CapitalSource, type LoanBuyer, type LoanOffer, type LoanSale, type ScopeLine } from "./mockData";
+import { seedDeals, seedBids, seedDraws, seedLoanSales, seedLoanOffers, seedMessages, seedPhotoRequests, capitalSources, partners as seedPartners, brokers as seedBrokers, loanBuyers, BORROWER_ID, DEMO_PARTNER_ID, DEMO_BUYER_ID, DEMO_BROKER_ID, type Broker, type Deal, type Bid, type DrawRequest, type DrawRequestLine, type LoanMessage, type Partner, type PayoffRequest, type DocStatus, type CapitalSource, type LoanBuyer, type LoanOffer, type LoanSale, type PhotoRequest, type RequestPhoto, type ScopeLine } from "./mockData";
 import { afterPayment, firstDueDate, payoffFor } from "./servicing";
 
-export interface Book { partnerId: string; buyerId: string; brokerId: string; borrowerId: string; loanPrefix: string; deals: Deal[]; bids: Bid[]; partners: Partner[]; buyers: LoanBuyer[]; brokers: Broker[]; sales: LoanSale[]; offers: LoanOffer[]; draws: DrawRequest[]; payoffs: PayoffRequest[]; messages: LoanMessage[]; sources: CapitalSource[]; audit: { at: string; text: string }[]; sample?: boolean }
+export interface Book { partnerId: string; buyerId: string; brokerId: string; borrowerId: string; loanPrefix: string; deals: Deal[]; bids: Bid[]; partners: Partner[]; buyers: LoanBuyer[]; brokers: Broker[]; sales: LoanSale[]; offers: LoanOffer[]; draws: DrawRequest[]; photoRequests: PhotoRequest[]; payoffs: PayoffRequest[]; messages: LoanMessage[]; sources: CapitalSource[]; audit: { at: string; text: string }[]; sample?: boolean }
 
 export type BookAction =
   | { t: "submitApp"; app: Application; address: string; city: string; zip: string; entityName: string; exitStrategy: string; client?: { name: string; borrowerId?: string; brokerId?: string; brokerPoints?: number }; source?: string }
@@ -21,6 +21,12 @@ export type BookAction =
   | { t: "acceptTermSheet"; dealId: string; signedName: string }
   | { t: "saveScope"; dealId: string; scope: ScopeLine[]; summary: string }
   | { t: "requestDraw"; dealId: string; by: string; note: string; contact: string; photos: string[]; photoIds?: string[]; lines: DrawRequestLine[] }
+  | { t: "askForPhotos"; requestId: string; dealId: string; drawId?: string; to: string; email?: string; who: PhotoRequest["who"]; scopeIds: string[]; by: string; expiresAt: string }
+  | { t: "renewPhotoRequest"; requestId: string; expiresAt: string }
+  | { t: "turnOffPhotoRequest"; requestId: string }
+  | { t: "addRequestPhoto"; requestId: string; photo: RequestPhoto }
+  | { t: "removeRequestPhoto"; requestId: string; photoId: string }
+  | { t: "finishPhotoRequest"; requestId: string; by: string; note: string }
   | { t: "sendInspector"; drawId: string }
   | { t: "recordInspection"; drawId: string; observed: Record<string, number> }
   | { t: "approveDrawRequest"; drawId: string; by: string }
@@ -61,15 +67,17 @@ export function demoBook(): Book {
   });
   const quoted = payoffFor(deals.find((d) => d.id === "d11")!, "2026-11-15");
   const payoffs: PayoffRequest[] = [{ id: "payoff-1", dealId: "d11", goodThrough: "2026-11-15", requestedAt: "2026-10-22T10:00:00-07:00", by: "Avery Mock (FAKE)", status: "requested", ...quoted }];
-  return { partnerId: DEMO_PARTNER_ID, buyerId: DEMO_BUYER_ID, brokerId: DEMO_BROKER_ID, borrowerId: BORROWER_ID, loanPrefix: "LH-DEMO-", deals, bids: seedBids, partners: seedPartners, buyers: loanBuyers, brokers: seedBrokers, sales: seedLoanSales, offers: seedLoanOffers, draws: seedDraws, payoffs, messages: seedMessages, sources: capitalSources, audit: [{ at: SEED_AT, text: "Demo data loaded (all records are FAKE)" }] };
+  return { partnerId: DEMO_PARTNER_ID, buyerId: DEMO_BUYER_ID, brokerId: DEMO_BROKER_ID, borrowerId: BORROWER_ID, loanPrefix: "LH-DEMO-", deals, bids: seedBids, partners: seedPartners, buyers: loanBuyers, brokers: seedBrokers, sales: seedLoanSales, offers: seedLoanOffers, draws: seedDraws, photoRequests: seedPhotoRequests, payoffs, messages: seedMessages, sources: capitalSources, audit: [{ at: SEED_AT, text: "Demo data loaded (all records are FAKE)" }] };
 }
 
 /** A book with no records: a new database, or an account with nothing to see yet. */
-export const emptyBook = (): Book => ({ partnerId: "", buyerId: "", brokerId: "", borrowerId: "", loanPrefix: "LH-", deals: [], bids: [], partners: [], buyers: [], brokers: [], sales: [], offers: [], draws: [], payoffs: [], messages: [], sources: [], audit: [] });
+export const emptyBook = (): Book => ({ partnerId: "", buyerId: "", brokerId: "", borrowerId: "", loanPrefix: "LH-", deals: [], bids: [], partners: [], buyers: [], brokers: [], sales: [], offers: [], draws: [], photoRequests: [], payoffs: [], messages: [], sources: [], audit: [] });
 
 export function reducer(s: Book, a: BookAction): Book {
   const log = (text: string) => [{ at: now(), text }, ...s.audit].slice(0, 50);
   const upd = (id: string, f: (d: Deal) => Deal) => s.deals.map((d) => (d.id === id ? f(d) : d));
+  const photos = (id: string, f: (r: PhotoRequest) => PhotoRequest) => s.photoRequests.map((r) => (r.id === id ? f(r) : r));
+  const requestOf = (id: string) => s.photoRequests.find((r) => r.id === id)!;
   switch (a.t) {
     case "reset": return demoBook();
     case "loadSample": return { ...demoBook(), sample: true };
@@ -140,6 +148,19 @@ export function reducer(s: Book, a: BookAction): Book {
       if (drawRequestError(deal, lines)) return s;
       const draw: DrawRequest = { id: `draw${uid()}`, dealId: a.dealId, requestedAt: now(), by: a.by, note: a.note, contact: a.contact, photos: a.photos, photoIds: a.photoIds, lines, status: "submitted", approvers: [] };
       return { ...s, draws: [draw, ...s.draws], audit: log(`${deal.loanNumber}: draw of $${lines.reduce((sum, line) => sum + line.requested, 0).toLocaleString()} requested`) };
+    }
+    case "askForPhotos": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const request: PhotoRequest = { id: a.requestId, dealId: a.dealId, drawId: a.drawId, to: a.to, email: a.email, who: a.who, scopeIds: a.scopeIds, sentBy: a.by, sentAt: now(), expiresAt: a.expiresAt, status: "open", photos: [] };
+      return { ...s, photoRequests: [request, ...s.photoRequests], audit: log(`${deal.loanNumber}: photos requested from ${a.to}`) };
+    }
+    case "renewPhotoRequest": return { ...s, photoRequests: photos(a.requestId, (r) => ({ ...r, expiresAt: a.expiresAt, status: r.status === "off" ? "open" : r.status })), audit: log(`New photo link sent to ${requestOf(a.requestId).to}`) };
+    case "turnOffPhotoRequest": return { ...s, photoRequests: photos(a.requestId, (r) => ({ ...r, status: "off" })), audit: log(`Photo link for ${requestOf(a.requestId).to} turned off`) };
+    case "addRequestPhoto": return { ...s, photoRequests: photos(a.requestId, (r) => ({ ...r, photos: [...r.photos, a.photo] })) };
+    case "removeRequestPhoto": return { ...s, photoRequests: photos(a.requestId, (r) => ({ ...r, photos: r.photos.filter((photo) => photo.id !== a.photoId) })) };
+    case "finishPhotoRequest": {
+      const request = requestOf(a.requestId); const deal = s.deals.find((d) => d.id === request.dealId)!;
+      return { ...s, photoRequests: photos(a.requestId, (r) => ({ ...r, status: "received", finishedAt: now(), finishedBy: a.by, note: a.note })), audit: log(`${deal.loanNumber}: ${request.photos.length} photos received from ${a.by}`) };
     }
     case "sendInspector": return { ...s, draws: s.draws.map((d) => (d.id === a.drawId && d.status === "submitted" ? { ...d, status: "inspecting" } : d)), audit: log("Draw inspection ordered") };
     case "recordInspection": return { ...s, draws: s.draws.map((d) => (d.id === a.drawId && d.status === "inspecting" ? { ...d, status: "inspected", lines: d.lines.map((line) => ({ ...line, observedPct: a.observed[line.scopeId] ?? 0 })) } : d)), audit: log("Draw inspection recorded") };

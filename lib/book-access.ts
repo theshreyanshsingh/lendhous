@@ -36,7 +36,7 @@ export function scopeBook(book: Book, viewer: Viewer): Book {
   if (view === "borrower") {
     const mine = book.deals.filter((deal) => deal.borrowerId === viewer.id);
     const ids = new Set(mine.map((deal) => deal.id));
-    return { ...empty, borrowerId: viewer.id, deals: mine.map((deal) => ({ ...forClient(deal), brokerId: undefined, brokerPoints: undefined })), draws: book.draws.filter((draw) => ids.has(draw.dealId)).map((draw) => ({ ...draw, approvers: [] })), payoffs: book.payoffs.filter((payoff) => ids.has(payoff.dealId)), messages: shared(ids) };
+    return { ...empty, borrowerId: viewer.id, deals: mine.map((deal) => ({ ...forClient(deal), brokerId: undefined, brokerPoints: undefined })), draws: book.draws.filter((draw) => ids.has(draw.dealId)).map((draw) => ({ ...draw, approvers: [] })), photoRequests: book.photoRequests.filter((request) => ids.has(request.dealId)), payoffs: book.payoffs.filter((payoff) => ids.has(payoff.dealId)), messages: shared(ids) };
   }
 
   if (view === "broker") {
@@ -91,6 +91,15 @@ export const canUploadFile = (book: Book, viewer: Viewer, dealId: string, allowe
   const view = viewFor(viewer.roleCodes);
   if (view === "admin") return allowed("review_documents");
   return (view === "borrower" && deal.borrowerId === viewer.id) || (view === "broker" && deal.brokerId === firmOf(viewer));
+};
+
+/** Who can send someone a photo link: staff who deal with documents, draws or servicing, and the borrower on their own loan. */
+export const canAskForPhotos = (book: Book, viewer: Viewer, dealId: string, allowed: (permission: Permission) => boolean) => {
+  const deal = book.deals.find((item) => item.id === dealId);
+  if (!deal) return false;
+  const view = viewFor(viewer.roleCodes);
+  if (view === "admin") return allowed("assign_inspection") || allowed("approve_draw") || allowed("review_documents") || allowed("service_loans");
+  return view === "borrower" && deal.borrowerId === viewer.id;
 };
 
 type Result = { error: string } | { action: BookAction };
@@ -155,6 +164,9 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
     case "uploadDoc":
       // Only the upload route does this, after the file is safely stored.
       return trusted ? ok() : no("Upload the file itself to mark this document as received.");
+    case "askForPhotos": case "renewPhotoRequest": case "turnOffPhotoRequest": case "addRequestPhoto": case "removeRequestPhoto": case "finishPhotoRequest":
+      // Only the server does these, once it has checked who is asking or which link was opened.
+      return trusted ? ok() : no(NOT_ALLOWED);
 
     case "route": case "sendTeaser":
       if (!dealOf(action.dealId)) return no(GONE);

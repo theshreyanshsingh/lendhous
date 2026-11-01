@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { nextStep } from "@/lib/approvals";
 import { sessionExpired } from "@/lib/auth";
-import { decryptField, DEV_FIELD_KEY, encryptField, last4, needsRotation, parseFieldKeys } from "@/lib/crypto";
+import { decryptBytes, decryptField, DEV_FIELD_KEY, encryptBytes, encryptField, fieldKeys, fieldNeedsSealing, fileNeedsSealing, isEncrypted, isEncryptedFile, jsonNeedsSealing, last4, needsRotation, openJson, parseFieldKeys, readField, sealJson } from "@/lib/crypto";
 import { assertMongoUrl, assertReleaseEnv, demoSeedBlocked, DEV_AUTH_SECRET, DEV_DEMO_PASSWORD, isDemoEmail, secureCookies } from "@/lib/deploy";
 import { accessChanges, accessError, accessFor, removeError } from "@/lib/member-rules";
 import { can, grantFor, homeFor, viewFor } from "@/lib/permissions";
@@ -57,6 +57,72 @@ describe("release guard (ported from UPB, Lendhous rules added)", () => {
     expect(demoSeedBlocked({})).toBe(false);
     expect(secureCookies({ NODE_ENV: "production" })).toBe(true);
     expect(secureCookies({ NODE_ENV: "production", ALLOW_HTTP_SESSIONS: "1" })).toBe(false);
+  });
+});
+
+describe("records and files at rest", () => {
+  const keys = parseFieldKeys(key("k1", 1));
+  const rotated = parseFieldKeys(`${key("k2", 2)},${key("k1", 1)}`);
+  it("a whole record round-trips, with nothing readable while stored", () => {
+    const record = { borrowerName: "Bonnie Borrower", app: { fico: 720 }, photos: [] };
+    const sealed = sealJson(record, "BookRecord:deals:d1", keys);
+    expect(JSON.stringify(sealed)).not.toContain("Bonnie");
+    expect(JSON.stringify(sealed)).not.toContain("720");
+    expect(openJson(sealed, "BookRecord:deals:d1", keys)).toEqual(record);
+  });
+  it("a record copied over another row won't open", () => {
+    expect(() => openJson(sealJson({ a: 1 }, "BookRecord:deals:d1", keys), "BookRecord:deals:d2", keys)).toThrow();
+  });
+  it("a record saved before encryption still reads, and is marked to be sealed", () => {
+    const old = { borrowerName: "Bonnie" };
+    expect(openJson(old, "BookRecord:deals:d1", keys)).toEqual(old);
+    expect(jsonNeedsSealing(old, keys)).toBe(true);
+    expect(jsonNeedsSealing(sealJson(old, "c", keys), keys)).toBe(false);
+    expect(jsonNeedsSealing(sealJson(old, "c", keys), rotated)).toBe(true);
+    // A record that happens to have a field called enc is still just a record.
+    expect(openJson({ enc: "not sealed" }, "c", keys)).toEqual({ enc: "not sealed" });
+  });
+  it("a field saved before encryption still reads", () => {
+    expect(readField("dana@example.com", "Lead.email:1", keys)).toBe("dana@example.com");
+    const sealed = encryptField("dana@example.com", "Lead.email:1", keys);
+    expect(isEncrypted(sealed)).toBe(true);
+    expect(readField(sealed, "Lead.email:1", keys)).toBe("dana@example.com");
+    expect(() => readField(sealed, "Lead.email:2", keys)).toThrow();
+    expect(fieldNeedsSealing("dana@example.com", keys)).toBe(true);
+    expect(fieldNeedsSealing(sealed, keys)).toBe(false);
+    expect(fieldNeedsSealing(sealed, rotated)).toBe(true);
+    expect(fieldNeedsSealing("", keys)).toBe(false);
+  });
+  it("a file round-trips, and its bytes aren't readable while stored", () => {
+    const plain = Buffer.from("%PDF-1.4 Bonnie Borrower bank statement");
+    const stored = encryptBytes(plain, "file:loans/d1/a.pdf", keys);
+    expect(isEncryptedFile(stored)).toBe(true);
+    expect(stored.includes(Buffer.from("Bonnie"))).toBe(false);
+    expect(stored.includes(Buffer.from("%PDF"))).toBe(false);
+    expect(decryptBytes(stored, "file:loans/d1/a.pdf", keys).equals(plain)).toBe(true);
+  });
+  it("a tampered or moved file won't open", () => {
+    const stored = encryptBytes(Buffer.from("real"), "file:a", keys);
+    expect(() => decryptBytes(stored, "file:b", keys)).toThrow();
+    const changed = Buffer.from(stored);
+    changed[changed.length - 1] ^= 1;
+    expect(() => decryptBytes(changed, "file:a", keys)).toThrow();
+  });
+  it("a file stored before encryption still opens, and rotation is noticed", () => {
+    const plain = Buffer.from("%PDF-1.4 old");
+    expect(decryptBytes(plain, "file:a", keys).equals(plain)).toBe(true);
+    expect(fileNeedsSealing(plain, keys)).toBe(true);
+    const stored = encryptBytes(plain, "file:a", keys);
+    expect(fileNeedsSealing(stored, keys)).toBe(false);
+    expect(fileNeedsSealing(stored, rotated)).toBe(true);
+    expect(decryptBytes(stored, "file:a", rotated).equals(plain)).toBe(true);
+    expect(() => decryptBytes(encryptBytes(plain, "file:a", rotated), "file:a", keys)).toThrow(/k2 is not configured/);
+  });
+  it("a live site refuses to run on the public development key", () => {
+    expect(() => fieldKeys({ NODE_ENV: "production", NEXT_PUBLIC_APP_URL: "https://portal.lendhous.com" })).toThrow(/required on a live site/);
+    expect(fieldKeys({ NODE_ENV: "production", NEXT_PUBLIC_APP_URL: "http://127.0.0.1:3000" })[0].id).toBe("dev");
+    expect(fieldKeys({ NODE_ENV: "development" })[0].id).toBe("dev");
+    expect(fieldKeys({ NODE_ENV: "production", NEXT_PUBLIC_APP_URL: "https://portal.lendhous.com", FIELD_ENCRYPTION_KEYS: key("k1", 1) })[0].id).toBe("k1");
   });
 });
 

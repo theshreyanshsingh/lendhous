@@ -63,8 +63,8 @@ export function DealBrief() {
         <label style={{ marginTop: 20 }}>Exit strategy &amp; project notes
           <textarea name="notes" rows={4} maxLength={1500} placeholder="Planned sale, rental hold, or refinance; project timeline and questions." required />
         </label>
-        {/* Hidden from people; bots that fill it are ignored. */}
-        <label className="hp" aria-hidden="true">Website<input name="website" tabIndex={-1} autoComplete="off" /></label>
+        {/* Hidden from people; bots that fill it are ignored. Named so that a browser's autofill won't fill it and lose a real brief. */}
+        <label className="hp" aria-hidden="true">Leave this empty<input name="leave_blank" tabIndex={-1} autoComplete="off" /></label>
         {state.error && <div className="form-error" role="alert">{state.error}</div>}
         <button className="button" style={{ marginTop: 25 }} type="submit" disabled={sending}>{sending ? "Sending…" : "Send to LendHous"}</button>
       </form>

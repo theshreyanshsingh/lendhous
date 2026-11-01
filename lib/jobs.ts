@@ -2,18 +2,20 @@
 // delinquency moves, insurance expiry, OFAC re-checks), so each job is named and runs at most once per day: the
 // JobRun.runKey unique index makes a second cron call that day a no-op. B0 ships the housekeeping jobs.
 import { Prisma } from "@prisma/client";
+import { encryptStoredData } from "@/lib/encrypt-data";
 import { prisma } from "@/lib/prisma";
 import { getSettings } from "@/lib/settings";
 
 type Job = (now: Date) => Promise<string>;
 
 async function purgeSessions(now: Date) {
-  const [sessions, links, windows] = await Promise.all([
+  const [sessions, links, photoLinks, windows] = await Promise.all([
     prisma.serverSession.deleteMany({ where: { expiresAt: { lt: now } } }),
     prisma.passwordLink.deleteMany({ where: { expiresAt: { lt: now } } }),
+    prisma.photoLink.deleteMany({ where: { expiresAt: { lt: now } } }),
     prisma.rateWindow.deleteMany({ where: { expiresAt: { lt: now } } }),
   ]);
-  return `removed ${sessions.count} expired sessions, ${links.count} password links, ${windows.count} rate windows`;
+  return `removed ${sessions.count} expired sessions, ${links.count} password links, ${photoLinks.count} photo links, ${windows.count} rate windows`;
 }
 
 async function cleanRetention(now: Date) {
@@ -25,7 +27,13 @@ async function cleanRetention(now: Date) {
   return `retention removed ${notices.count} read notices`;
 }
 
-export const JOBS: Record<string, Job> = { sessions: purgeSessions, retention: cleanRetention };
+// Catches anything saved before encryption, and moves records to the newest key after a rotation.
+async function sealStoredData() {
+  const done = await encryptStoredData();
+  return `encrypted ${done.records} loan records, ${done.leads} leads, ${done.notices} notices, ${done.files} files${done.missing ? `; ${done.missing} files missing` : ""}`;
+}
+
+export const JOBS: Record<string, Job> = { sessions: purgeSessions, retention: cleanRetention, encryption: sealStoredData };
 
 export const runKeyFor = (job: string, now: Date) => `${job}:${now.toISOString().slice(0, 10)}`;
 

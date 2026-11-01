@@ -32,6 +32,13 @@ export function alertsFor(before: Book, after: Book, action: BookAction): Alert[
       return [{ to: "borrower", dealId: action.dealId, subject: `We need a document: ${number(action.dealId)}`, body: `Please upload: ${action.name}.`, event: "doc.requested" }];
     case "requestDraw":
       return [{ to: "team", subject: `Draw requested: ${number(action.dealId)}`, body: `${action.by} requested a draw of $${action.lines.reduce((sum, line) => sum + line.requested, 0).toLocaleString("en-US")}.`, event: "draw.requested" }];
+    case "finishPhotoRequest": {
+      const request = after.photoRequests.find((item) => item.id === action.requestId);
+      if (!request) return [];
+      const told = `${action.by} sent ${request.photos.length} photo${request.photos.length === 1 ? "" : "s"} of the work.`;
+      const team: Alert = { to: "team", subject: `Photos received: ${number(request.dealId)}`, body: told, event: "photos.received" };
+      return request.who === "contractor" ? [team, { ...team, to: "borrower", dealId: request.dealId }] : [team];
+    }
     case "rejectDraw": case "releaseDraw": {
       const draw = after.draws.find((item) => item.id === action.drawId);
       if (!draw) return [];

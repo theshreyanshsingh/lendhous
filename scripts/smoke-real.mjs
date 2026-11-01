@@ -2,7 +2,8 @@
 // sign-up to funding, documents, draws, payoff, a partner bid, a loan sale and a broker deal, checking what each person
 // can and can't see. It wipes the loan book when it starts and ends, so it refuses anything but a local database.
 // Usage: npm run db:seed && npm run build && npm start, then npm run smoke:real
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import bcrypt from "bcryptjs";
 import { chromium } from "playwright-core";
 
@@ -21,7 +22,9 @@ const wipe = async () => {
   await prisma.bookRecord.deleteMany();
   await prisma.bookVersion.deleteMany();
   await prisma.document.deleteMany({ where: { ownerType: "LOAN" } });
-  await prisma.lead.deleteMany({ where: { email: { endsWith: DOMAIN } } });
+  await prisma.lead.deleteMany();
+  await prisma.photoLink.deleteMany();
+  await prisma.rateWindow.deleteMany({ where: { key: { startsWith: "lead:" } } });
   await prisma.user.deleteMany({ where: { email: { endsWith: DOMAIN } } });
   await prisma.rateWindow.deleteMany({ where: { key: { contains: DOMAIN } } });
   await prisma.platformSettings.update({ where: { id: "default" }, data: { offerSampleData: true } });
@@ -58,7 +61,11 @@ const path = (page) => new URL(page.url()).pathname;
 // What actually reached this person's browser, including data the screen doesn't show.
 const received = (page) => page.content();
 const go = (page, route) => page.goto(BASE + route, { waitUntil: "networkidle" });
-const PDF = { name: "bank-statement.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 real smoke test file") };
+// Three megabytes, like a real scan: well past the 1 MB a server action takes unless it's told otherwise.
+const PDF = { name: "bank-statement.pdf", mimeType: "application/pdf", buffer: Buffer.concat([Buffer.from("%PDF-1.4 real smoke test file\n"), Buffer.alloc(3 * 1024 * 1024, 32)]) };
+// What's on disk under a stored file's key.
+const STORED = (key) => readFileSync(join(process.cwd(), "storage", "uploads", key));
+const rawRows = async (collection) => JSON.stringify((await prisma.$runCommandRaw({ find: collection, filter: {} })).cursor.firstBatch);
 
 try {
   const owner = await person("owner");
@@ -69,7 +76,54 @@ try {
   const partner = await person("partner");
   const buyer = await person("buyer");
 
+  // A brief from the public site, as a visitor sends it
+  const visitorContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const visitor = await visitorContext.newPage();
+  visitor.on("pageerror", (error) => errors.push(`visitor: ${error.message}`));
+  await visitor.goto(`${BASE}/start`);
+  await visitor.getByLabel("Your name").fill("Vera Visitor");
+  await visitor.getByLabel("Email").fill(`vera@${DOMAIN}`);
+  await visitor.getByLabel("Phone (optional)").fill("(555) 010-0300");
+  await visitor.getByLabel("Property city").fill("Tampa");
+  await visitor.getByLabel("Property state").fill("FL");
+  await visitor.getByLabel("Purchase price or current value ($)").fill("300000");
+  await visitor.getByLabel("Estimated renovation budget ($)").fill("60000");
+  await visitor.getByLabel("Requested loan amount ($)").fill("270000");
+  await visitor.getByLabel("Exit strategy & project notes").fill("Refinance into a rental next spring.");
+  await visitor.getByRole("button", { name: "Send to LendHous" }).click();
+  ok("a visitor can send a brief from a phone", await seen(visitor.getByTestId("deal-brief")));
+  const leadRows = await rawRows("Lead");
+  ok("the brief's contact details are encrypted in the database", !leadRows.includes("Vera Visitor") && !leadRows.includes(`vera@${DOMAIN}`) && !leadRows.includes("(555) 010-0300") && !leadRows.includes("Refinance into a rental") && leadRows.includes("enc1:"));
+  ok("so is the alert saved for the team", !(await rawRows("Notification")).includes("Vera Visitor"));
+  await go(owner, "/admin/account/notifications");
+  ok("the owner gets the alert with the brief in it", await seen(owner.getByTestId("notice").filter({ hasText: "New project brief: Tampa, FL" }).filter({ hasText: "Vera Visitor" })));
+  await go(owner, "/admin");
+  ok("the pipeline says a brief is waiting", (await owner.getByTestId("attention-leads").innerText()).includes("Website briefs"));
+  await go(owner, "/admin/leads");
+  const veraRow = owner.getByTestId("leads-table").locator("tr", { hasText: "Vera Visitor" });
+  ok("the brief reaches the leads inbox, readable", (await seen(veraRow)) && (await veraRow.innerText()).includes("Refinance into a rental") && (await veraRow.innerText()).includes("$270,000"));
+  ok("staff can email the visitor from it", (await veraRow.getByRole("link", { name: `vera@${DOMAIN}` }).getAttribute("href")) === `mailto:vera@${DOMAIN}`);
+  await veraRow.getByRole("button", { name: "Mark contacted" }).click();
+  ok("staff can mark it contacted", await seen(veraRow.getByText("Contacted")));
+  await go(borrower, "/admin/leads");
+  ok("a borrower can't see the leads", !(await received(borrower)).includes("Vera Visitor"));
+  await visitor.goto(`${BASE}/start`);
+  await visitor.getByLabel("Your name").fill("Rob Robot");
+  await visitor.getByLabel("Email").fill(`rob@${DOMAIN}`);
+  await visitor.getByLabel("Property city").fill("Tampa");
+  await visitor.getByLabel("Property state").fill("FL");
+  await visitor.getByLabel("Purchase price or current value ($)").fill("300000");
+  await visitor.getByLabel("Requested loan amount ($)").fill("270000");
+  await visitor.getByLabel("Exit strategy & project notes").fill("Spam.");
+  await visitor.locator("input[name=leave_blank]").evaluate((input) => { input.value = "http://spam.example"; });
+  const before = await prisma.lead.count();
+  await visitor.getByRole("button", { name: "Send to LendHous" }).click();
+  await seen(visitor.getByTestId("deal-brief"));
+  ok("a bot filling the hidden field gets a normal reply and nothing is kept", (await prisma.lead.count()) === before);
+  await visitorContext.close();
+
   // An empty real account, then its first capital source
+  await go(owner, "/admin");
   ok("a real owner starts with an empty pipeline", (await owner.locator("main").innerText()).includes("No loans in the pipeline yet."));
   await go(owner, "/admin/capital");
   await owner.getByTestId("add-source").click();
@@ -122,12 +176,18 @@ try {
   ok("a file that isn't what it claims is refused", await seen(borrower.getByTestId("book-error").filter({ hasText: "do not match" })));
   await bank.getByRole("button", { name: "Upload" }).click();
   await borrower.getByTestId("file-input").setInputFiles(PDF);
-  ok("a real document uploads", await seen(bank.getByTestId("doc-file")));
+  ok("a real document of 3 MB uploads", await seen(bank.getByTestId("doc-file")));
   const fileUrl = await bank.getByTestId("doc-file").getAttribute("href");
   const mine = await borrower.request.get(BASE + fileUrl);
   ok("the borrower can open their file", mine.status() === 200 && (await mine.text()).startsWith("%PDF"));
   const staffCopy = await under.request.get(BASE + fileUrl);
   ok("the team can open it", staffCopy.status() === 200);
+  const bankFile = await prisma.document.findFirstOrThrow({ where: { ownerId: dealId, documentType: "bank" } });
+  const bankBytes = STORED(bankFile.storageKey);
+  ok("the file is encrypted on disk, and opens as the original", !bankBytes.includes(Buffer.from("%PDF")) && bankBytes.subarray(0, 6).toString() === "LHENC1" && (await staffCopy.body()).equals(PDF.buffer));
+  ok("its name is encrypted too", !(await rawRows("Document")).includes("bank-statement"));
+  const bookRows = await rawRows("BookRecord");
+  ok("the loan book is encrypted in the database", !bookRows.includes("Bonnie Borrower") && !bookRows.includes("100 Real Street") && !bookRows.includes("Real Flips") && !bookRows.includes("bank-statement") && bookRows.includes("enc1:"));
   ok("another borrower can't", (await other.request.get(BASE + fileUrl)).status() === 404);
   ok("a partner can't", (await partner.request.get(BASE + fileUrl)).status() === 404);
   ok("nobody signed out can", (await (await browser.newContext()).request.get(BASE + fileUrl, { maxRedirects: 0 })).status() === 401);
@@ -218,6 +278,127 @@ try {
   const photo = await card.getByTestId("draw-photos").getByRole("link").first().getAttribute("href");
   ok("the team can open the photo", (await owner.request.get(BASE + photo)).status() === 200);
   ok("another borrower can't open the photo", (await other.request.get(BASE + photo)).status() === 404);
+
+  // A contractor sends photos through a link, with no account
+  await card.getByTestId("ask-photos").click();
+  await card.getByTestId("photo-to").fill("Carl Contractor");
+  await card.getByTestId("photo-email").fill(`carl@${DOMAIN}`);
+  await card.getByTestId("photo-send-link").click();
+  ok("staff get a link to send", await seen(card.getByTestId("photo-issued")));
+  const photoHref = await card.getByTestId("photo-link").inputValue();
+  const photoPath = new URL(photoHref).pathname;
+  const photoToken = photoPath.split("/").pop();
+  ok("only the link's hash is stored", photoToken.length > 40 && !(await rawRows("PhotoLink")).includes(photoToken) && !(await rawRows("BookRecord")).includes(photoToken));
+  ok("the link never lands in the saved notices", !(await rawRows("Notification")).includes(photoToken));
+  ok("it shows on the draw", (await card.getByTestId("photo-request").innerText()).includes("Carl Contractor"));
+
+  const carlContext = await browser.newContext({ viewport: { width: 390, height: 844 }, geolocation: { latitude: 26.01, longitude: -80.15 }, permissions: ["geolocation"] });
+  const carl = await carlContext.newPage();
+  carl.on("pageerror", (error) => errors.push(`contractor: ${error.message}`));
+  const carlResponse = await carl.goto(BASE + photoPath);
+  ok("the link opens with no account", await seen(carl.getByTestId("photo-guide")));
+  ok("it greets them and names the property", (await carl.locator("main").innerText()).includes("Hi Carl") && (await carl.locator("main").innerText()).includes("100 Real Street"));
+  ok("the link can't leak or be indexed", carlResponse.headers()["referrer-policy"] === "no-referrer" && carlResponse.headers()["x-robots-tag"].includes("noindex") && carlResponse.headers()["cache-control"].includes("no-store"));
+  const carlHtml = await received(carl);
+  ok("no loan number, amount or borrower details reach them", !carlHtml.includes("LH-1001") && !carlHtml.includes("Real Flips") && !carlHtml.includes("Bonnie Borrower") && !carlHtml.includes("6,000") && !carlHtml.includes("6000"));
+  ok("the guide covers the property and the draw's budget lines", (await carl.getByTestId("photo-outline").innerText()).includes("The property") && (await carl.getByTestId("photo-outline").innerText()).includes("Kitchen"));
+  await carl.getByRole("button", { name: "Share location" }).click();
+  ok("they can share their location", await seen(carl.getByTestId("photo-location-on")));
+  // A camera-sized photo, made in the browser, because a real one has to survive being made smaller.
+  const cameraPhoto = Buffer.from(await carl.evaluate(() => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 4000; canvas.height = 3000;
+    const context = canvas.getContext("2d");
+    const image = context.createImageData(4000, 3000);
+    for (let i = 0; i < image.data.length; i += 4) { const shade = Math.random() * 255; image.data[i] = shade; image.data[i + 1] = shade; image.data[i + 2] = shade; image.data[i + 3] = 255; }
+    context.putImageData(image, 0, 0);
+    return canvas.toDataURL("image/jpeg", 0.95).split(",")[1];
+  }), "base64");
+  await carl.getByTestId("photo-start").click();
+  await carl.getByTestId("shot-input-property-front").setInputFiles({ name: "IMG_0001.jpg", mimeType: "image/jpeg", buffer: cameraPhoto });
+  ok(`a ${(cameraPhoto.length / 1048576).toFixed(1)} MB camera photo uploads`, await seen(carl.locator("[data-testid=photo-tile][data-state=sent]"), 30_000));
+  await carl.getByTestId("photo-next").click();
+  ok("the next step says what to photograph", (await carl.getByTestId("photo-step-kitchen").innerText()).includes("Cabinets and counters"));
+  await carl.getByTestId("shot-input-kitchen-room").setInputFiles({ name: "notes.jpg", mimeType: "image/jpeg", buffer: Buffer.from("not a picture at all") });
+  ok("a file that isn't a photo is refused, with a way out", await seen(carl.locator("[data-testid=photo-tile][data-state=failed]")));
+  await carl.locator("[data-testid=photo-tile][data-state=failed]").getByTestId("photo-remove").click();
+  await gone(carl.locator("[data-testid=photo-tile]"));
+  await carl.getByTestId("shot-input-kitchen-room").setInputFiles({ name: "IMG_0002.jpg", mimeType: "image/jpeg", buffer: cameraPhoto });
+  await seen(carl.locator("[data-testid=photo-tile][data-state=sent]"), 30_000);
+  await carl.getByTestId("shot-input-kitchen-cabinets").setInputFiles({ name: "IMG_0003.jpg", mimeType: "image/jpeg", buffer: cameraPhoto });
+  await carl.waitForFunction(() => document.querySelectorAll("[data-testid=photo-tile][data-state=sent]").length === 2, null, { timeout: 30_000 });
+  await carl.locator("[data-testid=shot-kitchen-cabinets]").getByTestId("photo-remove").click();
+  await carl.waitForFunction(() => document.querySelectorAll("[data-testid=photo-tile]").length === 1);
+  ok("a wrong photo can be taken back", (await carl.locator("[data-testid=shot-kitchen-cabinets] [data-testid=photo-tile]").count()) === 0);
+  await carl.reload();
+  await carl.getByTestId("photo-start").click();
+  ok("coming back to the link shows what was already sent", (await carl.locator("[data-testid=photo-tile][data-state=sent]").count()) === 1 && (await carl.locator("[data-testid=photo-tile] img").evaluate((img) => img.decode().then(() => img.naturalWidth > 0))));
+  await carl.getByTestId("photo-next").click();
+  await carl.getByTestId("photo-next").click();
+  ok("the last step lists what's missing", (await carl.getByTestId("photo-review").innerText()).includes("No photo yet: Cabinets and counters"));
+  ok("sending waits for the confirmation", await carl.getByTestId("photo-send").isDisabled());
+  await carl.getByTestId("photo-note").fill("Appliances arrive next week.");
+  await carl.getByTestId("photo-confirm").check();
+  await carl.getByTestId("photo-send").click();
+  ok("the contractor is thanked", await seen(carl.getByTestId("photo-done")));
+
+  const sentPhotos = await prisma.document.findMany({ where: { ownerId: dealId, documentType: "draw_photo", uploadedById: { isSet: false } }, orderBy: { createdAt: "asc" } });
+  const live = sentPhotos.filter((row) => !row.deletedAt);
+  ok("a camera photo is made smaller before it leaves the phone", live.length === 2 && live.every((row) => row.size < cameraPhoto.length && row.mime === "image/jpeg"));
+  ok("the photos are encrypted on disk", live.every((row) => STORED(row.storageKey).subarray(0, 6).toString() === "LHENC1"));
+  await go(owner, "/admin/account/notifications");
+  ok("the team hears that photos came in", await seen(owner.getByTestId("notice").filter({ hasText: "Photos received" })));
+  await go(borrower, "/admin/account/notifications");
+  ok("so does the borrower", await seen(borrower.getByTestId("notice").filter({ hasText: "Photos received" })));
+  await go(owner, "/admin/draws");
+  const receivedRow = card.getByTestId("photo-request");
+  ok("the photos appear on the draw, by budget line", (await receivedRow.innerText()).includes("2 photos received") && (await receivedRow.getByTestId("photo-group").count()) === 2);
+  ok("with the contractor's note", (await receivedRow.getByTestId("photo-request-note").innerText()).includes("Appliances arrive next week."));
+  ok("and what they didn't send", (await receivedRow.getByTestId("photo-missing").innerText()).includes("Kitchen, cabinets and counters"));
+  ok("and where they were sent from", (await receivedRow.getByTestId("photo-place").first().getAttribute("href")).includes("26.01,-80.15"));
+  const thumb = receivedRow.locator("img").first();
+  ok("the thumbnails show the real photo", await thumb.evaluate((img) => img.decode().then(() => img.naturalWidth > 0)));
+  mkdirSync("screenshots", { recursive: true });
+  await card.screenshot({ path: "screenshots/19-real-draw-photos.png" });
+  const thumbUrl = await thumb.getAttribute("src");
+  const shownPhoto = await owner.request.get(BASE + thumbUrl);
+  ok("it comes back as a picture, decrypted", shownPhoto.status() === 200 && shownPhoto.headers()["content-type"] === "image/jpeg" && (await shownPhoto.body()).subarray(0, 2).equals(Buffer.from([0xff, 0xd8])));
+  ok("another borrower can't open it", (await other.request.get(BASE + thumbUrl)).status() === 404);
+  const photoId = thumbUrl.split("/").pop().split("?")[0];
+  const opens = () => prisma.auditEvent.count({ where: { entityId: photoId, action: "document.opened" } });
+  const opensBefore = await opens();
+  await owner.request.get(`${BASE}/api/documents/${photoId}?view=inline`);
+  ok("opening a photo is logged, but a thumbnail isn't", (await opens()) === opensBefore + 1);
+  ok("the upload is in the audit log, with no account on it", (await prisma.auditEvent.findFirstOrThrow({ where: { entityId: photoId, action: "document.uploaded" } })).actorId === null);
+  ok("the link holder can't open the borrower's other files", (await carl.request.get(`${BASE}/api/photo-links/${photoToken}/${bankFile.id}`)).status() === 404);
+  ok("nor reach the staff route", (await carl.request.get(`${BASE}/api/documents/${bankFile.id}`)).status() === 401);
+  await go(borrower, `/admin/borrower/${dealId}`);
+  ok("the borrower sees the photos on their loan", (await borrower.getByTestId("photo-request").innerText()).includes("2 photos received"));
+
+  await carl.goto(BASE + photoPath);
+  ok("the link still opens to add more", await seen(carl.getByTestId("photo-add-more")));
+  await go(owner, "/admin/draws");
+  await receivedRow.getByTestId("photo-off").click();
+  await gone(receivedRow.getByTestId("photo-off"));
+  await carl.goto(BASE + photoPath);
+  ok("turning the link off closes it at once", await seen(carl.getByTestId("photo-link-closed")));
+  ok("and it won't take uploads", (await carl.request.post(`${BASE}/api/photo-links/${photoToken}`, { multipart: { scopeId: "kitchen", shot: "room", file: { name: "a.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff]) } } })).status() === 404);
+  await receivedRow.getByTestId("photo-renew").click();
+  ok("staff can make a new link", await seen(card.getByTestId("photo-issued")));
+  const renewedPath = new URL(await card.getByTestId("photo-link").inputValue()).pathname;
+  await carl.goto(BASE + renewedPath);
+  ok("the new link opens, with the old one still dead", (await seen(carl.getByTestId("photo-guide"))) && renewedPath !== photoPath);
+
+  await go(borrower, `/admin/borrower/${dealId}`);
+  await borrower.getByTestId("ask-photos").click();
+  ok("a borrower can send their contractor a link, but not pick who it's for", (await borrower.getByTestId("photo-who-borrower").count()) === 0 && (await borrower.getByTestId("photo-to").inputValue()) === "Carl Contractor");
+  await borrower.getByTestId("photo-send-link").click();
+  ok("and gets one", await seen(borrower.getByTestId("photo-issued")));
+  await go(other, `/admin/borrower/${dealId}`);
+  ok("nobody else's browser receives any of it", !(await received(other)).includes("Carl Contractor"));
+  await go(broker, "/admin/broker");
+  ok("nor a broker's", !(await received(broker)).includes("Carl Contractor"));
+
   await card.getByTestId("send-inspector").click();
   await card.getByTestId("observed-kitchen").fill("100");
   await card.getByTestId("record-inspection").click();
@@ -227,6 +408,10 @@ try {
   await seen(owner.getByTestId("closed-draw"));
   await go(borrower, `/admin/borrower/${dealId}`);
   ok("the borrower sees the money released", (await borrower.getByTestId("my-draw").innerText()).includes("Funds released"));
+  await carl.goto(BASE + renewedPath);
+  ok("a link closes once its draw is paid", await seen(carl.getByTestId("photo-link-closed")));
+  ok("and stops showing its photos", (await carl.request.get(`${BASE}/api/photo-links/${renewedPath.split("/").pop()}/${photoId}`)).status() === 404);
+  await carlContext.close();
 
   // Payments and payoff
   await go(owner, "/admin/servicing");

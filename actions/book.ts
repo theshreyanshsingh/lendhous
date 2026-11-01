@@ -8,6 +8,7 @@ import { parseAction } from "@/lib/book-actions";
 import { sendAlerts } from "@/lib/book-alerts";
 import { permissionCheck, readBook, runAction } from "@/lib/book-store";
 import { requirePermission, requireUser } from "@/lib/auth";
+import { encryptField } from "@/lib/crypto";
 import type { Book, BookAction } from "@/lib/book";
 import { isDemoEmail } from "@/lib/deploy";
 import { inviteMember } from "@/lib/members";
@@ -15,7 +16,7 @@ import { accessFor } from "@/lib/member-rules";
 import { prisma } from "@/lib/prisma";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import { extensionOf, mimeFor, putBytes, safeBasename } from "@/lib/storage";
-import { attachmentName, uploadProblem } from "@/lib/uploads";
+import { attachmentName, documentNameContext, uploadProblem } from "@/lib/uploads";
 
 export type BookReply = { book?: Book; error?: string };
 
@@ -75,9 +76,9 @@ export async function uploadLoanFile(form: FormData): Promise<BookReply & { docu
   const ext = extensionOf(file.name)!;
   const key = `loans/${safeBasename(dealId)}/${id}.${ext}`;
   const mime = mimeFor(ext, file.type);
-  await putBytes(key, bytes, mime);
+  await putBytes(key, bytes);
   await prisma.document.create({
-    data: { id, ownerType: "LOAN", ownerId: dealId, documentType: docId || "draw_photo", originalName: attachmentName(file.name), storageKey: key, mime, size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex"), uploadedById: viewer.id },
+    data: { id, ownerType: "LOAN", ownerId: dealId, documentType: docId || "draw_photo", originalName: encryptField(attachmentName(file.name), documentNameContext(id)), storageKey: key, mime, size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex"), uploadedById: viewer.id },
   });
   await audit({ actorId: viewer.id, action: "document.uploaded", entityType: "Document", entityId: id, after: { dealId, documentType: docId || "draw_photo", size: bytes.length } });
   if (!docId) return { documentId: id };

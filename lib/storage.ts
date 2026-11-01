@@ -1,5 +1,6 @@
 import fs from "fs/promises";
 import path from "path";
+import { decryptBytes, encryptBytes, fileNeedsSealing } from "@/lib/crypto";
 
 export function storageRoot() {
   return path.join(process.cwd(), "storage");
@@ -21,7 +22,7 @@ export function safeBasename(name: string) {
   return name.replace(/[^a-zA-Z0-9._-]+/g, "_").slice(0, 80) || "file";
 }
 
-const ALLOWED = new Set(["pdf", "png", "jpg", "jpeg", "webp", "heic", "csv", "xls", "xlsx", "doc", "docx", "txt"]);
+const ALLOWED = new Set(["pdf", "png", "jpg", "jpeg", "webp", "heic", "heif", "csv", "xls", "xlsx", "doc", "docx", "txt"]);
 
 export function extensionOf(name: string) {
   const ext = name.split(".").pop()?.toLowerCase() ?? "";
@@ -36,6 +37,7 @@ export function mimeFor(ext: string, fallback: string) {
     jpeg: "image/jpeg",
     webp: "image/webp",
     heic: "image/heic",
+    heif: "image/heif",
     csv: "text/csv",
     xls: "application/vnd.ms-excel",
     xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -91,52 +93,27 @@ async function s3Client() {
   });
 }
 
-export async function putBytes(key: string, bytes: Buffer, mime = "application/octet-stream") {
-  assertStorageKey(key);
+const fileContext = (key: string) => `file:${key}`;
+
+async function writeStored(key: string, stored: Buffer) {
   assertRemoteOnVercel();
   if (storageMode() === "blob") {
     const { put } = await import("@vercel/blob");
-    await put(key, bytes, { access: "private", addRandomSuffix: false, allowOverwrite: true, contentType: mime });
+    await put(key, stored, { access: "private", addRandomSuffix: false, allowOverwrite: true, contentType: "application/octet-stream" });
     return;
   }
   if (storageMode() === "s3") {
     const { PutObjectCommand } = await import("@aws-sdk/client-s3");
     const client = await s3Client();
-    await client.send(
-      new PutObjectCommand({
-        Bucket: process.env.S3_BUCKET,
-        Key: s3Key(key),
-        Body: bytes,
-        ContentType: mime,
-      }),
-    );
+    await client.send(new PutObjectCommand({ Bucket: process.env.S3_BUCKET, Key: s3Key(key), Body: stored, ContentType: "application/octet-stream" }));
     return;
   }
   const full = localPath(key);
   await ensureDir(path.dirname(full));
-  await fs.writeFile(full, bytes);
+  await fs.writeFile(full, stored);
 }
 
-/**
- * A short-lived private link to a stored file (Spec v3 10.2, placeholder five minutes). Only S3/R2 can sign links;
- * Vercel Blob and local disk return null, and the caller streams the file through an authenticated route instead.
- */
-export async function signedDownloadUrl(key: string, filename: string, ttlSeconds = 300) {
-  assertStorageKey(key);
-  if (storageMode() !== "s3") return null;
-  const { GetObjectCommand } = await import("@aws-sdk/client-s3");
-  const { getSignedUrl } = await import("@aws-sdk/s3-request-presigner");
-  const client = await s3Client();
-  const command = new GetObjectCommand({
-    Bucket: process.env.S3_BUCKET,
-    Key: s3Key(key),
-    ResponseContentDisposition: `attachment; filename="${filename.replace(/["\r\n]/g, "")}"`,
-  });
-  return getSignedUrl(client, command, { expiresIn: ttlSeconds });
-}
-
-export async function getBytes(key: string) {
-  assertStorageKey(key);
+async function readStored(key: string) {
   assertRemoteOnVercel();
   if (storageMode() === "blob") {
     const { get } = await import("@vercel/blob");
@@ -164,4 +141,27 @@ export async function getBytes(key: string) {
     }
   }
   return fs.readFile(localPath(key));
+}
+
+/** Files are encrypted before they leave the server, so the bucket or disk only ever holds ciphertext. */
+export async function putBytes(key: string, bytes: Buffer) {
+  assertStorageKey(key);
+  await writeStored(key, encryptBytes(bytes, fileContext(key)));
+}
+
+export async function getBytes(key: string) {
+  assertStorageKey(key);
+  return decryptBytes(await readStored(key), fileContext(key));
+}
+
+/** Encrypts a file stored before encryption, or moves one to the current key. False when it was already fine. */
+export async function resealFile(key: string) {
+  assertStorageKey(key);
+  const stored = await readStored(key);
+  if (!fileNeedsSealing(stored)) return false;
+  const plain = decryptBytes(stored, fileContext(key));
+  const sealed = encryptBytes(plain, fileContext(key));
+  if (!decryptBytes(sealed, fileContext(key)).equals(plain)) throw new Error(`Could not verify the encrypted copy of ${key}.`);
+  await writeStored(key, sealed);
+  return true;
 }

@@ -4,24 +4,28 @@ import { Prisma } from "@prisma/client";
 import { cache } from "react";
 import { authorize, scopeBook, type Viewer } from "@/lib/book-access";
 import { emptyBook, reducer, type Book, type BookAction } from "@/lib/book";
+import { openJson, sealJson } from "@/lib/crypto";
 import { can, type Permission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 
-const LISTS = ["deals", "bids", "partners", "buyers", "brokers", "sales", "offers", "draws", "payoffs", "messages", "sources"] as const;
+const LISTS = ["deals", "bids", "partners", "buyers", "brokers", "sales", "offers", "draws", "payoffs", "messages", "sources", "photoRequests"] as const;
 const AUDIT_ID = "activity:feed";
 const VERSION_ID = "main";
 const ATTEMPTS = 6;
 
 const rowId = (kind: string, id: string) => `${kind}:${id}`;
+/** What each record is bound to when it's encrypted, so a row copied over another won't open. */
+export const rowContext = (id: string) => `BookRecord:${id}`;
 // Newest first, as the reducer builds these lists. Messages read oldest first.
-const NEWEST_FIRST = new Set<string>(["deals", "bids", "sales", "offers", "draws", "payoffs"]);
+const NEWEST_FIRST = new Set<string>(["deals", "bids", "sales", "offers", "draws", "payoffs", "photoRequests"]);
 
 export async function readBook() {
   const [rows, versionRow] = await Promise.all([prisma.bookRecord.findMany({ orderBy: { createdAt: "asc" } }), prisma.bookVersion.findUnique({ where: { id: VERSION_ID } })]);
   const book = emptyBook();
   for (const row of rows) {
-    if (row.id === AUDIT_ID) book.audit = row.data as unknown as Book["audit"];
-    else if ((LISTS as readonly string[]).includes(row.kind)) (book[row.kind as (typeof LISTS)[number]] as unknown[]).push(row.data);
+    const data = openJson(row.data, rowContext(row.id));
+    if (row.id === AUDIT_ID) book.audit = data as Book["audit"];
+    else if ((LISTS as readonly string[]).includes(row.kind)) (book[row.kind as (typeof LISTS)[number]] as unknown[]).push(data);
   }
   for (const list of LISTS) if (NEWEST_FIRST.has(list)) book[list].reverse();
   return { book, version: versionRow?.version ?? 0 };
@@ -30,22 +34,21 @@ export async function readBook() {
 /** One read per request, however many components ask. */
 export const loadBook = cache(() => readBook());
 
-const asJson = (value: unknown) => JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
-
 class Conflict extends Error {}
 
 async function saveChanges(before: Book, after: Book, version: number) {
   const writes: { id: string; kind: string; data: Prisma.InputJsonValue }[] = [];
+  const sealed = (id: string, kind: string, value: unknown) => ({ id, kind, data: sealJson(value, rowContext(id)) });
   const removes: string[] = [];
   for (const kind of LISTS) {
     const old = new Map((before[kind] as { id: string }[]).map((item) => [item.id, JSON.stringify(item)]));
     for (const item of after[kind] as { id: string }[]) {
-      if (old.get(item.id) !== JSON.stringify(item)) writes.push({ id: rowId(kind, item.id), kind, data: asJson(item) });
+      if (old.get(item.id) !== JSON.stringify(item)) writes.push(sealed(rowId(kind, item.id), kind, item));
       old.delete(item.id);
     }
     for (const id of old.keys()) removes.push(rowId(kind, id));
   }
-  if (JSON.stringify(before.audit) !== JSON.stringify(after.audit)) writes.push({ id: AUDIT_ID, kind: "activity", data: asJson(after.audit) });
+  if (JSON.stringify(before.audit) !== JSON.stringify(after.audit)) writes.push(sealed(AUDIT_ID, "activity", after.audit));
   try {
     await prisma.$transaction(async (tx) => {
       await tx.bookVersion.upsert({ where: { id: VERSION_ID }, create: { id: VERSION_ID, version: 0 }, update: {} });

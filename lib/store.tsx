@@ -6,9 +6,9 @@ import { evaluate, capitalAvailable, type Application, type Estimate } from "./e
 import type { CapitalSource, Deal } from "./mockData";
 
 // Demo seats share one demo book in the browser, so a bid placed as the partner seat shows up for the staff seats.
-const KEY = "lendhous-demo-v3";
+const KEY = "lendhous-demo-v4";
 // Any other account can load the same book for itself. It stays with that account, in that browser.
-const sampleKey = (accountId: string) => `lendhous-sample-v2:${accountId}`;
+const sampleKey = (accountId: string) => `lendhous-sample-v3:${accountId}`;
 
 type Store = {
   s: Book;

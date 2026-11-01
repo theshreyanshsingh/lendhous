@@ -193,6 +193,18 @@ model PasswordLink {
   @@index([userId])
 }
 
+// The link a contractor or borrower opens to send photos of finished work, with no account (lib/photo-links.ts).
+// Only the hash is stored. The request it opens lives in the loan book.
+model PhotoLink {
+  id        String   @id @default(uuid()) @map("_id")
+  requestId String
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([requestId])
+}
+
 model RateWindow {
   key       String   @id @map("_id")
   count     Int      @default(0)
@@ -296,6 +308,7 @@ model PlatformSettings {
 }
 
 // A project brief sent from the public site's /start form. Not an application: no credit is pulled and nothing is decided on it.
+// Name, email, phone, city, state and notes are encrypted (lib/lead-store.ts).
 model Lead {
   id                 String    @id @default(uuid()) @map("_id")
   name               String

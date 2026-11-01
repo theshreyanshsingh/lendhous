@@ -2,6 +2,7 @@ import ApplicationWizard, { type LoanPrefill } from "@/components/ApplicationWiz
 import { requirePermission } from "@/lib/auth";
 import type { Product } from "@/lib/engine";
 import { q } from "@/lib/format";
+import { openLead } from "@/lib/lead-store";
 import { notDeleted, prisma } from "@/lib/prisma";
 
 export const metadata = { title: "New loan" };
@@ -13,7 +14,8 @@ const PRODUCT_FOR: Record<string, Product> = { "Fix & flip": "fix_flip", "DSCR r
 export default async function NewLoan({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   await requirePermission("view_pipeline");
   const leadId = q(await searchParams, "lead");
-  const lead = leadId ? await prisma.lead.findFirst({ where: { id: leadId, ...notDeleted } }) : null;
+  const row = leadId ? await prisma.lead.findFirst({ where: { id: leadId, ...notDeleted } }) : null;
+  const lead = row && openLead(row);
   const prefill: LoanPrefill | undefined = lead
     ? {
         leadId: lead.id,

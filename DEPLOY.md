@@ -7,8 +7,8 @@ This follows UPB Capital's DEPLOY.md: Vercel plus MongoDB Atlas, or a plain Node
 Lendhous will hold SSNs, credit reports and bank details, so it gets stricter isolation than UPB:
 
 1. **Database.** Use a separate Atlas project or cluster for Lendhous, not SynergyFund's shared cluster. Create a database user whose only role is `readWrite` on the `lendhous` database. Do not reuse SynergyFund's or UPB's user.
-2. **Field-encryption keys.** Generate `FIELD_ENCRYPTION_KEYS="k1:$(openssl rand -base64 32)"` and keep a copy in the password manager; losing it loses every encrypted field. Before real SSNs arrive, move to AWS KMS envelope keys (pre-launch item, Spec v3 10.2).
-3. **Files.** Borrowers upload bank statements and IDs here, so use Lendhous's own private bucket, not one shared with another app. Only S3/R2 can issue the five-minute signed links. Malware scanning on upload is still open (Spec v3 10.2).
+2. **Encryption keys.** Generate `FIELD_ENCRYPTION_KEYS="k1:$(openssl rand -base64 32)"` and keep a copy in the password manager. The whole loan book, every brief and every stored file are encrypted with it, so **losing it loses all of them, and a database backup won't bring them back**. Before real SSNs arrive, move to AWS KMS envelope keys (pre-launch item, Spec v3 10.2).
+3. **Files.** Borrowers upload bank statements and IDs here, so use Lendhous's own private bucket, not one shared with another app. Malware scanning on upload is still open (Spec v3 10.2).
 
 ## Checklist (Vercel + Atlas)
 
@@ -52,7 +52,7 @@ Optional: `ADMIN_NAME`, `LENDER_NAME`, `TEAM_EMAIL`, `SMTP_PORT`, `SMTP_USER`, `
 
 ## If mail stops working
 
-Sign-in keeps working, but invites, forgot-password links and alerts don't arrive. An admin can still send someone a password link from Members and copy it from the screen.
+Sign-in keeps working, but invites, forgot-password links, photo links and alerts don't arrive. An admin can still copy a password link from Members and a photo link from the draw, and website briefs still reach the leads inbox.
 
 ## A plain server under pm2
 
@@ -65,10 +65,18 @@ pm2 start node_modules/.bin/tsx --name lendhous-jobs --cron-restart "0 6 * * *" 
 pm2 save
 ```
 
-To update it later. The build regenerates the database client and syncs the indexes, so schema changes need no extra step. Use `npm ci` first if `package.json` changed.
+To update it later. The build regenerates the database client and syncs the indexes, so schema changes need no extra step. Use `npm ci` first if `package.json` added a package.
 
 ```bash
-git pull && LENDHOUS_RELEASE=1 npm run build && pm2 restart lendhous
+git pull && LENDHOUS_RELEASE=1 npm run build && pm2 restart lendhous && npm run db:encrypt
+```
+
+`db:encrypt` encrypts anything saved before encryption was switched on. It has to come after the restart, because the build it replaces can't read encrypted records. It's safe to run on every update, and it changes nothing once everything is encrypted. The daily job does the same as a backstop.
+
+If nginx is in front, it has to let uploads through: its default limit of 1 MB refuses most loan files and many photos, and a contractor sees "This photo is too large". Set this in the site's `server` block, then reload nginx:
+
+```nginx
+client_max_body_size 16m;
 ```
 
 Session cookies are https-only in production. Only on an internal server reached over plain http, set `ALLOW_HTTP_SESSIONS="1"` (release builds refuse it).

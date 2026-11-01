@@ -1,15 +1,18 @@
 // Mail, ported from UPB Capital's lib/email.ts: Resend, then SMTP, then the server log, and always an in-app notice.
 // Lendhous adds legal notices (Spec v3 12.1 "(L)"), which go out whatever the user's preferences say.
+import { randomUUID } from "node:crypto";
+import { encryptField } from "@/lib/crypto";
 import { notDeleted, prisma } from "@/lib/prisma";
 import { deliverable, deskRecipients, resolveMailTransport, type MailTransport } from "@/lib/mail-config";
+import { noticeContext } from "@/lib/notifications";
 
-async function deliver(transport: MailTransport, toEmail: string, subject: string, body: string) {
+async function deliver(transport: MailTransport, toEmail: string, subject: string, body: string, replyTo?: string) {
   const from = process.env.EMAIL_FROM || "Lendhous <team@localhost>";
   if (transport === "resend") {
     const response = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from, to: [toEmail], subject, text: body }),
+      body: JSON.stringify({ from, to: [toEmail], subject, text: body, ...(replyTo ? { reply_to: replyTo } : {}) }),
       signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) {
@@ -27,11 +30,11 @@ async function deliver(transport: MailTransport, toEmail: string, subject: strin
       secure: port === 465,
       auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD || "" } : undefined,
     });
-    await transporter.sendMail({ from, to: toEmail, subject, text: body });
+    await transporter.sendMail({ from, to: toEmail, subject, text: body, replyTo });
   }
 }
 
-export async function notify(toEmail: string, subject: string, body: string, options: { eventCode?: string; legal?: boolean } = {}) {
+export async function notify(toEmail: string, subject: string, body: string, options: { eventCode?: string; legal?: boolean; replyTo?: string } = {}) {
   const user = await prisma.user.findUnique({ where: { email: toEmail }, select: { id: true, notifyEmail: true, notifyInApp: true } });
   const legal = Boolean(options.legal);
   const sendEmail = legal || !user || user.notifyEmail;
@@ -43,7 +46,7 @@ export async function notify(toEmail: string, subject: string, body: string, opt
     console.info(`[lendhous-mail] to=${toEmail} subject=${subject}\n${body}`);
   } else if (sendEmail) {
     try {
-      await deliver(transport, toEmail, subject, body);
+      await deliver(transport, toEmail, subject, body, options.replyTo);
     } catch (error) {
       delivery = "failed";
       console.error(`[lendhous-mail] ${transport} failed for ${toEmail}:`, error);
@@ -51,7 +54,9 @@ export async function notify(toEmail: string, subject: string, body: string, opt
     }
   }
   if (!keepInApp) return;
-  await prisma.notification.create({ data: { toEmail, userId: user?.id, subject, body, delivery, legal, eventCode: options.eventCode ?? "" } });
+  // Alerts can quote a client's details, so the saved copy is encrypted like the record it came from.
+  const id = randomUUID();
+  await prisma.notification.create({ data: { id, toEmail, userId: user?.id, subject: encryptField(subject, noticeContext("subject", id)), body: encryptField(body, noticeContext("body", id)), delivery, legal, eventCode: options.eventCode ?? "" } });
 }
 
 /**
@@ -79,13 +84,18 @@ export function sendPasswordLink(toEmail: string, link: string, reason: { invite
   return sendSecret(toEmail, invited ? "You're invited to LendHous" : "Set a new LendHous password", `${opening}\n\nSet your password here:\n${link}\n\nThe link works once and expires in seven days. If you weren't expecting this, ignore it and nothing changes.`);
 }
 
+/** A photo link is a live key to one upload page, so like a password link it stays out of the notifications table. */
+export function sendPhotoLinkMail(toEmail: string, details: { to: string; sentBy: string; address: string; link: string; expires: string }) {
+  return sendSecret(toEmail, `Photos needed: ${details.address}`, `Hi ${details.to},\n\n${details.sentBy} asked for photos of the finished work at ${details.address}. They go to LendHous.\n\nOpen this link on your phone and it will walk you through what to photograph. You don't need an account:\n${details.link}\n\nThe link works until ${details.expires}. Please don't forward it. If you weren't expecting this, ignore it.`);
+}
+
 /** Team alerts go to every approved owner-admin, and to TEAM_EMAIL when it is set. */
-export async function notifyTeam(subject: string, body: string, eventCode = "") {
+export async function notifyTeam(subject: string, body: string, eventCode = "", replyTo?: string) {
   const owners = await prisma.user.findMany({
     where: { accountStatus: "APPROVED", ...notDeleted, roles: { some: { role: "ADMIN_OWNER" } } },
     select: { email: true },
   });
   const recipients = deskRecipients(owners.map((owner) => owner.email), process.env.TEAM_EMAIL);
   if (!recipients.length) console.warn(`[lendhous-mail] no team recipient for ${subject}`);
-  for (const email of recipients) await notify(email, subject, body, { eventCode });
+  for (const email of recipients) await notify(email, subject, body, { eventCode, replyTo });
 }

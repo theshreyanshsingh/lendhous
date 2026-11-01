@@ -1,7 +1,9 @@
 "use client";
 import { useState } from "react";
+import { PhotoRequests } from "@/components/loan/PhotoRequests";
 import { drawRequestError } from "@/lib/draws";
 import type { Deal, DrawRequest } from "@/lib/mockData";
+import { shrinkPhoto } from "@/lib/shrink-photo";
 import { est, useStore } from "@/lib/store";
 import { Badge, Section, shortDate, usd } from "@/components/ui";
 
@@ -36,7 +38,7 @@ export function DrawPanel({ deal }: { deal: Deal }) {
   const submit = async () => {
     setSending(true);
     // Photos go up first, so the request can point at them. Demo and sample data keep only the names.
-    const photoIds = (await Promise.all(photos.map((photo) => uploadPhoto(deal.id, photo)))).filter((id): id is string => Boolean(id));
+    const photoIds = (await Promise.all(photos.map(async (photo) => uploadPhoto(deal.id, await shrinkPhoto(photo))))).filter((id): id is string => Boolean(id));
     const done = await dispatch({ t: "requestDraw", dealId: deal.id, by: viewerName, note, contact, photos: photos.map((photo) => photo.name), photoIds, lines });
     setSending(false);
     if (!done) return;
@@ -81,6 +83,7 @@ export function DrawPanel({ deal }: { deal: Deal }) {
           </div>
         </div>
       )}
+      <div className="mt-4 border-t border-border pt-4"><PhotoRequests deal={deal} asBorrower /></div>
     </Section>
   );
 }

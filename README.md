@@ -6,7 +6,8 @@ Three layers live here today:
 
 - **The public site.** The landing page at `/`, plus loan programs, investor guides, calculators, the deal-brief form, about and disclosures, under `app/(site)`. No page needs an account. It was rebuilt from the LendHous marketing site's export, on the brand kit's colors and fonts. Its styles are in `app/(site)/site.css`, scoped under `.site` so they never reach the panel. The Let's talk form saves each brief, alerts the team (every owner-admin, plus `TEAM_EMAIL`), and lists it for staff at `/admin/leads`.
 - **The panel.** Portal login on the site opens `/login`, and signing in opens the panel under `/admin`: the staff pipeline at `/admin`, `/admin/capital`, `/admin/deals`, `/admin/leads`, `/admin/loan-sales`, `/admin/draws`, `/admin/servicing`, `/admin/members` and `/admin/audit`, then `/admin/borrower`, `/admin/apply`, `/admin/partner`, `/admin/buyer`, `/admin/broker` and `/admin/account`. Also `/admin/new-loan`, `/admin/partners` and `/admin/settings`. Every page needs a signed-in account, and the account's role decides which section it opens. Real accounts work on the real loan book in the database: loans, documents, draws, payments, bids, sales and messages. The server checks every change against the person's role and sends each person only what they may see (`lib/book-access.ts`). Demo seats (`@lendhous.test`) get a shared book of FAKE demo records in the browser, and any account with no loans can load the same FAKE book for itself with **Load sample data**, until an owner turns that off in Settings. The rates in `lib/pricing-config.ts` are still placeholders.
-- **The backend.** Sign-in, roles and permissions, field encryption, dual control, audit, storage, mail, jobs, health, and the release guard. The loan book is saved as JSON records (`BookRecord`), one per loan, bid, draw and so on, with the rules in `lib/book.ts`. Splitting those records into their own tables is still open, for when reporting across them needs it.
+- **The photo link.** `/photos/<token>` is the one page outside the public site that holds real records, and it needs no account. Staff or a borrower send a contractor or borrower a link from a draw or a loan's Documents tab. It walks them through the property and each budget line, saying what to photograph, and the photos appear on the draw by budget line. `/photos/demo` is a preview that sends nothing.
+- **The backend.** Sign-in, roles and permissions, encryption at rest, dual control, audit, storage, mail, jobs, health, and the release guard. The loan book is saved as JSON records (`BookRecord`), one per loan, bid, draw and so on, with the rules in `lib/book.ts`. Splitting those records into their own tables is still open, for when reporting across them needs it.
 
 ## Run
 
@@ -51,12 +52,12 @@ Every role signs in with an email and password. Spec v3 10.1 asks for two-factor
 ## Tests
 
 ```bash
-npm test                        # 163 tests: pricing engine (Spec worked examples A–I), foundations, who sees and does what in the loan book, loan stages, draws, payments, loan buyer arithmetic, public site calculators and briefs, and MongoDB integration
+npm test                        # 212 tests: pricing engine (Spec worked examples A–I), foundations, who sees and does what in the loan book, loan stages, draws, payments, loan buyer arithmetic, public site calculators and briefs, photo links, encryption at rest, and MongoDB integration
 npm run build && npm start      # then, with the server up:
-npm run screenshots             # site and panel smoke test (178 checks: the public site, each demo seat, the borrower, staff, broker, loan sale and members journeys, and a temporary non-demo account) + screenshots into ./screenshots
+npm run screenshots             # site and panel smoke test (186 checks: the public site, each demo seat, the borrower, staff, broker, loan sale and members journeys, and a temporary non-demo account) + screenshots into ./screenshots
 npm run smoke:auth              # sign-in, where it returns to, rate limits, audit, cron, health (21 checks; needs db:seed)
 npm run phone:check             # every page at 320, 375, 430 and 768px wide: nothing sticks out and nothing scrolls sideways (needs db:seed)
-npm run smoke:real              # a loan's whole life with real accounts, each in its own browser, including what reaches each browser (68 checks; needs db:seed; wipes the local loan book)
+npm run smoke:real              # a website brief, then a loan's whole life with real accounts, each in its own browser, including a contractor with no account, what reaches each browser and what's stored encrypted (126 checks; needs db:seed; wipes the local loan book and leads)
 ```
 
 The integration tests start their own MongoDB 7.0 replica set (`mongodb-memory-server`), so they need no running database. The smoke scripts use Google Chrome; set `CHROME=/path/to/chrome` if it isn't in the default macOS or Linux location.
@@ -82,12 +83,26 @@ The integration tests start their own MongoDB 7.0 replica set (`mongodb-memory-s
 | `app/admin/broker`, `components/ApplicationWizard.tsx` | The broker's deals and fees, and the application form borrowers and brokers share |
 | `lib/notifications.ts`, `app/admin/account/notifications`, `app/admin/(staff)/audit`, `app/login/forgot` | The notifications inbox, the audit log and forgotten passwords |
 | `lib/loan-sale.ts`, `app/admin/buyer`, `app/admin/(staff)/loan-sales` | Selling funded loans: the blind loan tape and yield math, the buyer's workspace, and the staff side |
-| `lib/crypto.ts` | AES-256-GCM field encryption with key ids for rotation, bound to field and row |
+| `lib/crypto.ts`, `lib/encrypt-data.ts`, `lib/lead-store.ts` | AES-256-GCM encryption with key ids for rotation, bound to field, row or file, and the step that encrypts older records (see below) |
+| `lib/photo-requests.ts`, `lib/photo-links.ts`, `actions/photo-links.ts`, `app/photos`, `app/api/photo-links`, `components/PhotoGuide.tsx`, `components/loan/PhotoRequests.tsx` | The photo link: the guide for each budget line, when a link still works, the page contractors see, and the staff side |
 | `lib/approvals.ts`, `lib/mongo-validators.ts` | Dual control: app rules, plus a MongoDB validator that rejects the same mistakes |
 | `lib/audit.ts` | Append-only audit events with before/after values, IP and request id; secrets are redacted |
-| `lib/storage.ts`, `lib/email.ts`, `lib/jobs.ts` | Files (R2/S3, Blob, local, five-minute signed links), mail (Resend/SMTP/log), daily jobs (UPB patterns) |
+| `lib/storage.ts`, `lib/email.ts`, `lib/jobs.ts` | Files (R2/S3, Blob, local, always encrypted first), mail (Resend/SMTP/log), daily jobs (UPB patterns) |
 | `lib/deploy.ts`, `scripts/release.ts`, `lib/bootstrap.ts` | Release guard and production bootstrap (see DEPLOY.md) |
 | `app/api/health`, `app/api/cron` | Health (modes only, no secrets) and the cron entry points |
+
+## What is encrypted
+
+With `FIELD_ENCRYPTION_KEYS`, before anything is stored:
+
+- every loan book record: names, addresses, credit scores, liquidity, messages, draw contacts and photo requests
+- a website brief's name, email, phone, city, state and notes
+- saved alerts in the notifications inbox
+- every stored file and its name, so the bucket only ever holds ciphertext
+
+Sign-in email addresses, account names and phone numbers are not, because sign-in and alerts look people up by them. The audit log holds who did what and from where, not the details. Passwords are hashed, and password and photo links are stored only as hashes. Files always come through the signed-in route rather than a signed link to the bucket, since the bucket can't decrypt them.
+
+Records saved before this still read. `npm run db:encrypt` and the daily job encrypt them, and move records to the newest key after a rotation. To rotate, put the new key first (`k2:...,k1:...`), run `db:encrypt`, and only then remove the old key.
 
 ## MongoDB instead of PostgreSQL
 
