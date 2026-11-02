@@ -76,9 +76,9 @@ export async function uploadLoanFile(form: FormData): Promise<BookReply & { docu
   const ext = extensionOf(file.name)!;
   const key = `loans/${safeBasename(dealId)}/${id}.${ext}`;
   const mime = mimeFor(ext, file.type);
-  await putBytes(key, bytes);
+  const fileKeyId = await putBytes(key, bytes);
   await prisma.document.create({
-    data: { id, ownerType: "LOAN", ownerId: dealId, documentType: docId || "draw_photo", originalName: encryptField(attachmentName(file.name), documentNameContext(id)), storageKey: key, mime, size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex"), uploadedById: viewer.id },
+    data: { id, ownerType: "LOAN", ownerId: dealId, documentType: docId || "draw_photo", originalName: encryptField(attachmentName(file.name), documentNameContext(id)), storageKey: key, fileKeyId, mime, size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex"), uploadedById: viewer.id },
   });
   await audit({ actorId: viewer.id, action: "document.uploaded", entityType: "Document", entityId: id, after: { dealId, documentType: docId || "draw_photo", size: bytes.length } });
   if (!docId) return { documentId: id };

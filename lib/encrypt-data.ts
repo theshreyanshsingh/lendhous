@@ -1,6 +1,6 @@
 // Encrypts what was saved before encryption was switched on, and moves records to the newest key after a rotation.
 // The app reads both forms, so this can run while it serves traffic, and running it again changes nothing.
-import { encryptField, fieldNeedsSealing, jsonNeedsSealing, openJson, readField, sealJson } from "@/lib/crypto";
+import { encryptField, fieldKeys, fieldNeedsSealing, jsonNeedsSealing, openJson, readField, sealJson } from "@/lib/crypto";
 import { rowContext } from "@/lib/book-store";
 import { leadContext, SEALED_LEAD_FIELDS } from "@/lib/lead-store";
 import { noticeContext } from "@/lib/notifications";
@@ -35,13 +35,18 @@ export async function encryptStoredData() {
     done.notices += 1;
   }
 
-  for (const document of await prisma.document.findMany({ select: { id: true, originalName: true, storageKey: true } })) {
+  // Reading a file back is the slow, costly part, so only files not yet under the current key are read.
+  const current = fieldKeys()[0].id;
+  for (const document of await prisma.document.findMany({ select: { id: true, originalName: true, storageKey: true, fileKeyId: true } })) {
     if (fieldNeedsSealing(document.originalName)) {
       await prisma.document.update({ where: { id: document.id }, data: { originalName: reseal(document.originalName, documentNameContext(document.id)) } });
       done.documentNames += 1;
     }
+    if (document.fileKeyId === current) continue;
     try {
-      if (await resealFile(document.storageKey)) done.files += 1;
+      const { changed, keyId } = await resealFile(document.storageKey);
+      await prisma.document.update({ where: { id: document.id }, data: { fileKeyId: keyId } });
+      if (changed) done.files += 1;
     } catch (error) {
       // One lost file must not stop the rest being protected. The count tells whoever ran this to look.
       done.missing += 1;

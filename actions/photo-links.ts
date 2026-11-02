@@ -16,7 +16,7 @@ import { PHOTO_LINK_DAYS } from "@/lib/photo-requests";
 import { prisma } from "@/lib/prisma";
 import { consumeRateLimit } from "@/lib/rate-limit";
 
-export type PhotoLinkReply = { book?: Book; error?: string; link?: string; mail?: "sent" | "logged" | "failed" | "none" };
+export type PhotoLinkReply = { book?: Book; error?: string; link?: string; mail?: "sent" | "logged" | "failed" | "none"; requestId?: string; sentTo?: string };
 
 const expiry = () => new Date(Date.now() + PHOTO_LINK_DAYS * 86_400_000).toISOString();
 const longDate = (at: string) => new Date(at).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "America/Los_Angeles" });
@@ -62,13 +62,19 @@ export async function askForPhotos(raw: unknown): Promise<PhotoLinkReply> {
   const expiresAt = expiry();
   const sentBy = staff ? `${viewer.name} at LendHous` : viewer.name;
   const email = parsed.data.email || account?.email || undefined;
-  const result = await runAction(viewer, { t: "askForPhotos", requestId, dealId: deal.id, drawId: parsed.data.drawId, to: parsed.data.to, email, who: staff ? parsed.data.who : "contractor", scopeIds, by: sentBy, expiresAt }, { trusted: true });
+  const result = await runAction(viewer, { t: "askForPhotos", requestId, dealId: deal.id, drawId: parsed.data.drawId, to: parsed.data.to, email, who: staff ? parsed.data.who : "contractor", scopeIds, by: sentBy, byTeam: staff, expiresAt }, { trusted: true });
   if ("error" in result) return { error: result.error };
   const link = await createPhotoLink(requestId, expiresAt);
   const mail = await mailLink({ to: parsed.data.to, sentBy, email, expiresAt }, deal, link);
   await audit({ actorId: viewer.id, action: "photos.requested", entityType: "LoanBook", entityId: deal.id, after: { photoRequest: requestId, who: parsed.data.who, mail } });
-  return { book: scopeBook(result.after, viewer), link, mail };
+  return { book: scopeBook(result.after, viewer), link, mail, requestId, sentTo: email };
 }
+
+/**
+ * Only the team changes a link the team sent. Otherwise a borrower could take over the contractor's link and send photos
+ * that look like the contractor's.
+ */
+const mayChange = (viewer: Viewer, request: PhotoRequest) => viewFor(viewer.roleCodes) === "admin" || !request.byTeam;
 
 /** A new link for the same request: for one that expired or got lost, since only its hash is kept. The old one stops working. */
 export async function renewPhotoLink(requestId: string): Promise<PhotoLinkReply> {
@@ -76,13 +82,14 @@ export async function renewPhotoLink(requestId: string): Promise<PhotoLinkReply>
   if (!request) return { error: "That request no longer exists." };
   const { viewer, error } = await asker(request.dealId);
   if (!viewer) return { error };
+  if (!mayChange(viewer, request)) return { error: "Only the LendHous team can change a link it sent." };
   const expiresAt = expiry();
   const result = await runAction(viewer, { t: "renewPhotoRequest", requestId: request.id, expiresAt }, { trusted: true });
   if ("error" in result) return { error: result.error };
   const link = await createPhotoLink(request.id, expiresAt);
   const mail = await mailLink({ ...request, expiresAt }, result.after.deals.find((item) => item.id === request.dealId)!, link);
   await audit({ actorId: viewer.id, action: "photos.link_renewed", entityType: "LoanBook", entityId: request.dealId, after: { photoRequest: request.id, mail } });
-  return { book: scopeBook(result.after, viewer), link, mail };
+  return { book: scopeBook(result.after, viewer), link, mail, requestId: request.id, sentTo: request.email };
 }
 
 /** Stops a link at once. Photos already sent stay on the loan. */
@@ -91,7 +98,8 @@ export async function turnOffPhotoLink(requestId: string): Promise<PhotoLinkRepl
   if (!request) return { error: "That request no longer exists." };
   const { viewer, error } = await asker(request.dealId);
   if (!viewer) return { error };
-  const result = await runAction(viewer as Viewer, { t: "turnOffPhotoRequest", requestId: request.id }, { trusted: true });
+  if (!mayChange(viewer, request)) return { error: "Only the LendHous team can change a link it sent." };
+  const result = await runAction(viewer, { t: "turnOffPhotoRequest", requestId: request.id }, { trusted: true });
   if ("error" in result) return { error: result.error };
   await prisma.photoLink.deleteMany({ where: { requestId: request.id } });
   await audit({ actorId: viewer.id, action: "photos.link_off", entityType: "LoanBook", entityId: request.dealId, after: { photoRequest: request.id } });

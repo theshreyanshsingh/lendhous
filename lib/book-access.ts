@@ -4,6 +4,7 @@
 import type { RoleCode } from "@prisma/client";
 import { emptyBook, type Book, type BookAction } from "./book";
 import { scopeError } from "./draws";
+import { MAX_PHOTOS_PER_LINK, photoRequestState, photosClosed } from "./photo-requests";
 import { evaluate } from "./engine";
 import type { Deal, Doc, LoanSale } from "./mockData";
 import { viewFor, type MemberAccess, type Permission } from "./permissions";
@@ -105,6 +106,8 @@ export const canAskForPhotos = (book: Book, viewer: Viewer, dealId: string, allo
 type Result = { error: string } | { action: BookAction };
 const no = (error: string): Result => ({ error });
 const NOT_ALLOWED = "Your account can't do that.";
+const LINK_CLOSED = "This link has been turned off. Ask for a new one.";
+const PHOTOS_CLOSED = "Photos can't be added once the loan is paid off or its draw has been decided.";
 const GONE = "That record no longer exists.";
 
 /**
@@ -164,9 +167,27 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
     case "uploadDoc":
       // Only the upload route does this, after the file is safely stored.
       return trusted ? ok() : no("Upload the file itself to mark this document as received.");
-    case "askForPhotos": case "renewPhotoRequest": case "turnOffPhotoRequest": case "addRequestPhoto": case "removeRequestPhoto": case "finishPhotoRequest":
-      // Only the server does these, once it has checked who is asking or which link was opened.
-      return trusted ? ok() : no(NOT_ALLOWED);
+    // Only the server does these, once it has checked who is asking or which link was opened. The state is checked again
+    // here, on the book as it is now, because a link can be turned off or its draw decided while a photo is on its way.
+    case "askForPhotos": {
+      if (!trusted) return no(NOT_ALLOWED);
+      const deal = dealOf(action.dealId);
+      if (!deal || (action.drawId && !book.draws.some((draw) => draw.id === action.drawId && draw.dealId === deal.id))) return no(GONE);
+      return photosClosed(deal, book.draws.find((draw) => draw.id === action.drawId)) ? no(PHOTOS_CLOSED) : ok();
+    }
+    case "renewPhotoRequest": case "turnOffPhotoRequest": case "addRequestPhoto": case "removeRequestPhoto": case "finishPhotoRequest": {
+      if (!trusted) return no(NOT_ALLOWED);
+      const request = book.photoRequests.find((item) => item.id === action.requestId);
+      if (!request) return no(GONE);
+      if (action.t === "turnOffPhotoRequest") return ok();
+      const deal = dealOf(request.dealId);
+      const draw = book.draws.find((item) => item.id === request.drawId);
+      if (action.t === "renewPhotoRequest") return photoRequestState({ ...request, status: "open", expiresAt: action.expiresAt }, deal, draw) === "open" ? ok() : no(PHOTOS_CLOSED);
+      if (photoRequestState(request, deal, draw) !== "open") return no(LINK_CLOSED);
+      if (action.t === "addRequestPhoto" && request.photos.length >= MAX_PHOTOS_PER_LINK) return no(`This link is full at ${MAX_PHOTOS_PER_LINK} photos. Remove one or ask for a new link.`);
+      if (action.t === "finishPhotoRequest" && !request.photos.length) return no("Add at least one photo first.");
+      return ok();
+    }
 
     case "route": case "sendTeaser":
       if (!dealOf(action.dealId)) return no(GONE);

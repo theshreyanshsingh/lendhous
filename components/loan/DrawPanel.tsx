@@ -20,7 +20,7 @@ export const drawTotal = (draw: DrawRequest) => draw.lines.reduce((sum, line) =>
 
 /** The borrower's draws: request money against the budget, and see where each request stands. */
 export function DrawPanel({ deal }: { deal: Deal }) {
-  const { s, dispatch, viewerName, uploadPhoto } = useStore();
+  const { s, dispatch, viewerName, uploadPhoto, local } = useStore();
   const e = est(deal.app);
   const released = deal.disbursedDraws ?? 0;
   const left = Math.max(0, e.holdback - released);
@@ -37,9 +37,15 @@ export function DrawPanel({ deal }: { deal: Deal }) {
   const error = total > 0 ? drawRequestError(deal, lines) : null;
   const submit = async () => {
     setSending(true);
-    // Photos go up first, so the request can point at them. Demo and sample data keep only the names.
-    const photoIds = (await Promise.all(photos.map(async (photo) => uploadPhoto(deal.id, await shrinkPhoto(photo))))).filter((id): id is string => Boolean(id));
-    const done = await dispatch({ t: "requestDraw", dealId: deal.id, by: viewerName, note, contact, photos: photos.map((photo) => photo.name), photoIds, lines });
+    // Photos go up first, so the request can point at them, and one at a time, so a phone holds one big picture in memory
+    // at once. If one fails, nothing is requested and its error stays up. Demo and sample data keep only the names.
+    const photoIds: string[] = [];
+    for (const photo of local ? [] : photos) {
+      const id = await uploadPhoto(deal.id, await shrinkPhoto(photo));
+      if (!id) { setSending(false); return; }
+      photoIds.push(id);
+    }
+    const done = await dispatch({ t: "requestDraw", dealId: deal.id, by: viewerName, note, contact, photos: photos.map((photo) => photo.name), photoIds: local ? undefined : photoIds, lines });
     setSending(false);
     if (!done) return;
     setOpen(false); setAmounts({}); setNote(""); setContact(""); setPhotos([]); setCertified(false);

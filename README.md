@@ -52,12 +52,12 @@ Every role signs in with an email and password. Spec v3 10.1 asks for two-factor
 ## Tests
 
 ```bash
-npm test                        # 212 tests: pricing engine (Spec worked examples A–I), foundations, who sees and does what in the loan book, loan stages, draws, payments, loan buyer arithmetic, public site calculators and briefs, photo links, encryption at rest, and MongoDB integration
+npm test                        # 223 tests: pricing engine (Spec worked examples A–I), foundations, who sees and does what in the loan book, loan stages, draws, payments, loan buyer arithmetic, public site calculators and briefs, photo links, encryption at rest, and MongoDB integration
 npm run build && npm start      # then, with the server up:
 npm run screenshots             # site and panel smoke test (186 checks: the public site, each demo seat, the borrower, staff, broker, loan sale and members journeys, and a temporary non-demo account) + screenshots into ./screenshots
 npm run smoke:auth              # sign-in, where it returns to, rate limits, audit, cron, health (21 checks; needs db:seed)
 npm run phone:check             # every page at 320, 375, 430 and 768px wide: nothing sticks out and nothing scrolls sideways (needs db:seed)
-npm run smoke:real              # a website brief, then a loan's whole life with real accounts, each in its own browser, including a contractor with no account, what reaches each browser and what's stored encrypted (126 checks; needs db:seed; wipes the local loan book and leads)
+npm run smoke:real              # a website brief, then a loan's whole life with real accounts, each in its own browser, including a contractor with no account, what reaches each browser and what's stored encrypted (127 checks; needs db:seed; wipes the local loan book and leads)
 ```
 
 The integration tests start their own MongoDB 7.0 replica set (`mongodb-memory-server`), so they need no running database. The smoke scripts use Google Chrome; set `CHROME=/path/to/chrome` if it isn't in the default macOS or Linux location.

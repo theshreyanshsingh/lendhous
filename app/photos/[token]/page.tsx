@@ -7,7 +7,7 @@ export const metadata = { title: "Send photos", robots: { index: false, follow: 
 export const dynamic = "force-dynamic";
 
 // A preview for staff and demo accounts. Its page keeps everything in the browser and sends nothing.
-const DEMO = { to: "Sam Sample", sentBy: "The LendHous team", address: "100 Sample Street, Hollywood", steps: guideSteps([{ id: "kitchen", division: "Kitchen" }, { id: "plumbing", division: "Plumbing" }, { id: "flooring", division: "Flooring and paint" }]), photos: [], finished: false, expiresAt: "" };
+const DEMO = { to: "Sam Sample", sentBy: "The LendHous team", address: "100 Sample Street, Hollywood", steps: guideSteps([{ id: "kitchen", division: "Kitchen" }, { id: "plumbing", division: "Plumbing" }, { id: "flooring", division: "Flooring and paint" }]), photos: [], finished: false, finishedBy: "", note: "", expiresAt: "" };
 
 export default async function PhotoLinkPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
@@ -26,7 +26,7 @@ export default async function PhotoLinkPage({ params }: { params: Promise<{ toke
   }
   // Only what the guide needs reaches the browser: no loan number, no amounts, no borrower details.
   const shown = link
-    ? { to: link.request.to, sentBy: link.request.sentBy, address: `${link.deal.address}, ${link.deal.city}`, steps: guideSteps(requestLines(link.request, link.deal)), photos: link.request.photos.map(({ id, scopeId, shot, name }) => ({ id, scopeId, shot, name })), finished: link.request.status === "received", expiresAt: link.request.expiresAt }
+    ? { to: link.request.to, sentBy: link.request.sentBy, address: `${link.deal.address}, ${link.deal.city}`, steps: guideSteps(requestLines(link.request, link.deal)), photos: link.request.photos.map(({ id, scopeId, shot, name }) => ({ id, scopeId, shot, name })), finished: link.request.status === "received", finishedBy: link.request.finishedBy ?? "", note: link.request.note ?? "", expiresAt: link.request.expiresAt }
     : DEMO;
   return <PhotoGuide token={link ? token : null} {...shown} />;
 }

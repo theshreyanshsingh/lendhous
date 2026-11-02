@@ -21,7 +21,7 @@ export type BookAction =
   | { t: "acceptTermSheet"; dealId: string; signedName: string }
   | { t: "saveScope"; dealId: string; scope: ScopeLine[]; summary: string }
   | { t: "requestDraw"; dealId: string; by: string; note: string; contact: string; photos: string[]; photoIds?: string[]; lines: DrawRequestLine[] }
-  | { t: "askForPhotos"; requestId: string; dealId: string; drawId?: string; to: string; email?: string; who: PhotoRequest["who"]; scopeIds: string[]; by: string; expiresAt: string }
+  | { t: "askForPhotos"; requestId: string; dealId: string; drawId?: string; to: string; email?: string; who: PhotoRequest["who"]; scopeIds: string[]; by: string; byTeam: boolean; expiresAt: string }
   | { t: "renewPhotoRequest"; requestId: string; expiresAt: string }
   | { t: "turnOffPhotoRequest"; requestId: string }
   | { t: "addRequestPhoto"; requestId: string; photo: RequestPhoto }
@@ -151,10 +151,10 @@ export function reducer(s: Book, a: BookAction): Book {
     }
     case "askForPhotos": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
-      const request: PhotoRequest = { id: a.requestId, dealId: a.dealId, drawId: a.drawId, to: a.to, email: a.email, who: a.who, scopeIds: a.scopeIds, sentBy: a.by, sentAt: now(), expiresAt: a.expiresAt, status: "open", photos: [] };
+      const request: PhotoRequest = { id: a.requestId, dealId: a.dealId, drawId: a.drawId, to: a.to, email: a.email, who: a.who, scopeIds: a.scopeIds, sentBy: a.by, byTeam: a.byTeam, sentAt: now(), expiresAt: a.expiresAt, status: "open", photos: [] };
       return { ...s, photoRequests: [request, ...s.photoRequests], audit: log(`${deal.loanNumber}: photos requested from ${a.to}`) };
     }
-    case "renewPhotoRequest": return { ...s, photoRequests: photos(a.requestId, (r) => ({ ...r, expiresAt: a.expiresAt, status: r.status === "off" ? "open" : r.status })), audit: log(`New photo link sent to ${requestOf(a.requestId).to}`) };
+    case "renewPhotoRequest": return { ...s, photoRequests: photos(a.requestId, (r) => ({ ...r, expiresAt: a.expiresAt, status: r.status === "off" ? (r.finishedAt ? "received" : "open") : r.status })), audit: log(`New photo link sent to ${requestOf(a.requestId).to}`) };
     case "turnOffPhotoRequest": return { ...s, photoRequests: photos(a.requestId, (r) => ({ ...r, status: "off" })), audit: log(`Photo link for ${requestOf(a.requestId).to} turned off`) };
     case "addRequestPhoto": return { ...s, photoRequests: photos(a.requestId, (r) => ({ ...r, photos: [...r.photos, a.photo] })) };
     case "removeRequestPhoto": return { ...s, photoRequests: photos(a.requestId, (r) => ({ ...r, photos: r.photos.filter((photo) => photo.id !== a.photoId) })) };

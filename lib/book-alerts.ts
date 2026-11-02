@@ -35,6 +35,9 @@ export function alertsFor(before: Book, after: Book, action: BookAction): Alert[
     case "finishPhotoRequest": {
       const request = after.photoRequests.find((item) => item.id === action.requestId);
       if (!request) return [];
+      // Pressing send again with nothing new tells nobody anything, so it alerts nobody.
+      const prior = before.photoRequests.find((item) => item.id === action.requestId);
+      if (prior?.status === "received" && !request.photos.some((photo) => !prior.finishedAt || photo.at > prior.finishedAt)) return [];
       const told = `${action.by} sent ${request.photos.length} photo${request.photos.length === 1 ? "" : "s"} of the work.`;
       const team: Alert = { to: "team", subject: `Photos received: ${number(request.dealId)}`, body: told, event: "photos.received" };
       return request.who === "contractor" ? [team, { ...team, to: "borrower", dealId: request.dealId }] : [team];

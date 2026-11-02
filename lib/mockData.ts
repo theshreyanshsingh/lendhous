@@ -27,7 +27,7 @@ export interface ScopeLine { id: string; division: string; budget: number; relea
 export interface DrawRequestLine { scopeId: string; requested: number; observedPct?: number }
 export interface DrawRequest { id: string; dealId: string; requestedAt: string; by: string; note: string; contact: string; photos: string[]; lines: DrawRequestLine[]; status: "submitted" | "inspecting" | "inspected" | "approved" | "funded" | "rejected"; approved?: number; approvers: string[]; reason?: string; fundedAt?: string; photoIds?: string[] }
 export interface RequestPhoto { id: string; scopeId: string; shot: string; name: string; at: string; takenAt?: string; lat?: number; lng?: number }
-export interface PhotoRequest { id: string; dealId: string; drawId?: string; to: string; email?: string; who: "contractor" | "borrower"; scopeIds: string[]; sentBy: string; sentAt: string; expiresAt: string; status: "open" | "received" | "off"; finishedAt?: string; finishedBy?: string; note?: string; photos: RequestPhoto[] }
+export interface PhotoRequest { id: string; dealId: string; drawId?: string; to: string; email?: string; who: "contractor" | "borrower"; scopeIds: string[]; sentBy: string; byTeam?: boolean; sentAt: string; expiresAt: string; status: "open" | "received" | "off"; finishedAt?: string; finishedBy?: string; note?: string; photos: RequestPhoto[] }
 export interface PayoffRequest { id: string; dealId: string; goodThrough: string; principal: number; accrued: number; perDiem: number; total: number; requestedAt: string; by: string; status: "requested" | "sent" | "paid" }
 export interface LoanMessage { id: string; dealId: string; from: string; side: "team" | "borrower" | "broker" | "internal"; text: string; at: string }
 export interface Broker { id: string; name: string }
@@ -129,7 +129,7 @@ export const brokers: Broker[] = [{ id: DEMO_BROKER_ID, name: "Demo Brokerage (F
 
 // What a finished photo link looks like. The demo keeps no files, so these show as placeholders.
 export const seedPhotoRequests: PhotoRequest[] = [
-  { id: "photos-1", dealId: "d2", drawId: "draw-1", to: "Mo Mock Builders (FAKE)", who: "contractor", scopeIds: ["kitchen", "flooring"], sentBy: "Olivia Owner at LendHous", sentAt: "2026-10-20T10:00:00-07:00", expiresAt: "2030-01-01T10:00:00-07:00", status: "received", finishedAt: "2026-10-20T15:40:00-07:00", finishedBy: "Mo Mock (FAKE)", note: "Appliances arrive next week.", photos: [
+  { id: "photos-1", dealId: "d2", drawId: "draw-1", to: "Mo Mock Builders (FAKE)", who: "contractor", scopeIds: ["kitchen", "flooring"], sentBy: "Olivia Owner at LendHous", byTeam: true, sentAt: "2026-10-20T10:00:00-07:00", expiresAt: "2030-01-01T10:00:00-07:00", status: "received", finishedAt: "2026-10-20T15:40:00-07:00", finishedBy: "Mo Mock (FAKE)", note: "Appliances arrive next week.", photos: [
     { id: "demo-front", scopeId: "property", shot: "front", name: "front.jpg", at: "2026-10-20T15:31:00-07:00" },
     { id: "demo-kitchen", scopeId: "kitchen", shot: "room", name: "kitchen.jpg", at: "2026-10-20T15:34:00-07:00" },
     { id: "demo-cabinets", scopeId: "kitchen", shot: "cabinets", name: "cabinets.jpg", at: "2026-10-20T15:35:00-07:00" },

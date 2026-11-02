@@ -16,13 +16,14 @@ const TIPS = [
 ];
 
 /** The page a contractor or borrower opens from a link: one budget line at a time, saying exactly what to photograph. */
-export function PhotoGuide({ token, to, sentBy, address, steps, photos, finished, expiresAt }: { token: string | null; to: string; sentBy: string; address: string; steps: GuideStep[]; photos: Sent[]; finished: boolean; expiresAt: string }) {
+export function PhotoGuide({ token, to, sentBy, address, steps, photos, finished, finishedBy, note: sentNote, expiresAt }: { token: string | null; to: string; sentBy: string; address: string; steps: GuideStep[]; photos: Sent[]; finished: boolean; finishedBy: string; note: string; expiresAt: string }) {
   const [tiles, setTiles] = useState<Tile[]>(() => photos.map((photo) => ({ key: photo.id, scopeId: photo.scopeId, shot: photo.shot, state: "sent", photoId: photo.id, url: `/api/photo-links/${token}/${photo.id}` })));
   // 0 is the welcome, then one page per guide step, then the review.
   const [page, setPage] = useState(0);
   const [done, setDone] = useState(finished);
-  const [name, setName] = useState(to);
-  const [note, setNote] = useState("");
+  // Coming back to add more starts from what they sent last time, so a second send doesn't wipe the first note.
+  const [name, setName] = useState(finishedBy || to);
+  const [note, setNote] = useState(sentNote);
   const [confirmed, setConfirmed] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
@@ -30,6 +31,7 @@ export function PhotoGuide({ token, to, sentBy, address, steps, photos, finished
   const place = useRef<{ lat: number; lng: number } | null>(null);
   // Photos go up one at a time, so a weak signal only ever has one to carry.
   const queue = useRef<Promise<unknown>>(Promise.resolve());
+  const removed = useRef(new Set<string>());
 
   const top = useRef<HTMLDivElement>(null);
   useEffect(() => { top.current?.scrollIntoView(); }, [page, done]);
@@ -42,7 +44,7 @@ export function PhotoGuide({ token, to, sentBy, address, steps, photos, finished
   const patch = (key: string, changes: Partial<Tile>) => setTiles((all) => all.map((tile) => (tile.key === key ? { ...tile, ...changes } : tile)));
 
   const upload = async (tile: Tile, file: File) => {
-    patch(tile.key, { state: "sending", error: undefined });
+    if (removed.current.has(tile.key)) return;
     if (!token) { patch(tile.key, { state: "sent", photoId: tile.key }); return; }
     try {
       const small = await shrinkPhoto(file);
@@ -52,15 +54,21 @@ export function PhotoGuide({ token, to, sentBy, address, steps, photos, finished
       form.set("shot", tile.shot);
       if (file.lastModified) form.set("takenAt", new Date(file.lastModified).toISOString());
       if (place.current) { form.set("lat", String(place.current.lat)); form.set("lng", String(place.current.lng)); }
-      const response = await fetch(`/api/photo-links/${token}`, { method: "POST", body: form });
+      // A request that hangs would hold up every photo behind it.
+      const response = await fetch(`/api/photo-links/${token}`, { method: "POST", body: form, signal: AbortSignal.timeout(120_000) });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(response.status === 413 ? "This photo is too large." : body.error || "It didn't send.");
       patch(tile.key, { state: "sent", photoId: body.photo.id, file: undefined });
     } catch (problem) {
-      patch(tile.key, { state: "failed", error: problem instanceof TypeError ? "No connection. Try again." : problem instanceof Error ? problem.message : "It didn't send." });
+      const offline = problem instanceof TypeError || (problem instanceof DOMException && problem.name === "TimeoutError");
+      patch(tile.key, { state: "failed", error: offline ? "No connection. Try again." : problem instanceof Error ? problem.message : "It didn't send." });
     }
   };
-  const enqueue = (tile: Tile, file: File) => { queue.current = queue.current.then(() => upload(tile, file)); };
+  // Marked as sending at once, so a second tap on retry can't send it twice.
+  const enqueue = (tile: Tile, file: File) => {
+    patch(tile.key, { state: "sending", error: undefined });
+    queue.current = queue.current.then(() => upload(tile, file));
+  };
 
   const pick = (scopeId: string, shot: string, files: FileList | null) => {
     for (const file of Array.from(files ?? [])) {
@@ -75,6 +83,8 @@ export function PhotoGuide({ token, to, sentBy, address, steps, photos, finished
       if (!response?.ok) { setError("That photo couldn't be removed. Try again."); return; }
     }
     setError("");
+    removed.current.add(tile.key);
+    if (tile.url.startsWith("blob:")) URL.revokeObjectURL(tile.url);
     setTiles((all) => all.filter((item) => item.key !== tile.key));
   };
   const askForPlace = () => {
@@ -110,7 +120,7 @@ export function PhotoGuide({ token, to, sentBy, address, steps, photos, finished
           <div data-testid="photo-done">
             <p className="eyebrow">Sent to LendHous</p>
             <h1 className="mt-2 text-3xl font-normal text-foreground">Thanks, {first}. They have your photos.</h1>
-            <p className="mt-3 text-sm text-muted-foreground">You can close this page. Did you miss something? You can add more{expiresAt ? ` until ${new Date(expiresAt).toLocaleDateString("en-US", { month: "long", day: "numeric" })}` : ""}.</p>
+            <p className="mt-3 text-sm text-muted-foreground">You can close this page. Did you miss something? You can add more{expiresAt ? ` until ${new Date(expiresAt).toLocaleDateString("en-US", { month: "long", day: "numeric", timeZone: "America/Los_Angeles" })}` : ""}.</p>
             <button className="btn-ghost mt-5" data-testid="photo-add-more" onClick={() => { setDone(false); setPage(1); setConfirmed(false); }}>Add more photos</button>
           </div>
         ) : page === 0 ? (

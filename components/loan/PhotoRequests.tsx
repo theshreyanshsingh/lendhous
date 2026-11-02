@@ -16,6 +16,8 @@ const STATE: Record<LinkState, { label: string; tone: "blue" | "amber" | "slate"
 const clock = (at: string) => new Date(at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: "America/Los_Angeles" });
 const DEMO_LINK = "/photos/demo";
 
+type Issued = { requestId: string; link: string; mail: PhotoLinkReply["mail"]; to: string; email?: string };
+
 /** Ask a contractor or borrower for photos by link, and see what came back, by budget line. */
 export function PhotoRequests({ deal, draw, asBorrower = false }: { deal: Deal; draw?: DrawRequest; asBorrower?: boolean }) {
   const { s, local, dispatch, applyReply, viewerName } = useStore();
@@ -30,7 +32,7 @@ export function PhotoRequests({ deal, draw, asBorrower = false }: { deal: Deal; 
   const [picked, setPicked] = useState<string[]>(startLines);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [issued, setIssued] = useState<{ link: string; mail: PhotoLinkReply["mail"]; to: string; email?: string } | null>(null);
+  const [issued, setIssued] = useState<Issued | null>(null);
   if (!lines.length) return null;
 
   const choose = (next: PhotoRequest["who"]) => {
@@ -38,22 +40,23 @@ export function PhotoRequests({ deal, draw, asBorrower = false }: { deal: Deal; 
     if (next === "borrower") { setTo(deal.borrowerName); setEmail(""); }
     else { setTo(lastContractor?.to ?? ""); setEmail(lastContractor?.email ?? ""); }
   };
-  const settle = (reply: PhotoLinkReply, name: string, address?: string) => {
+  const settle = (reply: PhotoLinkReply, name: string) => {
     if (reply.error) { setError(reply.error); return false; }
     applyReply(reply);
-    if (reply.link) setIssued({ link: reply.link, mail: reply.mail, to: name, email: address });
+    if (reply.link && reply.requestId) setIssued({ requestId: reply.requestId, link: reply.link, mail: reply.mail, to: name, email: reply.sentTo });
     return true;
   };
   const send = async () => {
     setBusy(true);
     setError("");
     if (local) {
-      await dispatch({ t: "askForPhotos", requestId: `photos-${Date.now().toString(36)}`, dealId: deal.id, drawId: draw?.id, to: to.trim(), email: email.trim() || undefined, who, scopeIds: picked, by: viewerName, expiresAt: new Date(Date.now() + PHOTO_LINK_DAYS * 86_400_000).toISOString() });
-      setIssued({ link: DEMO_LINK, mail: "none", to: to.trim() });
+      const requestId = `photos-${Date.now().toString(36)}`;
+      await dispatch({ t: "askForPhotos", requestId, dealId: deal.id, drawId: draw?.id, to: to.trim(), email: email.trim() || undefined, who, scopeIds: picked, by: viewerName, byTeam: !asBorrower, expiresAt: new Date(Date.now() + PHOTO_LINK_DAYS * 86_400_000).toISOString() });
+      setIssued({ requestId, link: DEMO_LINK, mail: "none", to: to.trim() });
       setOpen(false);
     } else {
       const reply = await askForPhotos({ dealId: deal.id, drawId: draw?.id, who, to, email, scopeIds: picked }).catch(() => ({ error: "That didn't go through. Check your connection and try again." }));
-      if (settle(reply, to.trim(), email.trim())) setOpen(false);
+      if (settle(reply, to.trim())) setOpen(false);
     }
     setBusy(false);
   };
@@ -62,18 +65,18 @@ export function PhotoRequests({ deal, draw, asBorrower = false }: { deal: Deal; 
     setError("");
     if (local) {
       await dispatch({ t: "renewPhotoRequest", requestId: request.id, expiresAt: new Date(Date.now() + PHOTO_LINK_DAYS * 86_400_000).toISOString() });
-      setIssued({ link: DEMO_LINK, mail: "none", to: request.to });
+      setIssued({ requestId: request.id, link: DEMO_LINK, mail: "none", to: request.to });
     } else {
-      settle(await renewPhotoLink(request.id).catch(() => ({ error: "That didn't go through. Check your connection and try again." })), request.to, request.email);
+      settle(await renewPhotoLink(request.id).catch(() => ({ error: "That didn't go through. Check your connection and try again." })), request.to);
     }
     setBusy(false);
   };
   const turnOff = async (request: PhotoRequest) => {
     setBusy(true);
     setError("");
-    if (local) await dispatch({ t: "turnOffPhotoRequest", requestId: request.id });
-    else settle(await turnOffPhotoLink(request.id).catch(() => ({ error: "That didn't go through. Check your connection and try again." })), request.to);
-    if (issued?.to === request.to) setIssued(null);
+    const done = local ? await dispatch({ t: "turnOffPhotoRequest", requestId: request.id }) : settle(await turnOffPhotoLink(request.id).catch(() => ({ error: "That didn't go through. Check your connection and try again." })), request.to);
+    // The link on screen is gone only if it was this request's.
+    if (done && issued?.requestId === request.id) setIssued(null);
     setBusy(false);
   };
 
@@ -113,21 +116,21 @@ export function PhotoRequests({ deal, draw, asBorrower = false }: { deal: Deal; 
         </div>
       )}
       {error && <p role="alert" className="mt-2 text-sm text-bad" data-testid="photo-error">{error}</p>}
-      {issued && <IssuedLink issued={issued} demo={local} onClose={() => setIssued(null)} />}
+      {issued && <IssuedLink key={issued.link} issued={issued} demo={local} onClose={() => setIssued(null)} />}
 
       {requests.length > 0 && (
         <ul className="mt-3 space-y-3">
-          {requests.map((request) => <RequestRow key={request.id} request={request} deal={deal} draw={s.draws.find((item) => item.id === request.drawId)} local={local} busy={busy} onRenew={() => void renew(request)} onTurnOff={() => void turnOff(request)} />)}
+          {requests.map((request) => <RequestRow key={request.id} request={request} deal={deal} draw={s.draws.find((item) => item.id === request.drawId)} local={local} busy={busy} canChange={!asBorrower || !request.byTeam} onRenew={() => void renew(request)} onTurnOff={() => void turnOff(request)} />)}
         </ul>
       )}
     </div>
   );
 }
 
-function IssuedLink({ issued, demo, onClose }: { issued: { link: string; mail: PhotoLinkReply["mail"]; to: string; email?: string }; demo: boolean; onClose: () => void }) {
+function IssuedLink({ issued, demo, onClose }: { issued: Issued; demo: boolean; onClose: () => void }) {
   const [copied, setCopied] = useState(false);
   const copy = async () => { await navigator.clipboard.writeText(issued.link.startsWith("/") ? window.location.origin + issued.link : issued.link); setCopied(true); };
-  const said = demo ? "Demo accounts don't send anything. This link opens a preview of the page." : issued.mail === "sent" ? `Emailed to ${issued.email ?? issued.to}. You can also copy the link and text it.` : issued.mail === "failed" ? "The email didn't go through. Copy the link and send it yourself." : `Copy the link and send it to ${issued.to}.`;
+  const said = demo ? "Demo accounts don't send anything. This link opens a preview of the page." : issued.mail === "sent" ? `Emailed to ${issued.email || issued.to}. You can also copy the link and text it.` : issued.mail === "failed" ? "The email didn't go through. Copy the link and send it yourself." : `Copy the link and send it to ${issued.to}.`;
   return (
     <div className="mt-3 rounded-[2px] border border-good/40 bg-good/5 p-3" data-testid="photo-issued">
       <p className="text-sm">{said}</p>
@@ -141,28 +144,28 @@ function IssuedLink({ issued, demo, onClose }: { issued: { link: string; mail: P
   );
 }
 
-function RequestRow({ request, deal, draw, local, busy, onRenew, onTurnOff }: { request: PhotoRequest; deal: Deal; draw?: DrawRequest; local: boolean; busy: boolean; onRenew: () => void; onTurnOff: () => void }) {
+function RequestRow({ request, deal, draw, local, busy, canChange, onRenew, onTurnOff }: { request: PhotoRequest; deal: Deal; draw?: DrawRequest; local: boolean; busy: boolean; canChange: boolean; onRenew: () => void; onTurnOff: () => void }) {
   const state = photoRequestState(request, deal, draw);
   const steps = guideSteps(requestLines(request, deal));
   const missing = missingShots(steps, request.photos);
-  const received = request.status === "received";
+  const received = Boolean(request.finishedAt);
   return (
     <li className="rounded-[2px] border border-border p-3" data-testid="photo-request">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0 text-sm"><b className="font-medium">{request.to}</b> <span className="text-xs text-muted-foreground capitalize">· {request.who}</span><div className="text-xs text-muted-foreground">Sent {shortDate(request.sentAt)} by {request.sentBy}{state === "open" ? ` · works until ${shortDate(request.expiresAt)}` : ""}</div></div>
-        {received ? <Badge tone="green">{request.photos.length} photo{request.photos.length === 1 ? "" : "s"} received</Badge> : <Badge tone={STATE[state].tone}>{request.photos.length ? `${request.photos.length} so far · ` : ""}{STATE[state].label}</Badge>}
+        {received ? <Badge tone="green">{request.photos.length} photo{request.photos.length === 1 ? "" : "s"} received{state === "off" || state === "expired" ? ` · ${STATE[state].label.toLowerCase()}` : ""}</Badge> : <Badge tone={STATE[state].tone}>{request.photos.length ? `${request.photos.length} so far · ` : ""}{STATE[state].label}</Badge>}
       </div>
       {request.note && <p className="mt-2 text-sm" data-testid="photo-request-note">&ldquo;{request.note}&rdquo;{request.finishedBy ? <span className="text-xs text-muted-foreground"> {request.finishedBy}</span> : null}</p>}
       {steps.filter((step) => request.photos.some((photo) => photo.scopeId === step.id)).map((step) => (
         <div key={step.id} className="mt-3" data-testid="photo-group">
           <h4 className="text-xs font-medium text-muted-foreground">{step.title}</h4>
           <ul className="mt-1 grid grid-cols-3 gap-2 sm:grid-cols-[repeat(auto-fill,minmax(112px,1fr))]">
-            {request.photos.filter((photo) => photo.scopeId === step.id).map((photo) => <PhotoTile key={photo.id} photo={photo} label={step.shots.find((shot) => shot.id === photo.shot)?.label ?? step.title} sentAt={request.sentAt} placeholder={local} />)}
+            {request.photos.filter((photo) => photo.scopeId === step.id).map((photo) => <PhotoTile key={photo.id} photo={photo} label={step.shots.find((shot) => shot.id === photo.shot)?.label ?? step.title} placeholder={local} />)}
           </ul>
         </div>
       ))}
       {received && missing.length > 0 && <p className="mt-2 text-xs text-warn" data-testid="photo-missing">Not sent: {missing.map((item) => `${item.step}, ${item.shot.toLowerCase()}`).join("; ")}</p>}
-      {state !== "closed" && (
+      {state !== "closed" && canChange && (
         <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">
           <button className="text-link underline underline-offset-2 disabled:opacity-40" data-testid="photo-renew" disabled={busy} onClick={onRenew}>Make a new link</button>
           {state === "open" && <button className="text-link underline underline-offset-2 disabled:opacity-40" data-testid="photo-off" disabled={busy} onClick={onTurnOff}>Turn the link off</button>}
@@ -172,10 +175,10 @@ function RequestRow({ request, deal, draw, local, busy, onRenew, onTurnOff }: { 
   );
 }
 
-function PhotoTile({ photo, label, sentAt, placeholder }: { photo: RequestPhoto; label: string; sentAt: string; placeholder: boolean }) {
+function PhotoTile({ photo, label, placeholder }: { photo: RequestPhoto; label: string; placeholder: boolean }) {
   // HEIC photos a browser couldn't convert still open as a download.
   const [broken, setBroken] = useState(false);
-  const old = looksOld(photo.takenAt, sentAt);
+  const old = looksOld(photo.takenAt, photo.at);
   return (
     <li className="min-w-0" data-testid="photo-received">
       {placeholder || broken ? (

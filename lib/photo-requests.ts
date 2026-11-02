@@ -40,11 +40,17 @@ export const requestLines = (request: Pick<PhotoRequest, "scopeIds">, deal: Pick
 
 export type LinkState = "open" | "expired" | "off" | "closed";
 
-/** Whether a link can still take photos. It closes with its draw or its loan, because nothing is left to review. */
+/**
+ * True once photos can't change anything: the loan is paid off, or its draw has been decided. From approval on, the photos
+ * are the evidence for that decision, so they can no longer be added to or taken back.
+ */
+export const photosClosed = (deal: Pick<Deal, "status"> | undefined, draw: Pick<DrawRequest, "status"> | undefined) => !deal || deal.status === "paid_off" || draw?.status === "approved" || draw?.status === "funded" || draw?.status === "rejected";
+
+/** Whether a link can still take photos. */
 export function photoRequestState(request: PhotoRequest, deal: Deal | undefined, draw: DrawRequest | undefined, now = Date.now()): LinkState {
+  if (photosClosed(deal, draw)) return "closed";
   if (request.status === "off") return "off";
   if (new Date(request.expiresAt).getTime() < now) return "expired";
-  if (!deal || deal.status === "paid_off" || draw?.status === "funded" || draw?.status === "rejected") return "closed";
   return "open";
 }
 
@@ -53,5 +59,5 @@ export function missingShots(steps: GuideStep[], photos: { scopeId: string; shot
   return steps.flatMap((step) => step.shots.filter((item) => !photos.some((photo) => photo.scopeId === step.id && photo.shot === item.id)).map((item) => ({ step: step.title, shot: item.label })));
 }
 
-/** A photo whose file is dated well before the request may not show the work as it is now. */
+/** A photo whose file is dated well before it was sent may not show the work as it is now. */
 export const looksOld = (takenAt: string | undefined, sentAt: string) => Boolean(takenAt) && new Date(takenAt!).getTime() < new Date(sentAt).getTime() - 3 * 86_400_000;

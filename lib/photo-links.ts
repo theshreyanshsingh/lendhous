@@ -13,8 +13,9 @@ const origin = () => (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "");
 /** Makes this request's link, replacing any earlier one. The address comes back once and is never stored. */
 export async function createPhotoLink(requestId: string, expiresAt: string) {
   const token = randomBytes(32).toString("base64url");
-  await prisma.photoLink.deleteMany({ where: { requestId } });
-  await prisma.photoLink.create({ data: { requestId, tokenHash: hashOf(token), expiresAt: new Date(expiresAt) } });
+  // One row per request, so two new links made at once still leave only one that works.
+  const data = { tokenHash: hashOf(token), expiresAt: new Date(expiresAt) };
+  await prisma.photoLink.upsert({ where: { requestId }, create: { requestId, ...data }, update: data });
   return `${origin()}/photos/${token}`;
 }
 

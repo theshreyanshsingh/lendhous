@@ -1,6 +1,6 @@
 import fs from "fs/promises";
 import path from "path";
-import { decryptBytes, encryptBytes, fileNeedsSealing } from "@/lib/crypto";
+import { decryptBytes, encryptBytes, fieldKeys, fileNeedsSealing } from "@/lib/crypto";
 
 export function storageRoot() {
   return path.join(process.cwd(), "storage");
@@ -143,10 +143,12 @@ async function readStored(key: string) {
   return fs.readFile(localPath(key));
 }
 
-/** Files are encrypted before they leave the server, so the bucket or disk only ever holds ciphertext. */
+/** Files are encrypted before they leave the server, so the bucket or disk only ever holds ciphertext. Returns the key's id. */
 export async function putBytes(key: string, bytes: Buffer) {
   assertStorageKey(key);
-  await writeStored(key, encryptBytes(bytes, fileContext(key)));
+  const keys = fieldKeys();
+  await writeStored(key, encryptBytes(bytes, fileContext(key), keys));
+  return keys[0].id;
 }
 
 export async function getBytes(key: string) {
@@ -154,14 +156,15 @@ export async function getBytes(key: string) {
   return decryptBytes(await readStored(key), fileContext(key));
 }
 
-/** Encrypts a file stored before encryption, or moves one to the current key. False when it was already fine. */
+/** Encrypts a file stored before encryption, or moves one to the current key. Says whether it had to, and the key it's under now. */
 export async function resealFile(key: string) {
   assertStorageKey(key);
+  const keys = fieldKeys();
   const stored = await readStored(key);
-  if (!fileNeedsSealing(stored)) return false;
-  const plain = decryptBytes(stored, fileContext(key));
-  const sealed = encryptBytes(plain, fileContext(key));
-  if (!decryptBytes(sealed, fileContext(key)).equals(plain)) throw new Error(`Could not verify the encrypted copy of ${key}.`);
+  if (!fileNeedsSealing(stored, keys)) return { changed: false, keyId: keys[0].id };
+  const plain = decryptBytes(stored, fileContext(key), keys);
+  const sealed = encryptBytes(plain, fileContext(key), keys);
+  if (!decryptBytes(sealed, fileContext(key), keys).equals(plain)) throw new Error(`Could not verify the encrypted copy of ${key}.`);
   await writeStored(key, sealed);
-  return true;
+  return { changed: true, keyId: keys[0].id };
 }

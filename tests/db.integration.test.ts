@@ -378,6 +378,9 @@ describe("encryption at rest", () => {
       expect(readField(name, documentNameContext(document.id))).toBe("olive-statement.pdf");
 
       expect(await encryptStoredData()).toEqual({ records: 0, leads: 0, notices: 0, documentNames: 0, files: 0, missing: 0 });
+      // A file already under the current key isn't read again: with it gone from disk, nothing is reported missing.
+      await fs.rm(file);
+      expect((await encryptStoredData()).missing).toBe(0);
     } finally {
       await fs.rm(path.dirname(file), { recursive: true, force: true });
       await prisma.document.deleteMany({ where: { id: document.id } });
@@ -420,7 +423,7 @@ describe("a photo link", () => {
   const params = (token: string) => ({ params: Promise.resolve({ token }) });
   const expires = (days = 14) => new Date(Date.now() + days * 86_400_000).toISOString();
   const openRequest = async (requestId: string, scopeIds = ["kitchen"]) => {
-    const done = await store.runAction(staff, { t: "askForPhotos", requestId, dealId, to: "Carl Contractor", who: "contractor", scopeIds, by: "Sam at LendHous", expiresAt: expires() }, { trusted: true });
+    const done = await store.runAction(staff, { t: "askForPhotos", requestId, dealId, to: "Carl Contractor", who: "contractor", scopeIds, by: "Sam at LendHous", byTeam: true, expiresAt: expires() }, { trusted: true });
     if ("error" in done) throw new Error(done.error);
     return new URL(await links.createPhotoLink(requestId, expires()), "http://x").pathname.split("/").pop()!;
   };
@@ -473,7 +476,7 @@ describe("a photo link", () => {
     const { photo } = await response.json();
     expect((await request("req-photo")).photos[0]).toMatchObject({ id: photo.id, scopeId: "kitchen", shot: "room", name: "kitchen.jpg", takenAt: "2026-11-01T10:00:00.000Z", lat: 26.01, lng: -80.15 });
     const document = await prisma.document.findUniqueOrThrow({ where: { id: photo.id } });
-    expect(document).toMatchObject({ ownerId: dealId, documentType: "draw_photo", mime: "image/jpeg", uploadedById: null });
+    expect(document).toMatchObject({ ownerId: dealId, documentType: "draw_photo", mime: "image/jpeg", uploadedById: null, fileKeyId: "dev" });
     expect(document.originalName).not.toContain("kitchen");
     const { getBytes, uploadDir } = await import("@/lib/storage");
     expect((await getBytes(document.storageKey)).equals(JPEG)).toBe(true);
@@ -534,9 +537,20 @@ describe("a photo link", () => {
     expect((await finish({ name: " ", note: "", confirmed: true })).status).toBe(400);
     expect((await finish({ name: "Carl", note: "Appliances next week.", confirmed: true })).status).toBe(200);
     expect(await request("req-finish")).toMatchObject({ status: "received", finishedBy: "Carl", note: "Appliances next week." });
-    expect(await prisma.notification.count({ where: { eventCode: "photos.received" } })).toBeGreaterThan(0);
+    const alerts = await prisma.notification.count({ where: { eventCode: "photos.received" } });
+    expect(alerts).toBeGreaterThan(0);
+    expect((await finish({ name: "Carl", note: "Again", confirmed: true })).status).toBe(200);
+    expect(await prisma.notification.count({ where: { eventCode: "photos.received" } })).toBe(alerts);
     // It stays open for anything that was missed.
     expect((await upload(token)).status).toBe(200);
+  });
+  it("keeps one working link per request, even when two are made at once", async () => {
+    await openRequest("req-twice");
+    const [first, second] = await Promise.all([links.createPhotoLink("req-twice", expires()), links.createPhotoLink("req-twice", expires())].map((made) => made.catch(() => null)));
+    const working = [];
+    for (const made of [first, second]) if (made && (await links.openPhotoLink(new URL(made, "http://x").pathname.split("/").pop()!))) working.push(made);
+    expect(working).toHaveLength(1);
+    expect(await prisma.photoLink.count({ where: { requestId: "req-twice" } })).toBe(1);
   });
   it("stops taking photos the moment it's turned off", async () => {
     const token = await openRequest("req-off");

@@ -17,7 +17,7 @@ const book = (): Book => {
   const base = demoBook();
   return { ...base, photoRequests: [], deals: base.deals.map((deal) => (deal.borrowerId === "b-alex" ? { ...deal, borrowerId: "borrower-1" } : deal)) };
 };
-const ask = (overrides: Partial<Extract<Parameters<typeof reducer>[1], { t: "askForPhotos" }>> = {}) => ({ t: "askForPhotos" as const, requestId: "req-1", dealId: "d2", drawId: "draw-1", to: "Carl Contractor", who: "contractor" as const, scopeIds: ["kitchen", "flooring"], by: "Owen at LendHous", expiresAt: new Date(Date.now() + 14 * DAY).toISOString(), ...overrides });
+const ask = (overrides: Partial<Extract<Parameters<typeof reducer>[1], { t: "askForPhotos" }>> = {}) => ({ t: "askForPhotos" as const, requestId: "req-1", dealId: "d2", drawId: "draw-1", to: "Carl Contractor", who: "contractor" as const, scopeIds: ["kitchen", "flooring"], by: "Owen at LendHous", byTeam: true, expiresAt: new Date(Date.now() + 14 * DAY).toISOString(), ...overrides });
 const withRequest = () => reducer(book(), ask());
 const requestIn = (state: Book) => state.photoRequests[0];
 const photo = (id: string, scopeId = "kitchen", shot = "room") => ({ id, scopeId, shot, name: `${id}.jpg`, at: new Date().toISOString() });
@@ -68,6 +68,13 @@ describe("a photo request's life", () => {
     expect(requestIn(state)).toMatchObject({ status: "received", finishedBy: "Carl", note: "Appliances next week." });
     expect(requestIn(state).finishedAt).toBeTruthy();
   });
+  it("stays finished through being turned off and back on", () => {
+    let state = reducer(withRequest(), { t: "addRequestPhoto", requestId: "req-1", photo: photo("a") });
+    state = reducer(state, { t: "finishPhotoRequest", requestId: "req-1", by: "Carl", note: "Done" });
+    state = reducer(state, { t: "turnOffPhotoRequest", requestId: "req-1" });
+    state = reducer(state, { t: "renewPhotoRequest", requestId: "req-1", expiresAt: new Date(Date.now() + DAY).toISOString() });
+    expect(requestIn(state)).toMatchObject({ status: "received", note: "Done", finishedBy: "Carl" });
+  });
   it("turns off and comes back with a new date", () => {
     const later = new Date(Date.now() + 30 * DAY).toISOString();
     let state = reducer(withRequest(), { t: "turnOffPhotoRequest", requestId: "req-1" });
@@ -102,6 +109,53 @@ describe("when a link stops working", () => {
   });
   it("stays open after the first batch, so a contractor can add what was missed", () => {
     expect(photoRequestState({ ...request, status: "received" }, deal, draw)).toBe("open");
+  });
+  it("reads as closed, not off or expired, once its draw is decided, so nobody is offered a new link that can't work", () => {
+    const funded = { ...draw, status: "funded" as const };
+    expect(photoRequestState({ ...request, status: "off" }, deal, funded)).toBe("closed");
+    expect(photoRequestState(request, deal, funded, Date.now() + 15 * DAY)).toBe("closed");
+  });
+  it("closes once the draw is approved, so the evidence for it can't be changed", () => {
+    expect(photoRequestState(request, deal, { ...draw, status: "approved" })).toBe("closed");
+    expect(photoRequestState(request, deal, { ...draw, status: "inspected" })).toBe("open");
+  });
+});
+
+describe("the server checks a link again on the book as it is now", () => {
+  const owner = person("owner", ["ADMIN_OWNER"]);
+  const link = person("photo-link:req-1", []);
+  const run = (state: Book, action: Parameters<typeof reducer>[1]) => authorize(state, link, action, allowedFor(link), true);
+  const add = (id: string) => ({ t: "addRequestPhoto" as const, requestId: "req-1", photo: photo(id) });
+  const decided = (status: "approved" | "funded" | "rejected") => ({ ...withRequest(), draws: withRequest().draws.map((item) => (item.id === "draw-1" ? { ...item, status } : item)) });
+
+  it("a photo still on its way when the link is turned off is refused", () => {
+    const off = reducer(withRequest(), { t: "turnOffPhotoRequest", requestId: "req-1" });
+    expect(run(off, add("late"))).toEqual({ error: "This link has been turned off. Ask for a new one." });
+    expect(run(off, { t: "finishPhotoRequest", requestId: "req-1", by: "Carl", note: "" })).toHaveProperty("error");
+    expect(run(off, { t: "removeRequestPhoto", requestId: "req-1", photoId: "a" })).toHaveProperty("error");
+  });
+  it("so is one arriving after the draw is decided", () => {
+    for (const status of ["approved", "funded", "rejected"] as const) expect(run(decided(status), add("late"))).toHaveProperty("error");
+  });
+  it("a full link takes no more, however many arrive at once", () => {
+    let state = withRequest();
+    for (let index = 0; index < 80; index++) state = reducer(state, add(`p${index}`));
+    expect(run(state, add("one-too-many"))).toHaveProperty("error");
+    expect(run(state, { t: "removeRequestPhoto", requestId: "req-1", photoId: "p0" })).toHaveProperty("action");
+  });
+  it("finishing needs a photo on the book itself", () => {
+    expect(run(withRequest(), { t: "finishPhotoRequest", requestId: "req-1", by: "Carl", note: "" })).toEqual({ error: "Add at least one photo first." });
+  });
+  it("no link is made for a draw already decided, or renewed onto one", () => {
+    expect(authorize(decided("funded"), owner, ask(), allowedFor(owner), true)).toHaveProperty("error");
+    expect(authorize(book(), owner, ask({ drawId: "no-such-draw" }), allowedFor(owner), true)).toHaveProperty("error");
+    expect(authorize(decided("approved"), owner, { t: "renewPhotoRequest", requestId: "req-1", expiresAt: new Date(Date.now() + DAY).toISOString() }, allowedFor(owner), true)).toHaveProperty("error");
+    const expired = { ...withRequest(), photoRequests: withRequest().photoRequests.map((item) => ({ ...item, expiresAt: new Date(Date.now() - DAY).toISOString(), status: "off" as const })) };
+    expect(authorize(expired, owner, { t: "renewPhotoRequest", requestId: "req-1", expiresAt: new Date(Date.now() + DAY).toISOString() }, allowedFor(owner), true)).toHaveProperty("action");
+  });
+  it("records whether the team sent it, so a borrower can't take over the team's link", () => {
+    expect(requestIn(withRequest()).byTeam).toBe(true);
+    expect(requestIn(reducer(book(), ask({ byTeam: false }))).byTeam).toBe(false);
   });
 });
 
@@ -139,6 +193,14 @@ describe("who can do what with photo links", () => {
 });
 
 describe("who hears about finished photos", () => {
+  it("nobody, when send is pressed again with nothing new", () => {
+    const action = { t: "finishPhotoRequest" as const, requestId: "req-1", by: "Carl", note: "" };
+    const once = reducer(reducer(book(), ask()), { t: "addRequestPhoto", requestId: "req-1", photo: { ...photo("a"), at: "2026-11-01T10:00:00.000Z" } });
+    const finished = reducer(once, action);
+    expect(alertsFor(finished, reducer(finished, action), action)).toEqual([]);
+    const more = reducer(finished, { t: "addRequestPhoto", requestId: "req-1", photo: { ...photo("b"), at: "2999-01-01T00:00:00.000Z" } });
+    expect(alertsFor(more, reducer(more, action), action).map((alert) => alert.to)).toEqual(["team", "borrower"]);
+  });
   const finished = (who: PhotoRequest["who"]) => {
     const before = reducer(reducer(book(), ask({ who })), { t: "addRequestPhoto", requestId: "req-1", photo: photo("a") });
     const action = { t: "finishPhotoRequest" as const, requestId: "req-1", by: "Carl", note: "" };

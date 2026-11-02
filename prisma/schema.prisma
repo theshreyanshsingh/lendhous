@@ -197,12 +197,10 @@ model PasswordLink {
 // Only the hash is stored. The request it opens lives in the loan book.
 model PhotoLink {
   id        String   @id @default(uuid()) @map("_id")
-  requestId String
+  requestId String   @unique
   tokenHash String   @unique
   expiresAt DateTime
   createdAt DateTime @default(now())
-
-  @@index([requestId])
 }
 
 model RateWindow {
@@ -255,6 +253,8 @@ model Document {
   documentType    String
   originalName    String
   storageKey      String
+  // The key the stored file was encrypted with, so the encryption job reads only files that need it (lib/encrypt-data.ts).
+  fileKeyId       String?
   mime            String
   size            Int
   sha256          String

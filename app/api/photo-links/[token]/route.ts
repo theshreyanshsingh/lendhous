@@ -57,13 +57,13 @@ export async function POST(request: Request, { params }: Context) {
   const ext = extensionOf(file.name)!;
   const key = `loans/${safeBasename(link.deal.id)}/${id}.${ext}`;
   const name = attachmentName(file.name);
-  await putBytes(key, bytes);
-  await prisma.document.create({ data: { id, ownerType: "LOAN", ownerId: link.deal.id, documentType: "draw_photo", originalName: encryptField(name, documentNameContext(id)), storageKey: key, mime: mimeFor(ext, file.type), size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") } });
+  const fileKeyId = await putBytes(key, bytes);
+  await prisma.document.create({ data: { id, ownerType: "LOAN", ownerId: link.deal.id, documentType: "draw_photo", originalName: encryptField(name, documentNameContext(id)), storageKey: key, fileKeyId, mime: mimeFor(ext, file.type), size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") } });
   const photo = { id, scopeId, shot, name, at: new Date().toISOString(), ...(details.success ? details.data : {}) };
   const saved = await runAction(linkActor(link.request), { t: "addRequestPhoto", requestId: link.request.id, photo }, { trusted: true });
   if ("error" in saved) {
     await prisma.document.update({ where: { id }, data: { deletedAt: new Date() } });
-    return refuse("That didn't save. Try again.", 409);
+    return refuse(saved.error, 409);
   }
   await audit({ actorId: null, action: "document.uploaded", entityType: "Document", entityId: id, after: { dealId: link.deal.id, photoRequest: link.request.id, documentType: "draw_photo", size: bytes.length } });
   return NextResponse.json({ photo: { id, scopeId, shot, name } });
@@ -76,7 +76,7 @@ export async function DELETE(request: Request, { params }: Context) {
   const photoId = new URL(request.url).searchParams.get("photo") ?? "";
   if (!link.request.photos.some((photo) => photo.id === photoId)) return refuse("That photo isn't on this request.", 404);
   const saved = await runAction(linkActor(link.request), { t: "removeRequestPhoto", requestId: link.request.id, photoId }, { trusted: true });
-  if ("error" in saved) return refuse("That didn't save. Try again.", 409);
+  if ("error" in saved) return refuse(saved.error, 409);
   await prisma.document.update({ where: { id: photoId }, data: { deletedAt: new Date() } });
   await audit({ actorId: null, action: "document.removed", entityType: "Document", entityId: photoId, after: { photoRequest: link.request.id } });
   return NextResponse.json({ ok: true });
@@ -88,12 +88,14 @@ const finish = z.object({ name: z.string().trim().min(1).max(120), note: z.strin
 export async function PATCH(request: Request, { params }: Context) {
   const { refused, link } = await openForChanges((await params).token);
   if (!link) return refused;
+  // Each one can alert the team, so far fewer of these than photos.
+  if (!(await consumeRateLimit(`photo-finish:${link.request.id}`, 10, 60 * 60 * 1000))) return refuse("That was sent a moment ago. Try again later.", 429);
   const parsed = finish.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return refuse("Add your name and confirm the photos.", 400);
   if (!link.request.photos.length) return refuse("Add at least one photo first.", 400);
   const action = { t: "finishPhotoRequest" as const, requestId: link.request.id, by: parsed.data.name, note: parsed.data.note };
   const saved = await runAction(linkActor(link.request), action, { trusted: true });
-  if ("error" in saved) return refuse("That didn't save. Try again.", 409);
+  if ("error" in saved) return refuse(saved.error, 409);
   await audit({ actorId: null, action: "photos.confirmed", entityType: "LoanBook", entityId: link.deal.id, after: { photoRequest: link.request.id, photos: link.request.photos.length } });
   await sendAlerts(saved.before, saved.after, saved.action);
   return NextResponse.json({ ok: true });

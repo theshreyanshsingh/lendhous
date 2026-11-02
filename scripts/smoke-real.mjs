@@ -390,6 +390,7 @@ try {
   ok("the new link opens, with the old one still dead", (await seen(carl.getByTestId("photo-guide"))) && renewedPath !== photoPath);
 
   await go(borrower, `/admin/borrower/${dealId}`);
+  ok("a borrower can't change a link the team sent", (await borrower.getByTestId("photo-request").count()) === 1 && (await borrower.getByTestId("photo-renew").count()) === 0 && (await borrower.getByTestId("photo-off").count()) === 0);
   await borrower.getByTestId("ask-photos").click();
   ok("a borrower can send their contractor a link, but not pick who it's for", (await borrower.getByTestId("photo-who-borrower").count()) === 0 && (await borrower.getByTestId("photo-to").inputValue()) === "Carl Contractor");
   await borrower.getByTestId("photo-send-link").click();
