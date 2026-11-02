@@ -61,6 +61,9 @@ const path = (page) => new URL(page.url()).pathname;
 // What actually reached this person's browser, including data the screen doesn't show.
 const received = (page) => page.content();
 const go = (page, route) => page.goto(BASE + route, { waitUntil: "networkidle" });
+// Every credit question has to be answered on its own.
+const QUESTIONS = ["bankruptcy", "foreclosure", "delinquent", "judgments", "lawsuit", "felony", "borrowedDownPayment"];
+const answerAll = async (page, yes = []) => { for (const key of QUESTIONS) await page.getByTestId(`decl-${key}-${yes.includes(key) ? "yes" : "no"}`).click(); };
 // Three megabytes, like a real scan: well past the 1 MB a server action takes unless it's told otherwise.
 const PDF = { name: "bank-statement.pdf", mimeType: "application/pdf", buffer: Buffer.concat([Buffer.from("%PDF-1.4 real smoke test file\n"), Buffer.alloc(3 * 1024 * 1024, 32)]) };
 // What's on disk under a stored file's key.
@@ -142,17 +145,37 @@ try {
   await borrower.getByLabel("Property address").fill("100 Real Street");
   await borrower.getByLabel("City").fill("Hollywood");
   await borrower.getByLabel("ZIP").fill("33020");
-  for (let i = 0; i < 4; i++) await borrower.getByTestId("next").click();
-  for (const c of ["bp", "noo", "consent"]) await borrower.getByTestId(`cert-${c}`).check();
-  ok("a real application needs its details", (await borrower.getByTestId("submit-missing").innerText()).includes("borrowing entity") && (await borrower.getByTestId("submit").isDisabled()));
-  await borrower.getByRole("button", { name: "Back" }).click();
-  await borrower.getByLabel("Borrowing entity (LLC)").fill("Real Flips LLC");
+  for (let i = 0; i < 3; i++) await borrower.getByTestId("next").click();
+  await borrower.getByTestId("guarantor-name-0").fill("Bonnie Borrower");
+  await borrower.getByTestId("guarantor-fico-0").fill("745");
   await borrower.getByTestId("next").click();
+  await borrower.getByTestId("add-deal").click();
+  await borrower.getByTestId("deal-address-0").fill("9 Past Flip Lane");
+  await borrower.getByTestId("deal-completed-0").fill("2026-02");
+  await borrower.getByTestId("deal-price-0").fill("210000");
+  await borrower.getByTestId("deal-sale-0").fill("315000");
+  await borrower.getByTestId("next").click();
+  await borrower.getByTestId("next").click();
+  for (const c of ["bp", "noo", "consent", "true"]) await borrower.getByTestId(`cert-${c}`).check();
+  const stillNeeded = await borrower.getByTestId("submit-missing").innerText();
+  ok("a real application needs its details and every credit answer", stillNeeded.includes("borrowing entity") && stillNeeded.includes("every credit question") && (await borrower.getByTestId("submit").isDisabled()));
+  ok("the review lists what will be asked for, including proof of the past deal", (await borrower.getByTestId("needs-preview").innerText()).includes("Settlement statements for your past deals"));
+  await borrower.getByRole("button", { name: "Back" }).click();
+  await answerAll(borrower, ["lawsuit"]);
+  await borrower.getByTestId("next").click();
+  ok("a yes needs an explanation", (await borrower.getByTestId("submit-missing").innerText()).includes("explanation"));
+  await borrower.getByRole("button", { name: "Back" }).click();
+  await borrower.getByTestId("decl-explanation").fill("A 2025 dispute with a contractor, settled in August.");
+  for (let i = 0; i < 2; i++) await borrower.getByRole("button", { name: "Back" }).click();
+  await borrower.getByLabel("Borrowing entity (LLC)").fill("Real Flips LLC");
+  for (let i = 0; i < 3; i++) await borrower.getByTestId("next").click();
   await borrower.getByTestId("submit").click();
   await borrower.waitForURL("**/admin/borrower");
   ok("a real borrower can submit an application", await seen(borrower.getByTestId("borrower-loan-card")));
   await go(borrower, "/admin/borrower");
   ok("it's still there after a reload", (await borrower.getByTestId("borrower-loan-card").count()) === 1);
+  await borrower.getByTestId("borrower-loan-card").click();
+  ok("the needs list follows the application: proof of past deals and a letter for the yes", (await seen(borrower.getByTestId("doc-track"))) && (await seen(borrower.getByTestId("doc-explanation"))) && (await borrower.getByTestId("doc-good-standing").innerText()).includes("last 90 days"));
 
   await go(under, "/admin");
   const row = under.getByTestId("pipeline-table").locator("tr", { hasText: "Bonnie Borrower" });
@@ -214,12 +237,25 @@ try {
   ok("the borrower is notified of the message", await seen(borrower.getByTestId("notice").filter({ hasText: "New message" })));
 
   await go(under, dealHref);
-  for (const label of ["Start initial review", "Send to underwriting", "Issue term sheet"]) {
+  for (const label of ["Start initial review", "Send to underwriting"]) {
     await under.getByTestId("advance-loan").filter({ hasText: label }).click();
     await gone(under.getByTestId("advance-loan").filter({ hasText: label }));
   }
+  ok("a term sheet waits for the credit review", (await under.getByTestId("stage-blockers").innerText()).includes("Credit review isn't signed off") && (await under.getByTestId("advance-loan").isDisabled()));
+  await under.getByTestId("tab-Credit review").click();
+  const creditFlags = await under.getByTestId("credit-flags").innerText();
+  ok("the credit review shows the yes and the unverified deal", creditFlags.includes("Party to a lawsuit") && creditFlags.includes("1 of 1 past deals not verified"));
+  ok("with the explanation and the guarantor", (await under.getByTestId("declaration-answers").innerText()).includes("settled in August") && (await under.getByTestId("credit-review").innerText()).includes("Bonnie Borrower"));
+  await under.locator("[data-testid^=verify-]").first().check();
+  await seen(under.getByTestId("experience-effect").getByText("Signing off prices it on 1 verified"));
+  await under.getByTestId("credit-note").fill("Settlement agreement reviewed 5521.");
+  await under.getByTestId("sign-off-credit").click();
+  ok("the underwriter signs off the credit review", await seen(under.getByTestId("credit-signed")));
+  await under.getByTestId("advance-loan").filter({ hasText: "Issue term sheet" }).click();
+  await gone(under.getByTestId("advance-loan").filter({ hasText: "Issue term sheet" }));
   ok("staff move the loan to a term sheet", await seen(under.getByTestId("stage-panel").getByText("Waiting for the borrower")));
   await go(borrower, `/admin/borrower/${dealId}`);
+  ok("the credit officer's notes never reach the borrower", !(await received(borrower)).includes("reviewed 5521"));
   await borrower.getByTestId("term-sheet-name").fill("Bonnie Borrower");
   await borrower.getByTestId("term-sheet-agree").check();
   await borrower.getByTestId("accept-term-sheet").click();
@@ -440,8 +476,8 @@ try {
   for (let i = 0; i < 3; i++) await owner.getByTestId("next").click();
   ok("it carries the client's details", (await owner.getByTestId("client-name").inputValue()) === "Lena Lead" && (await owner.getByTestId("client-email").inputValue()) === `lena@${DOMAIN}`);
   await owner.getByLabel("Borrowing entity (LLC)").fill("Lena Holdings LLC");
-  await owner.getByTestId("next").click();
-  for (const c of ["bp", "noo", "consent"]) await owner.getByTestId(`cert-${c}`).check();
+  for (let i = 0; i < 3; i++) await owner.getByTestId("next").click();
+  for (const c of ["bp", "noo", "consent", "true"]) await owner.getByTestId(`cert-${c}`).check();
   await owner.getByTestId("submit").click();
   await owner.waitForURL("**/admin/deals/*");
   const leadDeal = path(owner);
@@ -451,6 +487,9 @@ try {
   ok("the client is invited to the portal", invited?.roles[0]?.role === "BORROWER" && invited.passwordLinks.length === 1);
   const leadRow = await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } });
   ok("the brief links to its loan", leadRow.loanId === leadDealId && Boolean(leadRow.contactedAt));
+  await go(owner, leadDeal);
+  await owner.getByTestId("tab-Credit review").click();
+  ok("a loan started from a call waits for the borrower's profile", (await owner.getByTestId("credit-flags").innerText()).includes("No borrower profile"));
   await go(owner, "/admin/leads");
   ok("the leads page opens the loan", (await owner.locator("tr", { hasText: "Lena Lead" }).getByTestId("lead-loan").getAttribute("href")) === leadDeal);
 
@@ -529,8 +568,11 @@ try {
   for (let i = 0; i < 3; i++) await broker.getByTestId("next").click();
   await broker.getByTestId("client-name").fill("Casey Client");
   await broker.getByLabel("Borrowing entity (LLC)").fill("Casey LLC");
+  await broker.getByTestId("guarantor-name-0").fill("Casey Client");
+  for (let i = 0; i < 2; i++) await broker.getByTestId("next").click();
+  await answerAll(broker);
   await broker.getByTestId("next").click();
-  for (const c of ["bp", "noo", "consent"]) await broker.getByTestId(`cert-${c}`).check();
+  for (const c of ["bp", "noo", "consent", "true"]) await broker.getByTestId(`cert-${c}`).check();
   await broker.getByTestId("submit").click();
   await broker.waitForURL("**/admin/broker");
   ok("a broker submits a real deal", await seen(broker.getByTestId("broker-deal").filter({ hasText: "Casey Client" })));

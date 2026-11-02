@@ -11,6 +11,15 @@ export type CapitalStatus = "not_started" | "recommended" | "teaser_out" | "bids
 export type DocStatus = "requested" | "uploaded" | "in_review" | "accepted" | "rejected" | "waived";
 
 export interface Doc { id: string; name: string; category: string; status: DocStatus; fileName?: string; note?: string; documentId?: string }
+/** Someone who personally guarantees the loan. Everyone owning 20% or more of the borrowing entity should be one. */
+export interface Guarantor { name: string; ownershipPct: number; fico: number; citizenship: "us" | "resident" | "foreign" }
+/** A deal the borrower says they've done. Staff check it against its settlement statement before it counts for pricing. */
+export interface TrackDeal { id: string; address: string; kind: "flip" | "rental" | "build"; completed: string; purchasePrice: number; salePrice?: number; verified?: boolean }
+export interface Declarations { bankruptcy: boolean; foreclosure: boolean; delinquent: boolean; judgments: boolean; lawsuit: boolean; felony: boolean; borrowedDownPayment: boolean; explanation: string }
+/** Who stands behind a loan and their history (lib/credit.ts). */
+export interface Sponsor { entityState: string; guarantors: Guarantor[]; trackRecord: TrackDeal[]; declarations: Declarations }
+/** A credit officer's sign-off. Pricing then uses only the experience they verified. */
+export interface CreditReview { by: string; at: string; note: string; verifiedDeals: number }
 export interface Allocation { sourceId: string; amount: number }
 export interface Deal {
   id: string; loanNumber: string; borrowerId: string; borrowerName: string; entityName: string;
@@ -21,6 +30,7 @@ export interface Deal {
   scope?: ScopeLine[]; scopeSummary?: string; brokerId?: string; brokerPoints?: number; termSheetSignedBy?: string; termSheetSignedAt?: string;
   /** People who approved funding this loan. It always takes two different people (Spec 6, dual control). */
   fundingApprovers?: string[];
+  sponsor?: Sponsor; creditReview?: CreditReview;
 }
 /** One division of a project's rehab or construction budget. Draws are requested against these. */
 export interface ScopeLine { id: string; division: string; budget: number; released: number }
@@ -105,6 +115,13 @@ export const seedDeals: Deal[] = [
   { id: "d18", loanNumber: "LH-DEMO-1018", borrowerId: BORROWER_ID, borrowerName: "Alex Sample (FAKE)", entityName: "Sample Flips LLC (FAKE)", address: "18 Sample Loop", city: "Davie", zip: "33314", source: "web_quote",
     app: { ...flip({}), product: "bridge", purchasePrice: 350_000, rehab: 0, arv: 350_000, fico: 735, verifiedDeals: 4, liquidity: 120_000, valuationSource: "appraisal" }, status: "term_sheet_issued", daysInStage: 1, capitalStatus: "not_started", allocations: [], teaserSentTo: [], docs: stdDocs({ sow: "waived" }), exitStrategy: "Refi", closingDate: "2026-11-21" },
 ];
+
+// Borrower profiles for two of the demo loans waiting on credit review: what a full application leaves behind.
+const demoTrack = (count: number, builds: number, verified: number) => Array.from({ length: count }, (_, index) => ({ id: `t${index + 1}`, address: `${100 + index * 7} Demo Track Rd (FAKE)`, kind: (index < builds ? "build" : "flip") as "build" | "flip", completed: `202${5 + Math.floor(index / 6)}-${String((index % 6) * 2 + 1).padStart(2, "0")}`, purchasePrice: 220_000 + index * 15_000, salePrice: 330_000 + index * 20_000, verified: index < verified }));
+export const DEMO_SPONSORS: Record<string, Sponsor> = {
+  d5: { entityState: "FL", guarantors: [{ name: "Riley Placeholder (FAKE)", ownershipPct: 60, fico: 705, citizenship: "us" }, { name: "Sky Sample (FAKE)", ownershipPct: 40, fico: 742, citizenship: "us" }], trackRecord: demoTrack(8, 2, 5), declarations: { bankruptcy: false, foreclosure: false, delinquent: false, judgments: false, lawsuit: false, felony: false, borrowedDownPayment: false, explanation: "" } },
+  d6: { entityState: "FL", guarantors: [{ name: "Morgan Mockup (FAKE)", ownershipPct: 100, fico: 668, citizenship: "us" }], trackRecord: demoTrack(1, 0, 0), declarations: { bankruptcy: false, foreclosure: false, delinquent: false, judgments: false, lawsuit: true, felony: false, borrowedDownPayment: false, explanation: "A dispute with a former contractor over a 2025 job. Settled in August; the agreement is uploaded. (FAKE)" } },
+};
 
 export const capitalSources: CapitalSource[] = [
   { id: "gt-main", name: "LendHous Balance Sheet: Fund A (FAKE)", type: "gt_balance_sheet", commitment: 7_500_000, baseDeployed: 900_000, baseUnfunded: 120_000 },

@@ -3,6 +3,7 @@
 // No database code, so the rules can be tested on their own.
 import type { RoleCode } from "@prisma/client";
 import { emptyBook, type Book, type BookAction } from "./book";
+import { sponsorProblem, withSponsor } from "./credit";
 import { scopeError } from "./draws";
 import { MAX_PHOTOS_PER_LINK, photoRequestState, photosClosed } from "./photo-requests";
 import { evaluate } from "./engine";
@@ -16,15 +17,17 @@ export const firmOf = (viewer: Viewer) => viewer.organizationId ?? viewer.id;
 
 const FUNDED = ["funded", "servicing_current", "servicing_delinquent", "matured", "default"];
 const BEFORE_CLOSING = ["submitted", "initial_review", "underwriting", "term_sheet_issued", "term_sheet_accepted", "conditions"];
+// Until a term sheet goes out, the borrower's profile and the credit review can still change.
+const IN_REVIEW = ["submitted", "initial_review", "underwriting"];
 
 /** Removes what identifies the borrower, for a partner or buyer who hasn't closed on the loan. */
 function blind(deal: Deal): Deal {
-  return { ...deal, borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined };
+  return { ...deal, borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined };
 }
 
 /** What only the team sees on a loan it shares with a client. */
 function forClient(deal: Deal): Deal {
-  return { ...deal, allocations: [], teaserSentTo: [], route: undefined, capitalStatus: "not_started", contractorIsGtAffiliate: undefined, source: "", fundingApprovers: undefined };
+  return { ...deal, allocations: [], teaserSentTo: [], route: undefined, capitalStatus: "not_started", contractorIsGtAffiliate: undefined, source: "", fundingApprovers: undefined, creditReview: undefined };
 }
 
 /** The part of the book this account may see. Nothing else leaves the server. */
@@ -129,7 +132,12 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
 
     case "submitApp": {
       if (!action.address.trim() || !action.city.trim() || !action.zip.trim() || !action.entityName.trim()) return no("Add the property address, city, ZIP and the borrowing entity.");
-      if (!evaluate(action.app).eligible) return no("This loan isn't eligible as entered.");
+      // A borrower or broker sends the whole profile. Staff starting a loan from a call can leave it for the borrower to add.
+      if (action.sponsor) {
+        const problem = sponsorProblem(action.sponsor);
+        if (problem) return no(problem);
+      } else if (view === "borrower" || view === "broker") return no("Add the guarantors, past deals and declarations.");
+      if (!evaluate(action.sponsor ? withSponsor(action.app, action.sponsor, new Date()) : action.app).eligible) return no("This loan isn't eligible as entered.");
       if (view === "borrower") return ok({ ...action, client: { name: viewer.name, borrowerId: viewer.id }, source: "web_quote" });
       if (view === "broker") return action.client?.name?.trim() ? ok({ ...action, client: { name: action.client.name.trim(), brokerId: firm, brokerPoints: Math.min(5, Math.max(0, action.client.brokerPoints ?? 0)) }, source: "broker" }) : no("Enter your client's name.");
       if (staff && allowed("view_pipeline")) return action.client?.name?.trim() ? ok({ ...action, client: { name: action.client.name.trim(), borrowerId: action.client.borrowerId }, source: action.source ?? "staff" }) : no("Enter the borrower's name.");
@@ -161,6 +169,36 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
     case "docStatus":
       if (!dealOf(action.dealId)) return no(GONE);
       return staffOnly("review_documents");
+    case "saveSponsor": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      if (!ownsDeal(deal) && !(staff && allowed("review_documents"))) return no(NOT_ALLOWED);
+      if (deal.creditReview) return no("The credit review is signed off. Ask the team to reopen it to change this.");
+      if (!IN_REVIEW.includes(deal.status)) return no("The borrower profile is locked once a term sheet is issued.");
+      const problem = sponsorProblem(action.sponsor);
+      return problem ? no(problem) : ok();
+    }
+    case "verifyTrackDeal": {
+      const deal = dealOf(action.dealId);
+      if (!deal?.sponsor?.trackRecord.some((item) => item.id === action.trackId)) return no(GONE);
+      if (deal.creditReview) return no("The credit review is signed off. Reopen it to change what's verified.");
+      return staffOnly("review_documents", "issue_term_sheet");
+    }
+    // Signing off is a credit decision, so it takes the same authority as issuing a term sheet.
+    case "signOffCredit": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      if (!staff || !allowed("issue_term_sheet")) return no(NOT_ALLOWED);
+      if (deal.creditReview) return no("The credit review is already signed off.");
+      if (!IN_REVIEW.includes(deal.status)) return no("A term sheet has already gone out on this loan.");
+      return ok({ ...action, by: viewer.name });
+    }
+    case "reopenCreditReview": {
+      const deal = dealOf(action.dealId);
+      if (!deal?.creditReview) return no("The credit review isn't signed off.");
+      if (!staff || !allowed("issue_term_sheet")) return no(NOT_ALLOWED);
+      return IN_REVIEW.includes(deal.status) ? ok() : no("A term sheet has already gone out on this loan.");
+    }
     case "linkBorrower":
       // Only the server's own invite step does this, after it has looked the account up.
       return trusted ? ok() : no(NOT_ALLOWED);

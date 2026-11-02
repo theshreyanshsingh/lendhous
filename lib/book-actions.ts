@@ -45,6 +45,14 @@ const application = z.object({
   valuationSource: z.enum(["appraisal", "bpo", "avm", "borrower_estimate"]).optional(),
 });
 
+// The borrower profile. Whether a past deal is verified is never taken from a browser, so that field isn't here.
+const sponsor = z.object({
+  entityState: text(2).min(2),
+  guarantors: z.array(z.object({ name: text(120), ownershipPct: z.number().min(0).max(100), fico: z.number().int().min(0).max(900), citizenship: z.enum(["us", "resident", "foreign"]) })).min(1).max(6),
+  trackRecord: z.array(z.object({ id, address: text(200), kind: z.enum(["flip", "rental", "build"]), completed: z.string().regex(/^\d{4}-\d{2}$/), purchasePrice: money, salePrice: optionalMoney })).max(40),
+  declarations: z.object({ bankruptcy: z.boolean(), foreclosure: z.boolean(), delinquent: z.boolean(), judgments: z.boolean(), lawsuit: z.boolean(), felony: z.boolean(), borrowedDownPayment: z.boolean(), explanation: text(2000) }),
+});
+
 const buyBox = z.object({
   products: z.array(product).max(4),
   states: z.array(text(2)).max(60),
@@ -58,7 +66,11 @@ const buyBox = z.object({
 });
 
 const schema = z.discriminatedUnion("t", [
-  z.object({ t: z.literal("submitApp"), app: application, address: text(200), city: text(100), zip: text(10), entityName: text(200), exitStrategy: text(40), client: z.object({ name: text(120), borrowerId: id.optional(), brokerId: id.optional(), brokerPoints: z.number().min(0).max(5).optional() }).optional(), source: text(40).optional() }),
+  z.object({ t: z.literal("submitApp"), app: application, address: text(200), city: text(100), zip: text(10), entityName: text(200), exitStrategy: text(40), client: z.object({ name: text(120), borrowerId: id.optional(), brokerId: id.optional(), brokerPoints: z.number().min(0).max(5).optional() }).optional(), source: text(40).optional(), sponsor: sponsor.optional() }),
+  z.object({ t: z.literal("saveSponsor"), dealId: id, sponsor }),
+  z.object({ t: z.literal("verifyTrackDeal"), dealId: id, trackId: id, verified: z.boolean() }),
+  z.object({ t: z.literal("signOffCredit"), dealId: id, by: z.string().max(120), note: text(2000) }),
+  z.object({ t: z.literal("reopenCreditReview"), dealId: id }),
   z.object({ t: z.literal("advanceLoan"), dealId: id }),
   z.object({ t: z.literal("approveFunding"), dealId: id, by: text(120) }),
   z.object({ t: z.literal("updateDealNumbers"), dealId: id, changes: application.partial() }),

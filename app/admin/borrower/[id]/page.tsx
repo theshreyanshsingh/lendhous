@@ -33,6 +33,12 @@ export default function BorrowerLoan() {
         <div className="mt-4"><Tracker status={d.status} /></div>
         <div className="mt-3 text-sm text-muted-foreground">Next step: {d.status === "term_sheet_issued" ? "Review and accept your term sheet below." : funded ? "Make your monthly payment or request a draw." : d.docs.some((x) => x.status === "requested" || x.status === "rejected") ? "Upload the documents marked Requested below." : "Your team is reviewing. We'll notify you of the next step."}</div>
       </div>
+      {!d.sponsor && ["submitted", "initial_review", "underwriting"].includes(d.status) && (
+        <div className="glass flex flex-wrap items-center justify-between gap-3 border-warn/40 p-4" data-testid="finish-profile">
+          <div className="min-w-0 flex-1 basis-64"><h2 className="text-base font-medium">Finish your application</h2><p className="text-sm text-muted-foreground">Add your guarantors and past deals, and answer the credit questions, so the team can price and approve your loan.</p></div>
+          <Link href={`/admin/borrower/${d.id}/profile`} className="btn-primary">Finish it now</Link>
+        </div>
+      )}
       <TermSheetCard deal={d} canSign />
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="min-w-0 space-y-4">
@@ -48,7 +54,7 @@ export default function BorrowerLoan() {
                       onDragOver={(ev) => { ev.preventDefault(); setDrag(x.id); }} onDragLeave={() => setDrag(null)}
                       onDrop={(ev) => { ev.preventDefault(); setDrag(null); const f = ev.dataTransfer.files?.[0]; if (f) void upload(x.id, f); }}
                       className={`flex flex-wrap items-center justify-between gap-2 p-3 ${drag === x.id ? "bg-active" : ""}`}>
-                      <div className="min-w-0"><div className="text-sm font-medium">{x.name}</div>{x.fileName && (x.documentId ? <a href={`/api/documents/${x.documentId}`} className="block truncate text-xs text-link underline underline-offset-2" data-testid="doc-file">📎 {x.fileName}</a> : <div className="truncate text-xs text-muted-foreground">📎 {x.fileName}</div>)}{x.status === "rejected" && <div className="text-xs text-bad">Rejected: please upload a clearer, complete copy</div>}</div>
+                      <div className="min-w-0"><div className="text-sm font-medium">{x.name}</div>{x.fileName && (x.documentId ? <a href={`/api/documents/${x.documentId}`} className="block truncate text-xs text-link underline underline-offset-2" data-testid="doc-file">📎 {x.fileName}</a> : <div className="truncate text-xs text-muted-foreground">📎 {x.fileName}</div>)}{x.note && x.status !== "accepted" && <div className="text-xs text-muted-foreground">{x.note}</div>}{x.status === "rejected" && <div className="text-xs text-bad">Rejected: please upload a clearer, complete copy</div>}</div>
                       <div className="flex items-center gap-2"><Badge tone={docTone[x.status]}>{statusLabel(x.status)}</Badge>
                         {(x.status === "requested" || x.status === "rejected" || x.status === "uploaded") && <button className="btn-ghost py-1 text-xs" onClick={() => { setTarget(x.id); fileRef.current?.click(); }}>{x.status === "uploaded" ? "Replace" : "Upload"}</button>}</div>
                     </li>))}
@@ -56,6 +62,7 @@ export default function BorrowerLoan() {
             <p className="text-xs text-faint">Drag and drop a file onto a row, or tap Upload (opens the camera on phones).</p>
           </div>
         </Section>
+        {d.sponsor && ["submitted", "initial_review", "underwriting"].includes(d.status) && <Link href={`/admin/borrower/${d.id}/profile`} className="block text-sm text-link underline underline-offset-2" data-testid="edit-profile">Update your guarantors, past deals or credit answers</Link>}
         <ScopeOfWork deal={d} editable />
         <LoanMessages dealId={d.id} side="borrower" />
         </div>

@@ -1,15 +1,20 @@
 // The loan book's rules: one set of records and one reducer, with no React and no database. Demo seats and sample data
 // run it in the browser; real accounts run it on the server (lib/book-store.ts), after lib/book-access.ts checks them.
 import { evaluate, type Application, type BuyBox } from "./engine";
+import { countedDeals, missingDocs, needsList, withSponsor } from "./credit";
 import { approversNeeded, approvalError, defaultScope, drawRequestError, releaseToScope, reviewDraw } from "./draws";
 import { canAdvance, nextStage } from "./loan-stages";
-import { seedDeals, seedBids, seedDraws, seedLoanSales, seedLoanOffers, seedMessages, seedPhotoRequests, capitalSources, partners as seedPartners, brokers as seedBrokers, loanBuyers, BORROWER_ID, DEMO_PARTNER_ID, DEMO_BUYER_ID, DEMO_BROKER_ID, type Broker, type Deal, type Bid, type DrawRequest, type DrawRequestLine, type LoanMessage, type Partner, type PayoffRequest, type DocStatus, type CapitalSource, type LoanBuyer, type LoanOffer, type LoanSale, type PhotoRequest, type RequestPhoto, type ScopeLine } from "./mockData";
+import { seedDeals, seedBids, seedDraws, seedLoanSales, seedLoanOffers, seedMessages, seedPhotoRequests, DEMO_SPONSORS, capitalSources, partners as seedPartners, brokers as seedBrokers, loanBuyers, BORROWER_ID, DEMO_PARTNER_ID, DEMO_BUYER_ID, DEMO_BROKER_ID, type Broker, type Deal, type Bid, type DrawRequest, type DrawRequestLine, type LoanMessage, type Partner, type PayoffRequest, type DocStatus, type CapitalSource, type LoanBuyer, type LoanOffer, type LoanSale, type PhotoRequest, type RequestPhoto, type ScopeLine, type Sponsor } from "./mockData";
 import { afterPayment, firstDueDate, payoffFor } from "./servicing";
 
 export interface Book { partnerId: string; buyerId: string; brokerId: string; borrowerId: string; loanPrefix: string; deals: Deal[]; bids: Bid[]; partners: Partner[]; buyers: LoanBuyer[]; brokers: Broker[]; sales: LoanSale[]; offers: LoanOffer[]; draws: DrawRequest[]; photoRequests: PhotoRequest[]; payoffs: PayoffRequest[]; messages: LoanMessage[]; sources: CapitalSource[]; audit: { at: string; text: string }[]; sample?: boolean }
 
 export type BookAction =
-  | { t: "submitApp"; app: Application; address: string; city: string; zip: string; entityName: string; exitStrategy: string; client?: { name: string; borrowerId?: string; brokerId?: string; brokerPoints?: number }; source?: string }
+  | { t: "submitApp"; app: Application; address: string; city: string; zip: string; entityName: string; exitStrategy: string; client?: { name: string; borrowerId?: string; brokerId?: string; brokerPoints?: number }; source?: string; sponsor?: Sponsor }
+  | { t: "saveSponsor"; dealId: string; sponsor: Sponsor }
+  | { t: "verifyTrackDeal"; dealId: string; trackId: string; verified: boolean }
+  | { t: "signOffCredit"; dealId: string; by: string; note: string }
+  | { t: "reopenCreditReview"; dealId: string }
   | { t: "advanceLoan"; dealId: string }
   | { t: "approveFunding"; dealId: string; by: string }
   | { t: "updateDealNumbers"; dealId: string; changes: Partial<Application> }
@@ -63,7 +68,7 @@ const SEED_AT = "2026-10-18T09:00:00-07:00";
 export function demoBook(): Book {
   const deals = seedDeals.map((d) => {
     const e = evaluate(d.app);
-    return { ...d, scope: defaultScope(d.app.product, e.holdback, d.disbursedDraws ?? 0), allocations: d.allocations.map((a) => ({ ...a, amount: a.amount || e.noteAmount })) };
+    return { ...d, sponsor: DEMO_SPONSORS[d.id], scope: defaultScope(d.app.product, e.holdback, d.disbursedDraws ?? 0), allocations: d.allocations.map((a) => ({ ...a, amount: a.amount || e.noteAmount })) };
   });
   const quoted = payoffFor(deals.find((d) => d.id === "d11")!, "2026-11-15");
   const payoffs: PayoffRequest[] = [{ id: "payoff-1", dealId: "d11", goodThrough: "2026-11-15", requestedAt: "2026-10-22T10:00:00-07:00", by: "Avery Mock (FAKE)", status: "requested", ...quoted }];
@@ -83,16 +88,13 @@ export function reducer(s: Book, a: BookAction): Book {
     case "loadSample": return { ...demoBook(), sample: true };
     case "clearSample": return emptyBook();
     case "submitApp": {
+      // Credit inputs come from the people and deals listed, and nothing arrives already verified.
+      const sponsor = a.sponsor && { ...a.sponsor, trackRecord: a.sponsor.trackRecord.map(({ verified: _verified, ...item }) => item) };
+      const app = sponsor ? withSponsor(a.app, sponsor, new Date()) : a.app;
       // The highest number so far, not a count: a count could repeat if a record ever went away.
       const n = Math.max(1000, ...s.deals.map((item) => Number(item.loanNumber.match(/(\d+)$/)?.[1]) || 0)) + 1;
-      const d: Deal = { id: `d${uid()}`, loanNumber: `${s.loanPrefix}${n}`, borrowerId: a.client?.borrowerId ?? (a.client ? `client-${uid()}` : s.borrowerId), borrowerName: a.client?.name || "Alex Sample (FAKE)", entityName: a.entityName || "Sample Flips LLC (FAKE)", address: a.address || "100 New Demo St", city: a.city || "Hollywood", zip: a.zip || "33020", app: a.app, status: "submitted", daysInStage: 0, capitalStatus: "not_started", allocations: [], teaserSentTo: [], source: a.source ?? (a.client?.brokerId ? "broker" : "web_quote"), brokerId: a.client?.brokerId, brokerPoints: a.client?.brokerPoints, scope: defaultScope(a.app.product, evaluate(a.app).holdback),
-        docs: [
-          { id: "id", name: "Government ID (each guarantor)", category: "Identity", status: "requested" },
-          { id: "entity", name: "LLC Articles + Operating Agreement", category: "Entity", status: "requested" },
-          { id: "contract", name: "Purchase contract (fully executed)", category: "Property", status: "requested" },
-          { id: "sow", name: "Scope of work / rehab budget", category: "Property", status: a.app.rehab > 0 ? "requested" : "waived" },
-          { id: "bank", name: "Bank statements (2 most recent months)", category: "Liquidity", status: "requested" },
-        ], exitStrategy: a.exitStrategy, closingDate: "2026-11-30" };
+      const d: Deal = { id: `d${uid()}`, loanNumber: `${s.loanPrefix}${n}`, borrowerId: a.client?.borrowerId ?? (a.client ? `client-${uid()}` : s.borrowerId), borrowerName: a.client?.name || "Alex Sample (FAKE)", entityName: a.entityName || "Sample Flips LLC (FAKE)", address: a.address || "100 New Demo St", city: a.city || "Hollywood", zip: a.zip || "33020", app, status: "submitted", daysInStage: 0, capitalStatus: "not_started", allocations: [], teaserSentTo: [], source: a.source ?? (a.client?.brokerId ? "broker" : "web_quote"), brokerId: a.client?.brokerId, brokerPoints: a.client?.brokerPoints, scope: defaultScope(app.product, evaluate(app).holdback),
+        docs: needsList(app, sponsor), sponsor, exitStrategy: a.exitStrategy, closingDate: "2026-11-30" };
       return { ...s, deals: [d, ...s.deals], audit: log(`Application ${d.loanNumber} submitted${a.client?.brokerId ? " by broker" : a.client ? " by staff" : " by borrower"}`) };
     }
     case "approveFunding": {
@@ -116,6 +118,27 @@ export function reducer(s: Book, a: BookAction): Book {
     case "linkBorrower": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
       return { ...s, deals: upd(a.dealId, (d) => ({ ...d, borrowerId: a.borrowerId, borrowerName: a.borrowerName })), audit: log(`${deal.loanNumber}: borrower account linked`) };
+    }
+    case "saveSponsor": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      // Nothing listed is verified until staff check it, whatever the request says.
+      const sponsor = { ...a.sponsor, trackRecord: a.sponsor.trackRecord.map((item) => ({ ...item, verified: deal.sponsor?.trackRecord.find((old) => old.id === item.id && old.address === item.address)?.verified })) };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, sponsor, app: withSponsor(d.app, sponsor, new Date()), docs: [...d.docs, ...missingDocs(d.docs, d.app, sponsor)] })), audit: log(`${deal.loanNumber}: borrower profile updated`) };
+    }
+    case "verifyTrackDeal": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, sponsor: d.sponsor && { ...d.sponsor, trackRecord: d.sponsor.trackRecord.map((item) => (item.id === a.trackId ? { ...item, verified: a.verified } : item)) } })), audit: log(`${deal.loanNumber}: past deal ${a.verified ? "verified" : "unverified"}`) };
+    }
+    case "signOffCredit": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      // From here the loan is priced on what was checked, not on what was claimed.
+      const app = deal.sponsor ? withSponsor(deal.app, deal.sponsor, new Date(), true) : deal.app;
+      const verifiedDeals = deal.sponsor ? countedDeals(deal.sponsor.trackRecord, new Date(), true).deals : deal.app.verifiedDeals;
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, app, creditReview: { by: a.by, at: now(), note: a.note, verifiedDeals } })), audit: log(`${deal.loanNumber}: credit review signed off by ${a.by}`) };
+    }
+    case "reopenCreditReview": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, creditReview: undefined })), audit: log(`${deal.loanNumber}: credit review reopened`) };
     }
     case "saveSource": return { ...s, sources: s.sources.some((x) => x.id === a.source.id) ? s.sources.map((x) => (x.id === a.source.id ? a.source : x)) : [...s.sources, a.source], audit: log(`Capital source saved: ${a.source.name}`) };
     case "removeSource": return { ...s, sources: s.sources.filter((x) => x.id !== a.id), audit: log("Capital source removed") };

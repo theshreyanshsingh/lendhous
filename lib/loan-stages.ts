@@ -22,7 +22,10 @@ export function nextStage(deal: Deal, e: Estimate): NextStage | null {
   const step = NEXT[deal.status];
   if (!step) return null;
   const blockers: string[] = [];
-  if (step.to === "term_sheet_issued") blockers.push(...e.hardStops);
+  if (step.to === "term_sheet_issued") {
+    blockers.push(...e.hardStops);
+    if (!deal.creditReview) blockers.push("Credit review isn't signed off (Credit review tab)");
+  }
   if (step.to === "clear_to_close") {
     const open = deal.docs.filter((doc) => doc.status !== "accepted" && doc.status !== "waived").length;
     if (open) blockers.push(`${open} document${open > 1 ? "s" : ""} still open`);

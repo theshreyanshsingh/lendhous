@@ -2,13 +2,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { startLoan } from "@/actions/book";
+import { DECLARATIONS, needsList, qualifyingFico, withSponsor } from "@/lib/credit";
 import { evaluate, type Application, type Product } from "@/lib/engine";
 import { pricingConfig } from "@/lib/pricing-config";
 import { useStore } from "@/lib/store";
 import EstimatePanel from "@/components/EstimatePanel";
+import { allAnswered, DeclarationFields, emptyProfile, GuarantorFields, toSponsor, TrackRecordFields } from "@/components/SponsorForm";
 import { productLabel } from "@/components/ui";
 
-const steps = ["Loan type", "Property", "Deal numbers", "Loan request", "Borrower & experience", "Review & submit"];
+const steps = ["Loan type", "Property", "Deal numbers", "Loan request", "Borrower & guarantors", "Past deals", "Credit questions", "Review & submit"];
+const REVIEW = steps.length - 1;
 const counties = [...pricingConfig.geography.core, ...pricingConfig.geography.expansion, "Out of state"];
 
 function Num({ label, value, onChange, hint, testid }: { label: string; value: number | undefined; onChange: (n: number | undefined) => void; hint?: string; testid?: string }) {
@@ -37,19 +40,36 @@ export default function ApplicationWizard({ mode = "borrower", prefill }: { mode
   const [sending, setSending] = useState(false);
   const [step, setStep] = useState(0);
   const [addr, setAddr] = useState({ address: "", city: prefill?.city ?? "", zip: "", entityName: "", exit: "Sell" });
-  const [certs, setCerts] = useState({ bp: false, noo: false, consent: false });
+  const [certs, setCerts] = useState({ bp: false, noo: false, consent: false, true: false });
+  const [profile, setProfile] = useState<ReturnType<typeof emptyProfile>>(() => ({ ...emptyProfile(), guarantors: [{ name: prefill?.name ?? "", ownershipPct: 100, fico: 700, citizenship: "us" }] }));
+  // Staff starting a loan from a phone call may not have this yet; the borrower is then asked for it on their loan page.
+  const [collect, setCollect] = useState(!staff);
+  const sponsor = useMemo(() => toSponsor(profile), [profile]);
   const [a, setA] = useState<Application>({ product: prefill?.product ?? "fix_flip", purpose: "purchase", county: prefill && prefill.state !== "FL" ? "Out of state" : "Broward", state: prefill?.state ?? "FL", propertyType: "sfr", occupancy: "vacant", purchasePrice: prefill?.purchasePrice ?? 300_000, rehab: prefill?.rehab ?? 100_000, arv: prefill ? prefill.purchasePrice + prefill.rehab : 550_000, requestedAmount: prefill?.requestedAmount, interestReserve: "none", accrual: "full_boat", fico: 720, verifiedDeals: 3, liquidity: 150_000, valuationSource: "borrower_estimate", monthlyRent: 3_200, taxesAnnual: 6_000, insuranceAnnual: 4_800, hoaMonthly: 0, groundUpBuilds: 0 });
   const set = (p: Partial<Application>) => setA((x) => ({ ...x, ...p }));
-  const e = useMemo(() => evaluate(a), [a]);
+  // Priced on the people and deals listed, the same way the server will price it.
+  const priced = useMemo(() => (collect ? withSponsor(a, sponsor, new Date()) : a), [a, sponsor, collect]);
+  const e = useMemo(() => evaluate(priced), [priced]);
+  const owned = profile.guarantors.reduce((sum, item) => sum + item.ownershipPct, 0);
   useEffect(() => { window.scrollTo({ top: 0 }); }, [step]);
   const ownerOcc = a.occupancy === "owner_occupied";
   const canNext = step !== 1 || !ownerOcc;
   // Demo and sample data fill in placeholders; a real loan needs the real details.
-  const missing = local ? [] : [!addr.address.trim() && "property address", !addr.city.trim() && "city", !addr.zip.trim() && "ZIP", !addr.entityName.trim() && "borrowing entity"].filter((item): item is string => Boolean(item));
+  const missing = [
+    ...(local ? [] : [!addr.address.trim() && "property address", !addr.city.trim() && "city", !addr.zip.trim() && "ZIP", !addr.entityName.trim() && "borrowing entity"]),
+    ...(collect ? [
+      profile.guarantors.some((item) => !item.name.trim()) && "each guarantor's name",
+      profile.guarantors.some((item) => item.fico < 300 || item.fico > 850) && "a credit score between 300 and 850 for each guarantor",
+      owned > 100 && "ownership that adds up to 100% or less",
+      profile.trackRecord.some((item) => !item.address.trim() || !/^\d{4}-\d{2}$/.test(item.completed) || !item.purchasePrice) && "the address, month finished and price for each past deal",
+      !allAnswered(profile.answers) && "an answer to every credit question",
+      DECLARATIONS.some((item) => profile.answers[item.key]) && !profile.answers.explanation.trim() && "an explanation for each yes",
+    ] : []),
+  ].filter((item): item is string => Boolean(item));
   const needsClient = (broker || staff) && !client.name.trim();
   const submit = async () => {
     setSending(true);
-    const action = { t: "submitApp" as const, app: a, address: addr.address, city: addr.city, zip: addr.zip, entityName: addr.entityName, exitStrategy: addr.exit, client: broker ? { name: client.name.trim(), brokerId: s.brokerId, brokerPoints: client.points } : staff ? { name: client.name.trim() } : undefined, source: staff ? "staff" : undefined };
+    const action = { t: "submitApp" as const, app: priced, address: addr.address, city: addr.city, zip: addr.zip, entityName: addr.entityName, exitStrategy: addr.exit, client: broker ? { name: client.name.trim(), brokerId: s.brokerId, brokerPoints: client.points } : staff ? { name: client.name.trim() } : undefined, source: staff ? "staff" : undefined, sponsor: collect ? sponsor : undefined };
     if (staff && !local) {
       const reply = await startLoan({ action, clientEmail: client.email, invite: client.invite, leadId: prefill?.leadId });
       applyReply(reply);
@@ -111,45 +131,63 @@ export default function ApplicationWizard({ mode = "borrower", prefill }: { mode
             <div><span className="label">Interest on</span><Choice value={a.accrual} onChange={(v) => set({ accrual: v })} options={[{ v: "full_boat", l: "Full loan (full-boat)" }, { v: "dutch", l: "Disbursed funds only (Dutch)" }]} /></div></>}
             <label className="block"><span className="label">Exit strategy</span><select className="desk-input" value={addr.exit} onChange={(x) => setAddr({ ...addr, exit: x.target.value })}><option>Sell</option><option>Refi</option><option>Hold</option></select></label>
           </div>)}
-          {step === 4 && (<div className="grid gap-3 sm:grid-cols-2">
-            {staff && <>
-              <label className="block"><span className="label">Borrower&apos;s name</span><input data-testid="client-name" className="desk-input" value={client.name} onChange={(x) => setClient({ ...client, name: x.target.value })} /></label>
-              <label className="block"><span className="label">Borrower&apos;s email (optional)</span><input data-testid="client-email" type="email" className="desk-input" value={client.email} onChange={(x) => setClient({ ...client, email: x.target.value })} /></label>
-              {!local && client.email.trim() && <label className="flex items-center gap-2 text-sm sm:col-span-2"><input data-testid="client-invite" type="checkbox" checked={client.invite} onChange={(x) => setClient({ ...client, invite: x.target.checked })} /> Invite them to the portal if they don&apos;t have an account</label>}
-              {prefill?.notes && <p className="rounded-lg bg-muted p-3 text-xs text-muted-foreground sm:col-span-2">From their website brief: {prefill.notes}</p>}
-            </>}
-            {broker && <>
-              <label className="block"><span className="label">Client&apos;s name</span><input data-testid="client-name" className="desk-input" value={client.name} onChange={(x) => setClient({ ...client, name: x.target.value })} /></label>
-              <label className="block"><span className="label">Your fee (points, paid at closing)</span><input data-testid="client-points" className="desk-input" type="number" inputMode="decimal" min={0} max={5} step={0.25} value={client.points} onChange={(x) => setClient({ ...client, points: Number(x.target.value) || 0 })} /></label>
-            </>}
-            <label className="block sm:col-span-2"><span className="label">Borrowing entity (LLC)</span><input className="desk-input" placeholder="e.g. Sunrise Holdings LLC" value={addr.entityName} onChange={(x) => setAddr({ ...addr, entityName: x.target.value })} /></label>
-            <Num testid="fico" label="Credit score (self-reported)" value={a.fico} onChange={(v) => set({ fico: v ?? 0 })} hint="A soft pull (no score impact) happens after you consent" />
-            <Num testid="deals" label="Completed deals, last 36 months" value={a.verifiedDeals} onChange={(v) => set({ verifiedDeals: v ?? 0 })} hint="Flips, builds or rentals with HUD/closing statements" />
-            <Num label="Verified liquidity (cash + reserves)" value={a.liquidity} onChange={(v) => set({ liquidity: v ?? 0 })} />
-            <Num label="Earnest money already paid" value={a.earnestMoney} onChange={(v) => set({ earnestMoney: v })} />
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!a.foreignNational} onChange={(x) => set({ foreignNational: x.target.checked })} /> Foreign national guarantor</label>
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!a.repeatBorrower} onChange={(x) => set({ repeatBorrower: x.target.checked })} /> Repeat LendHous borrower</label>
-          </div>)}
-          {step === 5 && (<div className="space-y-3 text-sm">
-            <div className="grid gap-2 rounded-lg bg-muted p-3 sm:grid-cols-2">
-              <div><b>{productLabel[a.product]}</b> · {a.purpose.replace("_", " ")}</div><div>{addr.address || "(no address)"} {addr.city} · {a.county}</div>
-              <div>Price {a.purchasePrice.toLocaleString()} · Rehab {a.rehab.toLocaleString()} · ARV {a.arv.toLocaleString()}</div><div>FICO {a.fico} · {a.verifiedDeals} deals · Tier {e.tier}</div>
+          {step === 4 && (<div className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              {staff && <>
+                <label className="block"><span className="label">Borrower&apos;s name</span><input data-testid="client-name" className="desk-input" value={client.name} onChange={(x) => setClient({ ...client, name: x.target.value })} /></label>
+                <label className="block"><span className="label">Borrower&apos;s email (optional)</span><input data-testid="client-email" type="email" className="desk-input" value={client.email} onChange={(x) => setClient({ ...client, email: x.target.value })} /></label>
+                {!local && client.email.trim() && <label className="flex items-center gap-2 text-sm sm:col-span-2"><input data-testid="client-invite" type="checkbox" checked={client.invite} onChange={(x) => setClient({ ...client, invite: x.target.checked })} /> Invite them to the portal if they don&apos;t have an account</label>}
+                {prefill?.notes && <p className="rounded-lg bg-muted p-3 text-xs text-muted-foreground sm:col-span-2">From their website brief: {prefill.notes}</p>}
+              </>}
+              {broker && <>
+                <label className="block"><span className="label">Client&apos;s name</span><input data-testid="client-name" className="desk-input" value={client.name} onChange={(x) => setClient({ ...client, name: x.target.value })} /></label>
+                <label className="block"><span className="label">Your fee (points, paid at closing)</span><input data-testid="client-points" className="desk-input" type="number" inputMode="decimal" min={0} max={5} step={0.25} value={client.points} onChange={(x) => setClient({ ...client, points: Number(x.target.value) || 0 })} /></label>
+              </>}
+              <label className="block"><span className="label">Borrowing entity (LLC)</span><input className="desk-input" placeholder="e.g. Sunrise Holdings LLC" value={addr.entityName} onChange={(x) => setAddr({ ...addr, entityName: x.target.value })} /></label>
+              <label className="block"><span className="label">State the LLC was formed in</span><input className="desk-input" data-testid="entity-state" maxLength={2} value={profile.entityState} onChange={(x) => setProfile({ ...profile, entityState: x.target.value.replace(/[^a-zA-Z]/g, "").toUpperCase() })} /></label>
+              <Num label="Cash and reserves you can show on bank statements" value={a.liquidity} onChange={(v) => set({ liquidity: v ?? 0 })} hint={`This loan needs about $${Math.round(e.cashToClose).toLocaleString()} to close, plus reserves`} />
+              <Num label="Earnest money already paid" value={a.earnestMoney} onChange={(v) => set({ earnestMoney: v })} />
+              {staff && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!a.repeatBorrower} onChange={(x) => set({ repeatBorrower: x.target.checked })} /> Repeat LendHous borrower</label>}
+              {staff && <label className="flex items-start gap-2 text-sm sm:col-span-2"><input type="checkbox" className="mt-1" data-testid="collect-profile" checked={collect} onChange={(x) => setCollect(x.target.checked)} /> I have the guarantors, past deals and credit answers now. Otherwise the borrower is asked for them on their loan page.</label>}
+              {staff && !collect && <>
+                <Num testid="fico" label="Credit score (estimate)" value={a.fico} onChange={(v) => set({ fico: v ?? 0 })} />
+                <Num testid="deals" label="Completed deals, last 36 months (estimate)" value={a.verifiedDeals} onChange={(v) => set({ verifiedDeals: v ?? 0 })} />
+              </>}
             </div>
-            {[["bp", "I certify this loan is for business/investment purposes only."], ["noo", "Neither I nor any family member will occupy the property."], ["consent", "I consent to a soft credit pull and identity/OFAC checks (FCRA disclosure)."]].map(([key, txt]) => (
-              <label key={key} className="flex items-start gap-2"><input data-testid={`cert-${key}`} type="checkbox" className="mt-1" checked={certs[key as keyof typeof certs]} onChange={(x) => setCerts({ ...certs, [key]: x.target.checked })} /> {txt}</label>))}
+            {collect && <GuarantorFields guarantors={profile.guarantors} onChange={(guarantors) => setProfile({ ...profile, guarantors })} />}
+          </div>)}
+          {step === 5 && (collect ? <TrackRecordFields deals={profile.trackRecord} onChange={(trackRecord) => setProfile({ ...profile, trackRecord })} /> : <p className="text-sm text-muted-foreground">The borrower lists their past deals on their loan page.</p>)}
+          {step === 6 && (collect ? <DeclarationFields answers={profile.answers} onChange={(answers) => setProfile({ ...profile, answers })} /> : <p className="text-sm text-muted-foreground">The borrower answers the credit questions on their loan page.</p>)}
+          {step === REVIEW && (<div className="space-y-4 text-sm">
+            <div className="grid gap-2 rounded-lg bg-muted p-3 sm:grid-cols-2" data-testid="review-summary">
+              <div><b>{productLabel[a.product]}</b> · {a.purpose.replace("_", " ")}</div><div>{addr.address || "(no address)"} {addr.city} · {a.county}</div>
+              <div>Price {a.purchasePrice.toLocaleString()} · Rehab {a.rehab.toLocaleString()} · ARV {a.arv.toLocaleString()}</div>
+              <div>{collect ? `${profile.guarantors.length} guarantor${profile.guarantors.length === 1 ? "" : "s"} · qualifying score ${qualifyingFico(sponsor.guarantors)}` : `Score ${a.fico}`} · {priced.verifiedDeals} past deal{priced.verifiedDeals === 1 ? "" : "s"} · Tier {e.tier}</div>
+            </div>
+            <div data-testid="needs-preview">
+              <h2 className="text-sm font-medium">After you submit, we&apos;ll ask for</h2>
+              <ul className="mt-2 grid gap-1 text-sm text-muted-foreground sm:grid-cols-2">{needsList(priced, collect ? sponsor : undefined).map((item) => <li key={item.id}>· {item.name}</li>)}</ul>
+            </div>
+            <div className="space-y-2">
+              {[["bp", "This loan is for business or investment purposes only."], ["noo", "Neither I nor any family member will live in the property."], ["consent", "I consent to a soft credit pull and identity and OFAC checks for each guarantor (FCRA disclosure)."], ["true", "Everything in this application is true and complete as far as I know."]].map(([key, txt]) => (
+                <label key={key} className="flex items-start gap-2"><input data-testid={`cert-${key}`} type="checkbox" className="mt-1" checked={certs[key as keyof typeof certs]} onChange={(x) => setCerts({ ...certs, [key]: x.target.checked })} /> {txt}</label>))}
+            </div>
             {local ? <p className="text-xs text-muted-foreground">Sample data: the application is saved in this browser only.</p>
               : <p className="text-xs text-muted-foreground" data-testid="submit-real">{staff ? "This creates the loan in the pipeline." : "This goes to the LendHous team, who will be in touch."}</p>}
             {missing.length > 0 && <p role="alert" className="text-sm text-bad" data-testid="submit-missing">Still needed: {missing.join(", ")}.</p>}
-            {needsClient && <p role="alert" className="text-sm text-bad">Add {staff ? "the borrower's" : "your client's"} name on the previous step.</p>}
+            {needsClient && <p role="alert" className="text-sm text-bad">Add {staff ? "the borrower's" : "your client's"} name on the Borrower &amp; guarantors step.</p>}
           </div>)}
         </div>
         <div className="flex justify-between gap-2">
           <button className="btn-ghost" disabled={step === 0} onClick={() => setStep(step - 1)}>Back</button>
-          {step < steps.length - 1 ? <button data-testid="next" className="btn-primary" disabled={!canNext} onClick={() => setStep(step + 1)}>Continue</button>
-            : <button data-testid="submit" className="btn-primary" disabled={sending || !e.eligible || !certs.bp || !certs.noo || !certs.consent || needsClient || missing.length > 0} onClick={() => void submit()}>{sending ? "Sending…" : staff ? "Create loan" : "Submit application"}</button>}
+          {step < REVIEW ? <button data-testid="next" className="btn-primary" disabled={!canNext} onClick={() => setStep(step + 1)}>Continue</button>
+            : <button data-testid="submit" className="btn-primary" disabled={sending || !e.eligible || !certs.bp || !certs.noo || !certs.consent || !certs.true || needsClient || missing.length > 0} onClick={() => void submit()}>{sending ? "Sending…" : staff ? "Create loan" : "Submit application"}</button>}
         </div>
       </div>
-      <div className="lg:sticky lg:top-5 lg:self-start"><EstimatePanel e={e} product={a.product} /></div>
+      <div className="lg:sticky lg:top-5 lg:self-start">
+        <EstimatePanel e={e} product={a.product} />
+        <p className="mt-2 px-1 text-xs text-muted-foreground" data-testid="priced-on">Priced on {priced.verifiedDeals} past deal{priced.verifiedDeals === 1 ? "" : "s"} and a {priced.fico} credit score.{collect && step < 5 ? " List your guarantors and past deals in the next steps to see your own terms." : ""}</p>
+      </div>
       <div className="fixed inset-x-0 bottom-0 z-30 flex items-center justify-between border-t border-border bg-card px-4 py-2 shadow-[var(--shadow)] lg:hidden">
         <div><div className="text-xs text-muted-foreground">Estimate</div><div className="text-base font-semibold tracking-tight text-foreground">{e.eligible ? `$${e.noteAmount.toLocaleString()} · ${e.rate.toFixed(2)}%` : "Not eligible"}</div></div>
         <div className="text-right text-xs text-muted-foreground">Cash to close<br /><b className="text-foreground">${Math.round(e.cashToClose).toLocaleString()}</b></div>

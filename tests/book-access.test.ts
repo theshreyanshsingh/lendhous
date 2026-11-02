@@ -176,7 +176,8 @@ describe("what each account may do", () => {
   });
   it("staff can start a loan; a real application needs real details", () => {
     const app = b.deals[0].app;
-    const full = { t: "submitApp" as const, app, address: "1 Real St", city: "Miami", zip: "33101", entityName: "Real LLC", exitStrategy: "Sell" };
+    const sponsor = { entityState: "FL", guarantors: [{ name: "Real Person", ownershipPct: 100, fico: 740, citizenship: "us" as const }], trackRecord: [], declarations: { bankruptcy: false, foreclosure: false, delinquent: false, judgments: false, lawsuit: false, felony: false, borrowedDownPayment: false, explanation: "" } };
+    const full = { t: "submitApp" as const, app, address: "1 Real St", city: "Miami", zip: "33101", entityName: "Real LLC", exitStrategy: "Sell", sponsor };
     expect(check(b, borrower, { ...full, address: "" })).toEqual({ error: expect.stringMatching(/property address/) });
     expect(check(b, borrower, { ...full, client: { name: "Forged", borrowerId: "someone-else" } })).toMatchObject({ action: { client: { name: "borrower-1 name", borrowerId: "borrower-1" } } });
     expect(check(b, broker, { ...full, client: { name: "Client", brokerId: "other-firm", brokerPoints: 99 } })).toMatchObject({ action: { client: { name: "Client", brokerId: "broker-firm", brokerPoints: 5 } } });
@@ -223,8 +224,10 @@ describe("alerts", () => {
   it("tells the team about new work and the borrower about their loan, without details", () => {
     const applied = reducer(b, { t: "submitApp", app: b.deals[0].app, address: "1 St", city: "Miami", zip: "33101", entityName: "x", exitStrategy: "Sell", client: { name: "New Person", borrowerId: "n1" } });
     expect(alertsFor(b, applied, { t: "submitApp", app: b.deals[0].app, address: "1 St", city: "Miami", zip: "33101", entityName: "x", exitStrategy: "Sell" })[0]).toMatchObject({ to: "team", event: "loan.submitted" });
-    const issued = reducer(b, { t: "advanceLoan", dealId: "d1" });
-    expect(alertsFor(b, issued, { t: "advanceLoan", dealId: "d1" }).map((alert) => alert.to)).toEqual(["borrower", "broker"]);
+    // A term sheet goes out only after the credit review is signed off.
+    const reviewed = reducer(b, { t: "signOffCredit", dealId: "d1", by: "Uma", note: "" });
+    const issued = reducer(reviewed, { t: "advanceLoan", dealId: "d1" });
+    expect(alertsFor(reviewed, issued, { t: "advanceLoan", dealId: "d1" }).map((alert) => alert.to)).toEqual(["borrower", "broker"]);
     expect(alertsFor(b, b, { t: "sendMessage", dealId: "d1", from: "Uma", side: "team", text: "secret detail" }).map((alert) => alert.to)).toEqual(["borrower", "broker"]);
     expect(JSON.stringify(alertsFor(b, b, { t: "sendMessage", dealId: "d1", from: "Uma", side: "team", text: "secret detail" }))).not.toContain("secret detail");
     expect(alertsFor(b, b, { t: "sendMessage", dealId: "d1", from: "Uma", side: "internal", text: "note" })).toEqual([]);

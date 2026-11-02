@@ -8,6 +8,7 @@ import { pricingConfig } from "@/lib/pricing-config";
 import { canAdvance, nextStage } from "@/lib/loan-stages";
 import { teaserOf } from "@/lib/teaser";
 import { inviteBorrower } from "@/actions/book";
+import { CreditReview } from "@/components/loan/CreditReview";
 import { DocUpload } from "@/components/loan/DocUpload";
 import { LoanMessages } from "@/components/loan/LoanMessages";
 import { PhotoRequests } from "@/components/loan/PhotoRequests";
@@ -15,7 +16,7 @@ import { ScopeOfWork } from "@/components/loan/ScopeOfWork";
 import { TermSheetCard } from "@/components/loan/TermSheetCard";
 import { Badge, GradeBadge, RatioPill, Section, Stat, usd, pct, k, productLabel, statusLabel, capTone, points, ratioGrid, statGrid } from "@/components/ui";
 
-const tabs = ["Numbers & Ratios", "Score & Flags", "Capital Routing", "Documents", "Messages"] as const;
+const tabs = ["Numbers & Ratios", "Credit review", "Score & Flags", "Capital Routing", "Documents", "Messages"] as const;
 
 export default function DealWorkspace() {
   const { id } = useParams<{ id: string }>(); const { s, dispatch, applyReply, local, viewerName } = useStore();
@@ -82,7 +83,7 @@ export default function DealWorkspace() {
             {stage.blockers.length > 0 && <ul className="mt-2 space-y-0.5 text-xs text-warn" data-testid="stage-blockers">{stage.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>}
           </div>
         )}
-        <div className="mt-4 grid grid-cols-2 border-b border-border sm:flex sm:gap-1">
+        <div className="mt-4 grid grid-cols-2 border-b border-border sm:grid-cols-3 xl:flex xl:gap-1">
           {tabs.map((t) => <button key={t} data-testid={`tab-${t}`} onClick={() => setTab(t)} className={`border-b-2 px-3 py-2 text-left text-sm font-semibold sm:whitespace-nowrap ${tab === t ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>{t}</button>)}
         </div>
       </div>
@@ -196,6 +197,8 @@ export default function DealWorkspace() {
           </div>
         </div>
       )}
+
+      {tab === "Credit review" && <CreditReview deal={d} />}
 
       {tab === "Messages" && (
         <div className="grid gap-4 lg:grid-cols-2">

@@ -35,6 +35,9 @@ const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 }, 
 const page = await ctx.newPage();
 page.on("pageerror", (e) => errors.push("pageerror: " + e.message));
 page.on("console", (m) => { if (m.type() === "error") errors.push("console: " + m.text()); });
+// Every credit question has to be answered on its own.
+const QUESTIONS = ["bankruptcy", "foreclosure", "delinquent", "judgments", "lawsuit", "felony", "borrowedDownPayment"];
+const answerAll = async (p) => { for (const key of QUESTIONS) await p.getByTestId(`decl-${key}-no`).click(); };
 const shot = async (p, name, full = true) => { await p.waitForTimeout(350); await p.screenshot({ path: `${OUT}/${name}`, fullPage: full }); };
 
 // Sessions are kept per seat and swapped in later, so the run signs in once per seat (sign-in is rate limited).
@@ -127,8 +130,8 @@ const before = await page.getByTestId("est-loan").innerText();
 await page.getByTestId("rehab").fill("60000");
 await page.waitForTimeout(200);
 const after = await page.getByTestId("est-loan").innerText();
-ok(`live estimate shows $340,000 for the Spec worked example (got ${before})`, before.includes("340,000"));
-ok(`estimate updates live when rehab changes (${before} → ${after}; expect $306,000 = 85% LTC of $360k)`, after.includes("306,000"));
+ok(`until past deals are listed, the estimate prices a first-time investor (got ${before}; expect $320,000)`, before.includes("320,000") && (await page.getByTestId("priced-on").innerText()).includes("Priced on 0 past deals"));
+ok(`estimate updates live when rehab changes (${before} → ${after}; expect $288,000 = 80% LTC of $360k)`, after.includes("288,000"));
 await page.getByTestId("rehab").fill("100000");
 await shot(page, "01-borrower-application-live-estimate.png");
 
@@ -139,10 +142,31 @@ await page.getByText("I or a family member will live here").click();
 ok("owner-occupied shows hard stop", await page.getByTestId("owner-occ-stop").isVisible());
 ok("owner-occupied blocks Continue", await page.getByTestId("next").isDisabled());
 
-// complete + submit an application
+// complete + submit an application: guarantors, a past deal and every credit question
 await page.goto(BASE + "/admin/apply");
-for (let i = 0; i < 5; i++) await page.getByTestId("next").click();
-for (const c of ["bp", "noo", "consent"]) await page.getByTestId(`cert-${c}`).check();
+for (let i = 0; i < 4; i++) await page.getByTestId("next").click();
+await page.getByTestId("guarantor-name-0").fill("Alex Sample (FAKE)");
+await page.getByTestId("add-guarantor").click();
+await page.getByTestId("guarantor-name-1").fill("Pat Partner (FAKE)");
+await page.getByTestId("guarantor-own-0").fill("70");
+await page.getByTestId("guarantor-own-1").fill("30");
+await page.getByTestId("guarantor-fico-1").fill("690");
+ok("the loan is priced on the lowest guarantor's score", await page.getByTestId("est-loan").isVisible());
+await shot(page, "01b-application-guarantors.png");
+await page.getByTestId("next").click();
+await page.getByTestId("add-deal").click();
+await page.getByTestId("deal-address-0").fill("9 Past Flip Ln (FAKE)");
+await page.getByTestId("deal-completed-0").fill("2026-01");
+await page.getByTestId("deal-price-0").fill("200000");
+await page.getByTestId("deal-sale-0").fill("310000");
+await page.getByTestId("next").click();
+await answerAll(page);
+await shot(page, "01c-application-credit-questions.png");
+await page.getByTestId("next").click();
+ok("the review says what will be asked for", (await page.getByTestId("needs-preview").innerText()).includes("Settlement statements for your past deals"));
+ok("and prices on the lowest of the guarantors' scores", (await page.getByTestId("review-summary").innerText()).includes("qualifying score 690"));
+for (const c of ["bp", "noo", "consent", "true"]) await page.getByTestId(`cert-${c}`).check();
+await shot(page, "01d-application-review.png");
 await page.getByTestId("submit").click();
 await page.waitForURL("**/borrower");
 ok("submitted application appears on borrower dashboard", (await page.getByTestId("borrower-loan-card").count()) >= 3);
@@ -494,11 +518,25 @@ await page.getByTestId("new-loan").click();
 await page.waitForURL("**/admin/new-loan");
 for (let i = 0; i < 4; i++) await page.getByTestId("next").click();
 await page.getByTestId("client-name").fill("Staff Started (FAKE)");
-await page.getByTestId("next").click();
-for (const c of ["bp", "noo", "consent"]) await page.getByTestId(`cert-${c}`).check();
+for (let i = 0; i < 3; i++) await page.getByTestId("next").click();
+for (const c of ["bp", "noo", "consent", "true"]) await page.getByTestId(`cert-${c}`).check();
 await page.getByTestId("submit").click();
 await page.waitForURL("**/admin");
 ok("staff start a loan from the pipeline", await seen(page.getByTestId("pipeline-table").getByText("Staff Started (FAKE)")));
+// Credit review: a loan in underwriting can't get a term sheet until someone with that authority signs off
+await page.goto(BASE + "/admin/deals/d5");
+ok("a term sheet waits for the credit review", (await page.getByTestId("stage-blockers").innerText()).includes("Credit review isn't signed off"));
+await page.getByTestId("tab-Credit review").click();
+ok("the review flags the deals not yet checked", (await page.getByTestId("credit-flags").innerText()).includes("3 of 8 past deals not verified"));
+await page.getByTestId("verify-t6").check();
+ok("checking a deal against its statement counts it", await page.getByTestId("experience-effect").getByText("Signing off prices it on 6 verified").waitFor({ timeout: 5000 }).then(() => true, () => false));
+await shot(page, "05b-admin-credit-review.png");
+await page.getByTestId("credit-note").fill("Track record checked against HUDs (FAKE).");
+await page.getByTestId("sign-off-credit").click();
+ok("signing off clears the way for a term sheet", (await page.getByTestId("credit-signed").isVisible()) && !(await page.getByTestId("stage-panel").innerText()).includes("Credit review isn't signed off"));
+await page.goto(BASE + "/admin/deals/d6");
+await page.getByTestId("tab-Credit review").click();
+ok("a yes answer shows with its explanation", (await page.getByTestId("declaration-answers").innerText()).includes("Party to a lawsuit") && (await page.getByTestId("declaration-answers").innerText()).includes("Settled in August"));
 await page.goto(BASE + "/admin/deals/d1");
 await page.getByTestId("tab-Documents").click();
 await page.getByTestId("request-doc-name").fill("Updated insurance binder");
@@ -551,8 +589,11 @@ await page.goto(BASE + "/admin/broker/new");
 for (let i = 0; i < 4; i++) await page.getByTestId("next").click();
 await page.getByTestId("client-name").fill("Casey Client (FAKE)");
 await page.getByTestId("client-points").fill("1.5");
+await page.getByTestId("guarantor-name-0").fill("Casey Client (FAKE)");
+for (let i = 0; i < 2; i++) await page.getByTestId("next").click();
+await answerAll(page);
 await page.getByTestId("next").click();
-for (const c of ["bp", "noo", "consent"]) await page.getByTestId(`cert-${c}`).check();
+for (const c of ["bp", "noo", "consent", "true"]) await page.getByTestId(`cert-${c}`).check();
 await page.getByTestId("submit").click();
 await page.waitForURL("**/admin/broker");
 ok("a broker submits a deal for a client", await seen(page.getByTestId("broker-deal").filter({ hasText: "Casey Client (FAKE)" })));
