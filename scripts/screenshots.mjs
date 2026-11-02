@@ -470,8 +470,28 @@ const lateLoan = page.getByTestId("serviced-loan").filter({ hasText: "LH-DEMO-10
 await seen(lateLoan);
 await shot(page, "19-admin-servicing.png");
 ok("servicing shows the late loan", (await lateLoan.innerText()).includes("2 past due"));
+ok("servicing shows what brings it current", (await lateLoan.getByTestId("serviced-due").innerText()).startsWith("$"));
 await lateLoan.getByTestId("record-payment").click();
+const paymentForm = page.getByTestId("record-payment-form");
+await seen(paymentForm);
+ok("the payment form starts at what brings the loan current", (await page.getByTestId("payment-preview").innerText()).includes("current afterwards"));
+// One month's payment only: it should pay the oldest late one and leave the other.
+await page.getByTestId("payment-amount").fill((await lateLoan.locator('td[data-label="Payment"]').innerText()).replace(/[^0-9]/g, ""));
+await page.getByTestId("payment-reference").fill("DEMO-WIRE-1");
+ok("the preview says which payment it pays", (await page.getByTestId("payment-preview").innerText()).includes("Pays the 2026-09-01 payment"));
+await shot(page, "19b-admin-record-payment.png");
+await page.getByTestId("save-payment").click();
 ok("recording a payment clears the oldest late one", await seen(lateLoan.getByText("1 past due")));
+await page.goto(BASE + "/admin/deals/d13");
+await page.getByTestId("tab-Servicing").click();
+await seen(page.getByTestId("loan-ledger"));
+ok("the loan's ledger lists the payment received", (await page.getByTestId("ledger-payments").innerText()).includes("DEMO-WIRE-1"));
+await page.getByTestId("waive-fee").first().click();
+await page.getByTestId("servicing-reason").fill("First late payment");
+await page.getByTestId("confirm-servicing").click();
+ok("servicing waives a late fee with a reason", await seen(page.getByTestId("fee-waived").first()));
+await shot(page, "19c-admin-loan-ledger.png");
+await page.goto(BASE + "/admin/servicing");
 const payoffRow = page.getByTestId("payoff-row").filter({ hasText: "LH-DEMO-1011" });
 await payoffRow.getByTestId("send-payoff").click();
 const capitalBeforePayoff = await capitalNow();

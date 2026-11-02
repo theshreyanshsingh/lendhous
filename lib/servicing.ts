@@ -1,7 +1,17 @@
-// A funded loan's payment history and payoff statement (Spec 8). Dates are YYYY-MM-DD and interest is paid in arrears
-// on the 1st, so a loan's first payment falls on the 1st of the month after it closes.
-import { evaluate, fundedBalances, payoffQuote } from "./engine";
-import type { Deal } from "./mockData";
+// A funded loan's payments, lateness, maturity and payoff (Spec 8). Dates are YYYY-MM-DD and interest is paid in arrears
+// on the 1st, so a loan's first payment falls on the 1st of the month after it closes and the last on the 1st before it
+// matures. Everything here is worked out again from what's stored (the payments received, the amount each month owed,
+// the fees waived), so recording, reversing or waiving anything gives the same answer as if it had happened in order.
+import { evaluate, fundedBalances, maturityDate, payoffQuote, round2 } from "./engine";
+import type { Deal, LoanPayment, PaymentMethod } from "./mockData";
+import { pricingConfig } from "./pricing-config";
+
+const rules = pricingConfig.servicing;
+
+/** The statuses a loan is serviced in: it has money out and payments coming due. */
+export const SERVICED = ["funded", "servicing_current", "servicing_delinquent", "matured", "default"];
+
+export const METHODS: Record<PaymentMethod, string> = { wire: "Wire", ach: "ACH", check: "Check", other: "Other" };
 
 /** The same day a number of months later. Only used with due dates, which are always the 1st. */
 export function addMonths(date: string, months: number) {
@@ -9,9 +19,22 @@ export function addMonths(date: string, months: number) {
   return new Date(Date.UTC(year, month - 1 + months, day)).toISOString().slice(0, 10);
 }
 
+export const addDays = (date: string, days: number) => new Date(Date.parse(date) + days * 86_400_000).toISOString().slice(0, 10);
+export const daysBetween = (from: string, to: string) => Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000);
 export const firstDueDate = (closingDate: string) => addMonths(`${closingDate.slice(0, 7)}-01`, 1);
 
-const daysBetween = (from: string, to: string) => Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000);
+/** Today where the loans are: the properties and borrowers are in Florida, so a payment is late by Eastern time. */
+export const servicingDate = (now: Date) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+
+/** The demo book is a snapshot, so its loans stay as they were on this day instead of falling further behind each month. */
+export const DEMO_SERVICING_DAY = "2026-10-31";
+
+export const maturityOf = (deal: Deal) => maturityDate(deal.closingDate, evaluate(deal.app).termMonths);
+
+/** The rate after maturity: the note rate plus the default margin, capped. */
+export const defaultRate = (ratePct: number) => Math.max(ratePct, Math.min(rules.defaultRateMax, ratePct + rules.defaultRateAdd));
+
+export const lateFeeOn = (amount: number) => round2(amount * rules.lateFeePct);
 
 /** The balance after some payments on an amortizing loan. */
 export function amortizedBalance(amount: number, ratePct: number, monthlyPayment: number, payments: number) {
@@ -20,28 +43,134 @@ export function amortizedBalance(amount: number, ratePct: number, monthlyPayment
   return Math.max(0, left);
 }
 
-export type PaymentRow = { due: string; amount: number; status: "paid" | "late" };
-
-/** Every payment that has come due. nextPaymentDue is the next one to pay, or the latest one missed on a late loan. */
-export function paymentHistory(deal: Deal): PaymentRow[] {
-  if (!deal.nextPaymentDue) return [];
-  const amount = fundedBalances(evaluate(deal.app), deal.app, deal.disbursedDraws).nextPayment;
-  const late = deal.paymentsLate ?? 0;
-  const rows: PaymentRow[] = [];
-  const last = late ? deal.nextPaymentDue : addMonths(deal.nextPaymentDue, -1);
-  for (let due = firstDueDate(deal.closingDate); due <= last; due = addMonths(due, 1)) rows.push({ due, amount, status: "paid" });
-  rows.slice(rows.length - late).forEach((row) => { row.status = "late"; });
-  return rows;
+/**
+ * The first payment tracked here. A loan funded before payments were recorded only kept a due date and a count of missed
+ * payments, so everything before the oldest missed one counts as paid.
+ */
+function boardedFrom(deal: Deal) {
+  const first = firstDueDate(deal.closingDate);
+  const from = deal.boardedThrough ?? (deal.nextPaymentDue ? (deal.paymentsLate ? addMonths(deal.nextPaymentDue, -(deal.paymentsLate - 1)) : deal.nextPaymentDue) : first);
+  return from > first ? from : first;
 }
 
-export const paymentsMade = (deal: Deal) => paymentHistory(deal).filter((row) => row.status === "paid").length;
+export type BillStatus = "boarded" | "paid" | "paid_late" | "paid_ahead" | "due" | "late" | "upcoming";
+export type BillRow = { due: string; amount: number; status: BillStatus; paidOn?: string; lateOn: string; late: boolean; fee: number; feePaid: number; waived: boolean };
 
-/** The loan after one payment arrives: the oldest late payment first, otherwise the next one due. */
-export function afterPayment(deal: Deal): Deal {
-  const late = deal.paymentsLate ?? 0;
-  if (late > 1) return { ...deal, paymentsLate: late - 1 };
-  return { ...deal, paymentsLate: 0, nextPaymentDue: addMonths(deal.nextPaymentDue!, 1), status: deal.status === "servicing_delinquent" ? "servicing_current" : deal.status };
+export type Ledger = {
+  asOf: string; maturity: string; rows: BillRow[]; payments: LoanPayment[];
+  /** The oldest payment not yet paid, or none once every payment to maturity is in. */
+  nextDue?: string;
+  paymentsLate: number; pastDue: number; feesOwed: number; credit: number;
+  /** What brings the loan current today: past-due payments and fees, less any credit held. */
+  amountDue: number;
+  daysPastDue: number; paymentsMade: number; paidThrough: string; matured: boolean; daysToMaturity: number;
+};
+
+/**
+ * Every payment to maturity and where each dollar received went, as of a day. Money pays the oldest payment due first,
+ * then late fees, then the next payments ahead of time. A payment too small to cover a whole one is held as a credit
+ * until more arrives. A payment still unpaid once its grace days have passed is late and owes one late fee.
+ */
+export function ledgerOf(deal: Deal, asOf: string): Ledger {
+  const e = evaluate(deal.app);
+  const maturity = maturityDate(deal.closingDate, e.termMonths);
+  const current = fundedBalances(e, deal.app, deal.disbursedDraws).nextPayment;
+  const boarded = boardedFrom(deal);
+  const billed = new Map((deal.bills ?? []).map((bill) => [bill.due, bill.amount]));
+  const waived = new Set((deal.waivedFees ?? []).map((item) => item.due));
+  type Working = Omit<BillRow, "status"> & { boarded: boolean };
+  const rows: Working[] = [];
+  for (let due = firstDueDate(deal.closingDate); due <= maturity; due = addMonths(due, 1)) {
+    rows.push({ due, amount: billed.get(due) ?? current, lateOn: addDays(due, rules.graceDays + 1), late: false, fee: 0, feePaid: 0, waived: waived.has(due), boarded: due < boarded });
+  }
+  const payments = (deal.payments ?? []).filter((payment) => !payment.reversed && payment.receivedOn <= asOf).sort((a, b) => a.receivedOn.localeCompare(b.receivedOn) || a.at.localeCompare(b.at));
+
+  let credit = 0;
+  const assess = (day: string) => {
+    for (const row of rows) {
+      if (row.boarded || row.late || row.lateOn > day || (row.paidOn && row.paidOn < row.lateOn)) continue;
+      row.late = true;
+      row.fee = row.waived ? 0 : lateFeeOn(row.amount);
+    }
+  };
+  // Pays whole payments, oldest first, while the money covers them. Returns false when it stopped on one it couldn't cover.
+  const payRows = (day: string, dueOnly: boolean) => {
+    for (const row of rows) {
+      if (row.boarded || row.paidOn) continue;
+      if (dueOnly && row.due > day) return true;
+      if (credit + 0.005 < row.amount) return false;
+      credit = round2(credit - row.amount);
+      row.paidOn = day;
+    }
+    return true;
+  };
+  const apply = (day: string) => {
+    if (!payRows(day, true)) return;
+    for (const row of rows) {
+      const owed = round2(row.fee - row.feePaid);
+      if (owed <= 0 || credit <= 0) continue;
+      const paid = Math.min(owed, credit);
+      row.feePaid = round2(row.feePaid + paid);
+      credit = round2(credit - paid);
+    }
+    payRows(day, false);
+  };
+  // Due dates as well as payments, so a credit held from before pays a payment the day it falls due.
+  const events = [...rows.filter((row) => !row.boarded && row.due <= asOf).map((row) => ({ day: row.due, amount: 0, order: 0 })), ...payments.map((payment) => ({ day: payment.receivedOn, amount: payment.amount, order: 1 }))]
+    .sort((a, b) => a.day.localeCompare(b.day) || a.order - b.order);
+  for (const event of events) {
+    assess(event.day);
+    credit = round2(credit + event.amount);
+    apply(event.day);
+  }
+  assess(asOf);
+
+  const done: BillRow[] = rows.map(({ boarded: isBoarded, ...row }) => ({
+    ...row,
+    status: isBoarded ? "boarded" : row.paidOn ? (row.due > asOf ? "paid_ahead" : row.late ? "paid_late" : "paid") : row.due > asOf ? "upcoming" : row.late ? "late" : "due",
+  }));
+  const unpaid = done.filter((row) => row.status === "due" || row.status === "late");
+  const pastDue = round2(unpaid.reduce((sum, row) => sum + row.amount, 0));
+  const feesOwed = round2(done.reduce((sum, row) => sum + row.fee - row.feePaid, 0));
+  const paid = done.filter((row) => row.status === "boarded" || row.paidOn);
+  return {
+    asOf, maturity, rows: done, payments,
+    nextDue: done.find((row) => row.status !== "boarded" && !row.paidOn)?.due,
+    paymentsLate: done.filter((row) => row.status === "late").length,
+    pastDue, feesOwed, credit,
+    amountDue: Math.max(0, round2(pastDue + feesOwed - credit)),
+    daysPastDue: unpaid.length ? daysBetween(unpaid[0].due, asOf) : 0,
+    paymentsMade: paid.length,
+    paidThrough: paid.length ? paid[paid.length - 1].due : deal.closingDate,
+    matured: asOf > maturity,
+    daysToMaturity: daysBetween(asOf, maturity),
+  };
 }
+
+/** The day a loan's figures are as of: when it was last checked, or, for one never checked, the day its saved state describes. */
+export function asOfFor(deal: Deal) {
+  if (deal.servicedThrough) return deal.servicedThrough;
+  const next = deal.nextPaymentDue ?? firstDueDate(deal.closingDate);
+  return addDays(deal.paymentsLate ? addMonths(next, 1) : next, -1);
+}
+
+export const ledger = (deal: Deal) => ledgerOf(deal, asOfFor(deal));
+
+/**
+ * The loan brought up to a day: each payment that has fallen due keeps the amount it owed, and the due date, the count of
+ * late payments and the status follow from the ledger. A declared default stays until someone lifts it.
+ */
+export function settle(deal: Deal, asOf: string): Deal {
+  if (!SERVICED.includes(deal.status)) return deal;
+  const day = deal.servicedThrough && deal.servicedThrough > asOf ? deal.servicedThrough : asOf;
+  const l = ledgerOf(deal, day);
+  const bills = l.rows.filter((row) => row.status !== "boarded" && (row.due <= day || row.paidOn)).map((row) => ({ due: row.due, amount: row.amount }));
+  const status: Deal["status"] = deal.status === "default" ? "default" : l.matured ? "matured" : l.daysPastDue >= rules.delinquentDays ? "servicing_delinquent" : deal.status === "funded" ? "funded" : "servicing_current";
+  const notices = [...new Set([...(deal.maturityNotices ?? []), ...rules.maturityNoticeDays.filter((days) => l.daysToMaturity <= days)])].sort((a, b) => b - a);
+  return { ...deal, bills, boardedThrough: boardedFrom(deal), servicedThrough: day, nextPaymentDue: l.nextDue, paymentsLate: l.paymentsLate, status, daysInStage: status === deal.status ? deal.daysInStage : 0, maturityNotices: notices.length ? notices : undefined };
+}
+
+export const paymentsMade = (deal: Deal) => ledger(deal).paymentsMade;
 
 /** The principal owed today: what has been lent out, less what a rental loan's payments have paid down. */
 export function balanceOf(deal: Deal) {
@@ -50,19 +179,49 @@ export function balanceOf(deal: Deal) {
   return Math.round(amount * 100) / 100;
 }
 
-/** What it takes to pay the loan off on a date: principal plus the interest since the last payment. */
+/**
+ * What it takes to pay the loan off on a date: principal, interest since the last payment (at the default rate for days
+ * after maturity), and unpaid late fees, less any credit held.
+ */
 export function payoffFor(deal: Deal, goodThrough: string) {
   const e = evaluate(deal.app);
-  const dscr = deal.app.product === "dscr";
+  const l = ledger(deal);
   const principal = balanceOf(deal);
   // The last payment covers interest up to its own due date. A loan with none yet accrues from closing.
-  const history = paymentHistory(deal).filter((row) => row.status === "paid");
-  const paidThrough = history.length ? history[history.length - 1].due : deal.closingDate;
-  const quote = payoffQuote({
-    disbursedPrincipal: principal,
-    ratePct: e.rate,
-    daysAccrued: Math.max(0, daysBetween(paidThrough, goodThrough)),
-    accrualBasisAmount: !dscr && deal.app.accrual === "full_boat" ? e.noteAmount : undefined,
-  });
-  return { principal, accrued: quote.accrued, perDiem: quote.perDiem, total: quote.total };
+  const basis = deal.app.product !== "dscr" && deal.app.accrual === "full_boat" ? e.noteAmount : undefined;
+  const regularEnd = goodThrough < l.maturity ? goodThrough : l.maturity;
+  const regular = payoffQuote({ disbursedPrincipal: principal, ratePct: e.rate, daysAccrued: Math.max(0, daysBetween(l.paidThrough, regularEnd)), accrualBasisAmount: basis, unpaidCharges: l.feesOwed, borrowerEscrowCredit: l.credit });
+  const pastMaturity = payoffQuote({ disbursedPrincipal: 0, ratePct: defaultRate(e.rate), daysAccrued: Math.max(0, daysBetween(l.paidThrough > l.maturity ? l.paidThrough : l.maturity, goodThrough)), accrualBasisAmount: basis ?? principal });
+  return {
+    principal,
+    accrued: regular.accrued,
+    defaultAccrued: pastMaturity.accrued,
+    fees: l.feesOwed,
+    credit: l.credit,
+    perDiem: goodThrough > l.maturity ? pastMaturity.perDiem : regular.perDiem,
+    total: round2(regular.total + pastMaturity.accrued),
+  };
 }
+
+/** Where a payment would go before it's recorded: which payments it covers, how much of the late fees, and what's left over. */
+export function previewPayment(deal: Deal, amount: number, receivedOn: string, asOf: string) {
+  const day = receivedOn > asOf ? receivedOn : asOf;
+  const before = ledgerOf(deal, day);
+  const draft: LoanPayment = { id: "preview", amount, receivedOn, method: "other", reference: "", by: "", at: "9999" };
+  const after = ledgerOf({ ...deal, payments: [...(deal.payments ?? []), draft] }, day);
+  return {
+    pays: after.rows.filter((row, index) => row.paidOn && !before.rows[index].paidOn),
+    fees: round2(after.rows.reduce((sum, row, index) => sum + row.feePaid - before.rows[index].feePaid, 0)),
+    credit: after.credit,
+    after,
+  };
+}
+
+export const BILL_LABEL: Record<BillStatus, string> = { boarded: "Paid", paid: "Paid", paid_late: "Paid late", paid_ahead: "Paid ahead", due: "Due", late: "Late", upcoming: "Upcoming" };
+export const billTone = (status: BillStatus) => (status === "late" ? "rose" : status === "due" || status === "paid_late" ? "amber" : status === "upcoming" ? "slate" : "green") as "green";
+
+/** The rows worth showing: every payment that has fallen due or been paid, and the next one coming. */
+export const shownRows = (l: Ledger) => {
+  const next = l.rows.findIndex((row) => row.status === "upcoming");
+  return l.rows.filter((row, index) => row.status !== "upcoming" || index === next);
+};

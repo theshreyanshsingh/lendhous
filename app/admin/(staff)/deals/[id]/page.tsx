@@ -6,24 +6,27 @@ import { useStore, est, inHouseAvailable, capitalSummary } from "@/lib/store";
 import { evaluate, recommendRoute, matchPartner, fullBoatReserve, dutchReserve, evenDraws, type Application } from "@/lib/engine";
 import { pricingConfig } from "@/lib/pricing-config";
 import { canAdvance, nextStage } from "@/lib/loan-stages";
+import { SERVICED } from "@/lib/servicing";
 import { teaserOf } from "@/lib/teaser";
 import { inviteBorrower } from "@/actions/book";
 import { CreditReview } from "@/components/loan/CreditReview";
 import { DocUpload } from "@/components/loan/DocUpload";
+import { LoanLedger } from "@/components/loan/LoanLedger";
 import { LoanMessages } from "@/components/loan/LoanMessages";
 import { PhotoRequests } from "@/components/loan/PhotoRequests";
 import { ScopeOfWork } from "@/components/loan/ScopeOfWork";
 import { TermSheetCard } from "@/components/loan/TermSheetCard";
 import { Badge, GradeBadge, RatioPill, Section, Stat, usd, pct, k, productLabel, statusLabel, capTone, points, ratioGrid, statGrid } from "@/components/ui";
 
-const tabs = ["Numbers & Ratios", "Credit review", "Score & Flags", "Capital Routing", "Documents", "Messages"] as const;
+const allTabs = ["Numbers & Ratios", "Credit review", "Score & Flags", "Capital Routing", "Documents", "Messages", "Servicing"] as const;
+type Tab = (typeof allTabs)[number];
 
 export default function DealWorkspace() {
   const { id } = useParams<{ id: string }>(); const { s, dispatch, applyReply, local, viewerName } = useStore();
   const d = s.deals.find((x) => x.id === id);
   const [invite, setInvite] = useState("");
   const [request, setRequest] = useState({ name: "", category: "Property" });
-  const [tab, setTab] = useState<(typeof tabs)[number]>("Numbers & Ratios");
+  const [tab, setTab] = useState<Tab>("Numbers & Ratios");
   const [ov, setOv] = useState<Partial<Application>>({});
   const [routeSel, setRouteSel] = useState<"in_house" | "partner" | "split" | null>(null);
   const [splitAmt, setSplitAmt] = useState<number | null>(null);
@@ -31,6 +34,8 @@ export default function DealWorkspace() {
   const uwApp = useMemo(() => (d ? { ...d.app, ...ov } : null), [d, ov]);
   if (!d || !uwApp) return <div className="glass p-6">Deal not found. <Link href="/admin" className="underline">Back</Link></div>;
   const e = evaluate(uwApp); const orig = est(d.app);
+  // The servicing tab only means something once there's money out.
+  const tabs = allTabs.filter((t) => t !== "Servicing" || SERVICED.includes(d.status));
   const avail = inHouseAvailable(s.deals, s.sources, d.id);
   const rec = recommendRoute({ product: d.app.product, noteAmount: e.noteAmount, grade: e.score.grade, location: e.location, inHouseAvailable: avail });
   const cap = capitalSummary(s.deals, s.sources);
@@ -199,6 +204,7 @@ export default function DealWorkspace() {
       )}
 
       {tab === "Credit review" && <CreditReview deal={d} />}
+      {tab === "Servicing" && SERVICED.includes(d.status) && <LoanLedger deal={d} />}
 
       {tab === "Messages" && (
         <div className="grid gap-4 lg:grid-cols-2">

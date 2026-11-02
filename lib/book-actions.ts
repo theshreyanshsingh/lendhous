@@ -98,14 +98,16 @@ const schema = z.discriminatedUnion("t", [
   z.object({ t: z.literal("approveDrawRequest"), drawId: id, by: z.string().max(120) }),
   z.object({ t: z.literal("rejectDraw"), drawId: id, reason: text(500).min(1) }),
   z.object({ t: z.literal("releaseDraw"), drawId: id }),
-  z.object({ t: z.literal("recordPayment"), dealId: id }),
+  z.object({ t: z.literal("recordPayment"), dealId: id, amount: z.number().positive().max(100_000_000), receivedOn: date, method: z.enum(["wire", "ach", "check", "other"]), reference: text(120), by: z.string().max(120) }),
+  z.object({ t: z.literal("reversePayment"), dealId: id, paymentId: id, reason: text(300).min(1), by: z.string().max(120) }),
+  z.object({ t: z.literal("waiveLateFee"), dealId: id, due: date, reason: text(300).min(1), by: z.string().max(120) }),
   z.object({ t: z.literal("requestPayoff"), dealId: id, goodThrough: date, by: z.string().max(120) }),
   z.object({ t: z.literal("sendPayoff"), payoffId: id }),
   z.object({ t: z.literal("markPaidOff"), payoffId: id }),
   z.object({ t: z.literal("sendMessage"), dealId: id, from: z.string().max(120), side: z.enum(["team", "borrower", "broker", "internal"]), text: text(4000).min(1) }),
 ]);
 
-/** The action if it is well formed, or null. uploadDoc and linkBorrower aren't here: only the server starts those. */
+/** The action if it is well formed, or null. uploadDoc, linkBorrower and settleLoans aren't here: only the server starts those. */
 export function parseAction(raw: unknown): BookAction | null {
   const parsed = schema.safeParse(raw);
   return parsed.success ? (parsed.data as BookAction) : null;

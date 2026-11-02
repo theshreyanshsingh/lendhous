@@ -75,7 +75,8 @@ export function reviewDraw(deal: Deal, draw: DrawRequest) {
   });
   const costToComplete = (deal.scope ?? []).reduce((sum, item) => sum + item.budget - item.released, 0);
   const { inBalance } = inBalanceTest({ remainingHoldback: holdbackLeft(deal), balancingDeposits: 0, costToComplete });
-  return approveDraw(lines, { holdbackRemaining: holdbackLeft(deal), inBalance, loanCurrent: !deal.paymentsLate });
+  // Nothing more goes out on a loan behind on its payments, past its maturity or in default.
+  return approveDraw(lines, { holdbackRemaining: holdbackLeft(deal), inBalance, loanCurrent: !deal.paymentsLate && deal.status !== "matured" && deal.status !== "default" });
 }
 
 /** A large draw needs two people, and so does any draw where the contractor is affiliated with the lender. */

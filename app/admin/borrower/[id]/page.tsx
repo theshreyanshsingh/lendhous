@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useRef, useState } from "react";
+import { ledger } from "@/lib/servicing";
 import { useStore, est } from "@/lib/store";
 import { fundedBalances, maturityDate } from "@/lib/engine";
 import { DrawPanel } from "@/components/loan/DrawPanel";
@@ -71,7 +72,7 @@ export default function BorrowerLoan() {
             <div className="grid grid-cols-2 gap-3">
               <Stat label="Note amount" value={usd(e.noteAmount)} />
               <Stat label="Rate" value={`${e.rate.toFixed(2)}%`} sub={d.app.product === "dscr" ? "30-yr amortizing" : d.app.accrual === "dutch" ? "on disbursed funds" : "full-boat"} />
-              {funded ? <><Stat label="Disbursed" value={usd(b.disbursed)} /><Stat label="Holdback left" value={usd(b.holdbackRemaining)} /><Stat label="Next payment" value={usd(b.nextPayment)} sub={`due ${d.nextPaymentDue}`} /><Stat label="Maturity" value={maturityDate(d.closingDate, e.termMonths)} sub={`${e.termMonths}-month term`} /></>
+              {funded ? <><Stat label="Disbursed" value={usd(b.disbursed)} /><Stat label="Holdback left" value={usd(b.holdbackRemaining)} /><Stat label="Next payment" value={usd(b.nextPayment)} sub={`due ${ledger(d).nextDue ?? "—"}`} /><Stat label="Maturity" value={maturityDate(d.closingDate, e.termMonths)} sub={`${e.termMonths}-month term`} /></>
                 : <><Stat label="Cash to close" value={usd(e.cashToClose)} /><Stat label="Target closing" value={d.closingDate} /><Stat label={keyRatios.map((r) => r.label).join(" / ")} value={keyRatios.map((r) => (r.key === "dscr" ? r.actual.toFixed(2) + "x" : pct(r.actual))).join(" / ")} /><Stat label="Points" value={usd(e.points)} /></>}
             </div>
           </Section>

@@ -3,7 +3,7 @@ import { approvalError, approversNeeded, defaultScope, drawRequestError, release
 import { evaluate } from "@/lib/engine";
 import { canAdvance, nextStage } from "@/lib/loan-stages";
 import { seedDeals, seedDraws, type Deal, type DrawRequest } from "@/lib/mockData";
-import { addMonths, afterPayment, balanceOf, firstDueDate, paymentHistory, paymentsMade, payoffFor } from "@/lib/servicing";
+import { addMonths, balanceOf, firstDueDate, ledger, paymentsMade, payoffFor, settle } from "@/lib/servicing";
 
 const deal = (id: string, changes: Partial<Deal> = {}): Deal => {
   const base = seedDeals.find((item) => item.id === id)!;
@@ -118,21 +118,27 @@ describe("payments and payoff", () => {
     expect(addMonths("2026-12-01", 1)).toBe("2027-01-01");
     expect(addMonths("2026-01-01", -1)).toBe("2025-12-01");
   });
-  it("lists paid and late payments", () => {
-    expect(paymentHistory(deal("d9")).map((row) => row.due)).toEqual(["2026-06-01", "2026-07-01", "2026-08-01", "2026-09-01", "2026-10-01"]);
-    expect(paymentsMade(deal("d9"))).toBe(5);
-    const late = paymentHistory(deal("d13"));
-    expect(late.filter((row) => row.status === "late").map((row) => row.due)).toEqual(["2026-09-01", "2026-10-01"]);
+  it("reads a loan funded before payments were recorded: paid up to its oldest missed payment", () => {
+    const current = ledger(deal("d9"));
+    expect(current.rows.filter((row) => row.status === "boarded").map((row) => row.due)).toEqual(["2026-06-01", "2026-07-01", "2026-08-01", "2026-09-01", "2026-10-01"]);
+    expect(current).toMatchObject({ paymentsMade: 5, paymentsLate: 0, nextDue: "2026-11-01", amountDue: 0 });
+    const late = ledger(deal("d13"));
+    expect(late.rows.filter((row) => row.status === "late").map((row) => row.due)).toEqual(["2026-09-01", "2026-10-01"]);
+    expect(late).toMatchObject({ paymentsMade: 5, paymentsLate: 2, nextDue: "2026-09-01" });
     expect(paymentsMade(deal("d13"))).toBe(5);
-    expect(paymentHistory(deal("d1"))).toEqual([]);
   });
   it("a payment clears the oldest late one first, then moves the due date", () => {
-    const once = afterPayment(deal("d13"));
+    const loan = deal("d13");
+    const one = ledger(loan).rows.find((row) => row.due === "2026-09-01")!.amount;
+    const pay = (from: Deal, amount: number, id: string) => settle({ ...from, payments: [...(from.payments ?? []), { id, amount, receivedOn: "2026-10-31", method: "wire" as const, reference: id, by: "Sam Servicer", at: `2026-10-31T1${id}:00:00Z` }] }, "2026-10-31");
+    const once = pay(loan, one, "1");
     expect(once).toMatchObject({ paymentsLate: 1, status: "servicing_delinquent", nextPaymentDue: "2026-10-01" });
-    const twice = afterPayment(once);
-    expect(twice).toMatchObject({ paymentsLate: 0, status: "servicing_current", nextPaymentDue: "2026-11-01" });
+    const twice = pay(once, one, "2");
+    expect(twice).toMatchObject({ paymentsLate: 0, nextPaymentDue: "2026-11-01" });
     expect(paymentsMade(twice)).toBe(7);
-    expect(afterPayment(deal("d9"))).toMatchObject({ nextPaymentDue: "2026-12-01", status: "servicing_current" });
+    // The two late fees are still owed, so it isn't fully current until they're paid too.
+    expect(ledger(twice).amountDue).toBeCloseTo(ledger(twice).feesOwed, 2);
+    expect(twice.status).toBe("servicing_current");
   });
   it("a payoff is principal plus interest since the last payment", () => {
     const quote = payoffFor(deal("d11"), "2026-10-16");
@@ -151,6 +157,7 @@ describe("payments and payoff", () => {
   it("counts a rental loan's balance down with its payments", () => {
     const rental = deal("d10");
     expect(balanceOf(rental)).toBeLessThan(evaluate(rental.app).noteAmount);
-    expect(balanceOf(afterPayment(rental))).toBeLessThan(balanceOf(rental));
+    const paid = settle({ ...rental, payments: [{ id: "p1", amount: ledger(rental).rows.find((row) => row.due === "2026-11-01")!.amount, receivedOn: "2026-10-31", method: "ach", reference: "", by: "", at: "2026-10-31T12:00:00Z" }] }, "2026-10-31");
+    expect(balanceOf(paid)).toBeLessThan(balanceOf(rental));
   });
 });

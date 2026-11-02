@@ -16,7 +16,7 @@ Lendhous will hold SSNs, credit reports and bank details, so it gets stricter is
 2. In Vercel, import the repo. Framework preset: Next.js. Build command: `npm run build`.
 3. Set the required variables below for **Production** and **Preview**. A build without them fails closed.
 4. Deploy, then sign in at `https://<domain>/login` with `ADMIN_EMAIL` and `ADMIN_PASSWORD`. Use an inbox you can read for `ADMIN_EMAIL`, since password links and team alerts go there.
-5. Check `https://<domain>/api/health`: `db` is `ok`, `storage` is `s3` or `blob`, `encryption` is `keys`.
+5. Check `https://<domain>/api/health`: `db` is `ok`, `storage` is `s3` or `blob`, `encryption` is `keys`. After the first night, `servicingCheckedAt` shows when the servicing check last ran; point an uptime monitor at it, since late payments go unnoticed while the daily job is stopped.
 
 `vercel.json` schedules `GET /api/cron` daily at 06:00 UTC. Vercel sends `Authorization: Bearer $CRON_SECRET`.
 
@@ -70,6 +70,8 @@ To update it later. The build regenerates the database client and syncs the inde
 ```bash
 git pull && LENDHOUS_RELEASE=1 npm run build && pm2 restart lendhous && npm run db:encrypt
 ```
+
+Check `pm2 ls` shows `lendhous-jobs`. It runs the daily jobs at 06:00 UTC, including the servicing check that marks missed payments late, charges late fees and sends late and maturity notices. Without it nothing goes late, and the servicing page warns that the check has stopped. `npm run jobs` runs any job that hasn't run today, straight away.
 
 `db:encrypt` encrypts anything saved before encryption was switched on. It has to come after the restart, because the build it replaces can't read encrypted records. It's safe to run on every update, and it changes nothing once everything is encrypted. The daily job does the same as a backstop.
 

@@ -10,7 +10,8 @@ export function attentionCounts(s: Book, newLeads: number) {
   const offers = s.offers.filter((offer) => offer.status === "submitted").length;
   const payoffs = s.payoffs.filter((payoff) => payoff.status === "requested").length;
   const late = s.deals.filter((deal) => deal.paymentsLate).length;
-  return { leads: newLeads, draws, offers, payoffs, late, servicing: payoffs + late };
+  const matured = s.deals.filter((deal) => deal.status === "matured").length;
+  return { leads: newLeads, draws, offers, payoffs, late, matured, servicing: payoffs + late + matured };
 }
 
 export function attentionItems(s: Book, newLeads: number): AttentionItem[] {
@@ -29,6 +30,7 @@ export function attentionItems(s: Book, newLeads: number): AttentionItem[] {
     { key: "draws", label: "Draws in progress", count: counts.draws, href: "/admin/draws" },
     { key: "payoffs", label: "Payoff requests", count: counts.payoffs, href: "/admin/servicing" },
     { key: "late", label: "Loans past due", count: counts.late, href: "/admin/servicing" },
+    { key: "matured", label: "Loans past maturity", count: counts.matured, href: "/admin/servicing" },
     { key: "offers", label: "Offers on loans for sale", count: counts.offers, href: "/admin/loan-sales" },
   ];
   return items.filter((item) => item.count > 0);

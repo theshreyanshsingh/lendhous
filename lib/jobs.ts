@@ -1,9 +1,14 @@
-// Scheduled jobs. UPB runs one daily batch; Lendhous will need several nightly jobs (interest accrual, maturity and
-// delinquency moves, insurance expiry, OFAC re-checks), so each job is named and runs at most once per day: the
-// JobRun.runKey unique index makes a second cron call that day a no-op. B0 ships the housekeeping jobs.
+// Scheduled jobs. UPB runs one daily batch; Lendhous needs several nightly jobs (late payments and maturity now, later
+// insurance expiry and OFAC re-checks), so each job is named and runs at most once per day: the JobRun.runKey unique
+// index makes a second cron call that day a no-op.
 import { Prisma } from "@prisma/client";
+import { audit } from "@/lib/audit";
+import type { Viewer } from "@/lib/book-access";
+import { sendAlerts } from "@/lib/book-alerts";
+import { runAction } from "@/lib/book-store";
 import { encryptStoredData } from "@/lib/encrypt-data";
 import { prisma } from "@/lib/prisma";
+import { servicingDate } from "@/lib/servicing";
 import { getSettings } from "@/lib/settings";
 
 type Job = (now: Date) => Promise<string>;
@@ -33,7 +38,23 @@ async function sealStoredData() {
   return `encrypted ${done.records} loan records, ${done.leads} leads, ${done.notices} notices, ${done.files} files${done.missing ? `; ${done.missing} files missing` : ""}`;
 }
 
-export const JOBS: Record<string, Job> = { sessions: purgeSessions, retention: cleanRetention, encryption: sealStoredData };
+/** The servicing job acts as nobody in particular: settleLoans is a server-only step, so it needs no role. */
+const SERVICING: Viewer = { id: "system", name: "LendHous servicing", roleCodes: [] };
+
+// Brings every serviced loan up to today: payments past their grace days go late and owe a fee, loans move to delinquent
+// or matured, and borrowers and the team hear about each. Recording a payment does the same for one loan straight away.
+async function checkServicing(now: Date) {
+  const asOf = servicingDate(now);
+  const result = await runAction(SERVICING, { t: "settleLoans", asOf }, { trusted: true });
+  if ("error" in result) return `no loans changed as of ${asOf}`;
+  const changed = result.after.deals.filter((deal) => !result.before.deals.includes(deal));
+  await audit({ actorId: null, action: "book.settleLoans", entityType: "LoanBook", entityId: asOf, after: { loans: changed.map((deal) => ({ loan: deal.loanNumber, status: deal.status, paymentsLate: deal.paymentsLate ?? 0 })) } });
+  await sendAlerts(result.before, result.after, result.action);
+  const late = changed.filter((deal) => deal.paymentsLate).length;
+  return `checked ${changed.length} loans as of ${asOf}; ${late} with payments past due`;
+}
+
+export const JOBS: Record<string, Job> = { servicing: checkServicing, sessions: purgeSessions, retention: cleanRetention, encryption: sealStoredData };
 
 export const runKeyFor = (job: string, now: Date) => `${job}:${now.toISOString().slice(0, 10)}`;
 

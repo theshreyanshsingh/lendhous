@@ -31,14 +31,29 @@ export interface Deal {
   /** People who approved funding this loan. It always takes two different people (Spec 6, dual control). */
   fundingApprovers?: string[];
   sponsor?: Sponsor; creditReview?: CreditReview;
+  /** Money received, in the order it was recorded. A reversed payment stays listed but no longer counts. */
+  payments?: LoanPayment[];
+  /** Each monthly payment's amount, fixed once it falls due, so a later draw doesn't change what an earlier month owed. */
+  bills?: Bill[];
+  waivedFees?: FeeWaiver[];
+  /** Payments due before this date were paid before payments were recorded here. */
+  boardedThrough?: string;
+  /** The day lateness and maturity were last checked. The nightly job moves it forward. */
+  servicedThrough?: string;
+  /** Which maturity notices (days before) have gone out. */
+  maturityNotices?: number[];
 }
+export type PaymentMethod = "wire" | "ach" | "check" | "other";
+export interface LoanPayment { id: string; amount: number; receivedOn: string; method: PaymentMethod; reference: string; by: string; at: string; reversed?: { by: string; at: string; reason: string } }
+export interface Bill { due: string; amount: number }
+export interface FeeWaiver { due: string; by: string; at: string; reason: string }
 /** One division of a project's rehab or construction budget. Draws are requested against these. */
 export interface ScopeLine { id: string; division: string; budget: number; released: number }
 export interface DrawRequestLine { scopeId: string; requested: number; observedPct?: number }
 export interface DrawRequest { id: string; dealId: string; requestedAt: string; by: string; note: string; contact: string; photos: string[]; lines: DrawRequestLine[]; status: "submitted" | "inspecting" | "inspected" | "approved" | "funded" | "rejected"; approved?: number; approvers: string[]; reason?: string; fundedAt?: string; photoIds?: string[] }
 export interface RequestPhoto { id: string; scopeId: string; shot: string; name: string; at: string; takenAt?: string; lat?: number; lng?: number }
 export interface PhotoRequest { id: string; dealId: string; drawId?: string; to: string; email?: string; who: "contractor" | "borrower"; scopeIds: string[]; sentBy: string; byTeam?: boolean; sentAt: string; expiresAt: string; status: "open" | "received" | "off"; finishedAt?: string; finishedBy?: string; note?: string; photos: RequestPhoto[] }
-export interface PayoffRequest { id: string; dealId: string; goodThrough: string; principal: number; accrued: number; perDiem: number; total: number; requestedAt: string; by: string; status: "requested" | "sent" | "paid" }
+export interface PayoffRequest { id: string; dealId: string; goodThrough: string; principal: number; accrued: number; defaultAccrued?: number; fees?: number; credit?: number; perDiem: number; total: number; requestedAt: string; by: string; status: "requested" | "sent" | "paid" }
 export interface LoanMessage { id: string; dealId: string; from: string; side: "team" | "borrower" | "broker" | "internal"; text: string; at: string }
 export interface Broker { id: string; name: string }
 export interface CapitalSource { id: string; name: string; type: "gt_balance_sheet" | "gt_credit_line" | "partner_lender"; commitment: number; baseDeployed: number; baseUnfunded: number; lineUndrawn?: number; orgId?: string }

@@ -2,11 +2,37 @@
 // Only names the loan number and what happened: details stay behind sign-in.
 import type { Book, BookAction } from "@/lib/book";
 import { notify, notifyTeam } from "@/lib/email";
+import { evaluate } from "@/lib/engine";
+import type { Deal } from "@/lib/mockData";
+import { pricingConfig } from "@/lib/pricing-config";
 import { prisma } from "@/lib/prisma";
+import { defaultRate, ledger } from "@/lib/servicing";
 
 const origin = () => (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "");
 
 type Alert = { to: "team" | "borrower" | "broker" | "partner" | "buyer"; dealId?: string; firmId?: string; subject: string; body: string; event: string };
+
+const dollars = (amount: number) => `$${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const longDate = (day: string) => new Date(`${day}T12:00:00Z`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+
+/** What the nightly check found on one loan: payments that just went late, 30 and 90 days past due, maturity coming or passed. */
+function servicingAlerts(before: Deal, after: Deal): Alert[] {
+  const was = ledger(before); const now = ledger(after);
+  const alerts: Alert[] = [];
+  const both = (subject: string, body: string, event: string, team = body) => alerts.push({ to: "borrower", dealId: after.id, subject, body, event }, { to: "team", subject, body: `${after.borrowerName}: ${team}`, event });
+  const wasLate = new Set(was.rows.filter((row) => row.late).map((row) => row.due));
+  for (const row of now.rows.filter((item) => item.status === "late" && !wasLate.has(item.due))) {
+    const fee = row.fee ? ` A late fee of ${dollars(row.fee)} has been added.` : "";
+    both(`Payment late: ${after.loanNumber}`, `The payment of ${dollars(row.amount)} due ${longDate(row.due)} hasn't arrived.${fee} To bring the loan current, pay ${dollars(now.amountDue)}. If you've already sent it, contact your LendHous servicing team.`, "payment.late", `the payment of ${dollars(row.amount)} due ${longDate(row.due)} is late. ${dollars(now.amountDue)} is past due.`);
+  }
+  const { delinquentDays, defaultNoticeDays } = pricingConfig.servicing;
+  if (was.daysPastDue < delinquentDays && now.daysPastDue >= delinquentDays) both(`${delinquentDays} days past due: ${after.loanNumber}`, `Your loan is ${now.daysPastDue} days past due. ${dollars(now.amountDue)} brings it current. Please pay it now or call us to talk about it.`, "loan.delinquent", `the loan is ${now.daysPastDue} days past due, ${dollars(now.amountDue)} owed.`);
+  if (was.daysPastDue < defaultNoticeDays && now.daysPastDue >= defaultNoticeDays) alerts.push({ to: "team", subject: `${defaultNoticeDays} days past due: ${after.loanNumber}`, body: `${after.borrowerName}'s loan is ${now.daysPastDue} days past due. Decide whether to send a notice of default; talk to counsel first.`, event: "loan.default_review" });
+  const notice = (after.maturityNotices ?? []).filter((days) => !(before.maturityNotices ?? []).includes(days));
+  if (notice.length && !now.matured) both(`Your loan matures ${longDate(now.maturity)}: ${after.loanNumber}`, `Your loan matures in ${now.daysToMaturity} days, on ${longDate(now.maturity)}. Plan to pay it off by then: you can ask for a payoff statement on your loan page. If you need more time, talk to us before it matures.`, "loan.maturity_notice", `the loan matures in ${now.daysToMaturity} days, on ${longDate(now.maturity)}.`);
+  if (after.status === "matured" && before.status !== "matured") both(`Your loan has matured: ${after.loanNumber}`, `Your loan matured on ${longDate(now.maturity)} and the full balance is now due. From then, interest runs at the default rate of ${defaultRate(evaluate(after.app).rate).toFixed(2)}%. Sign in to ask for a payoff statement.`, "loan.matured", `the loan matured on ${longDate(now.maturity)} and hasn't been paid off.`);
+  return alerts;
+}
 
 /** The alerts one action causes. Pure, so it can be tested. */
 export function alertsFor(before: Book, after: Book, action: BookAction): Alert[] {
@@ -47,6 +73,24 @@ export function alertsFor(before: Book, after: Book, action: BookAction): Alert[
       if (!draw) return [];
       return [{ to: "borrower", dealId: draw.dealId, subject: `Update on your draw: ${number(draw.dealId)}`, body: action.t === "releaseDraw" ? `Your draw of $${(draw.approved ?? 0).toLocaleString("en-US")} was released.` : `Your draw wasn't approved: ${draw.reason}`, event: `draw.${action.t === "releaseDraw" ? "released" : "rejected"}` }];
     }
+    case "recordPayment": {
+      const deal = loan(action.dealId);
+      if (!deal) return [];
+      const after = ledger(deal);
+      const still = after.amountDue > 0 && after.paymentsLate ? ` Your loan is still ${dollars(after.amountDue)} past due.` : "";
+      return [{ to: "borrower", dealId: deal.id, subject: `Payment received: ${deal.loanNumber}`, body: `We received your payment of ${dollars(action.amount)} on ${longDate(action.receivedOn)}. Thank you.${still}`, event: "payment.received" }];
+    }
+    case "reversePayment": {
+      const deal = loan(action.dealId);
+      const payment = deal?.payments?.find((item) => item.id === action.paymentId);
+      if (!deal || !payment) return [];
+      return [{ to: "borrower", dealId: deal.id, subject: `A payment was reversed: ${deal.loanNumber}`, body: `Your payment of ${dollars(payment.amount)} received ${longDate(payment.receivedOn)} was reversed: ${action.reason}. Sign in to see what's due now.`, event: "payment.reversed" }];
+    }
+    case "settleLoans":
+      return after.deals.flatMap((deal) => {
+        const prior = before.deals.find((item) => item.id === deal.id);
+        return prior && prior !== deal ? servicingAlerts(prior, deal) : [];
+      });
     case "requestPayoff":
       return [{ to: "team", subject: `Payoff requested: ${number(action.dealId)}`, body: `${action.by} asked for a payoff statement good through ${action.goodThrough}.`, event: "payoff.requested" }];
     case "sendPayoff": {

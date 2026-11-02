@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { ledger } from "@/lib/servicing";
 import { useStore, est } from "@/lib/store";
 import { fundedBalances } from "@/lib/engine";
 import Tracker from "@/components/Tracker";
@@ -34,7 +35,7 @@ export default function BorrowerHome() {
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                   <Stat label="Disbursed principal" value={usd(b.disbursed)} />
                   <Stat label="Holdback remaining" value={usd(b.holdbackRemaining)} />
-                  <Stat label="Next payment" value={usd(b.nextPayment)} sub={`due ${d.nextPaymentDue}`} />
+                  <Stat label="Next payment" value={usd(b.nextPayment)} sub={`due ${ledger(d).nextDue ?? "—"}`} />
                 </div>
               ) : (
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">

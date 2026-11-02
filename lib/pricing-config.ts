@@ -109,6 +109,15 @@ export const pricingConfig = {
 
   // PLACEHOLDER, like the rest of this file. 10% matches the Spec's worked draw example.
   draws: { retainagePct: 0.1, secondApproverAbove: 50_000 },
+
+  /**
+   * Servicing (Spec 8). PLACEHOLDER until the attorney sets them against the note: a payment is late once the grace days
+   * after its due date have passed, and then owes a late fee of lateFeePct of that payment. A loan is delinquent once its
+   * oldest unpaid payment is delinquentDays past due. After maturity, interest runs at the note rate plus defaultRateAdd,
+   * never above defaultRateMax (Florida's usury cap is 18% a year on loans up to $500,000). Borrowers hear about maturity
+   * maturityNoticeDays before it.
+   */
+  servicing: { graceDays: 10, lateFeePct: 0.05, delinquentDays: 30, defaultNoticeDays: 90, defaultRateAdd: 6, defaultRateMax: 18, maturityNoticeDays: [60, 30] },
   routing: { dualApprovalFundingAlways: true, splitEnabled: true /* prototype demo; Spec: off until M8 */ },
 };
 export type PricingConfig = typeof pricingConfig;

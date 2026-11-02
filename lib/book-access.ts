@@ -7,7 +7,8 @@ import { sponsorProblem, withSponsor } from "./credit";
 import { scopeError } from "./draws";
 import { MAX_PHOTOS_PER_LINK, photoRequestState, photosClosed } from "./photo-requests";
 import { evaluate } from "./engine";
-import type { Deal, Doc, LoanSale } from "./mockData";
+import type { Deal, Doc, LoanPayment, LoanSale } from "./mockData";
+import { ledger, servicingDate } from "./servicing";
 import { viewFor, type MemberAccess, type Permission } from "./permissions";
 
 export type Viewer = MemberAccess & { id: string; name: string; roleCodes: RoleCode[]; organizationId?: string | null };
@@ -20,14 +21,20 @@ const BEFORE_CLOSING = ["submitted", "initial_review", "underwriting", "term_she
 // Until a term sheet goes out, the borrower's profile and the credit review can still change.
 const IN_REVIEW = ["submitted", "initial_review", "underwriting"];
 
+/** The payment record without who on the team keyed it in or why a fee was waived. Amounts and dates stay: they are the pay history. */
+const quietPayments = (deal: Deal, keepReference: boolean): Partial<Deal> => ({
+  payments: deal.payments?.map((payment): LoanPayment => ({ ...payment, by: "", reference: keepReference ? payment.reference : "", reversed: payment.reversed && { ...payment.reversed, by: "", reason: keepReference ? payment.reversed.reason : "" } })),
+  waivedFees: deal.waivedFees?.map((item) => ({ ...item, by: "", reason: "" })),
+});
+
 /** Removes what identifies the borrower, for a partner or buyer who hasn't closed on the loan. */
 function blind(deal: Deal): Deal {
-  return { ...deal, borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined };
+  return { ...deal, borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined, ...quietPayments(deal, false) };
 }
 
 /** What only the team sees on a loan it shares with a client. */
 function forClient(deal: Deal): Deal {
-  return { ...deal, allocations: [], teaserSentTo: [], route: undefined, capitalStatus: "not_started", contractorIsGtAffiliate: undefined, source: "", fundingApprovers: undefined, creditReview: undefined };
+  return { ...deal, allocations: [], teaserSentTo: [], route: undefined, capitalStatus: "not_started", contractorIsGtAffiliate: undefined, source: "", fundingApprovers: undefined, creditReview: undefined, ...quietPayments(deal, true) };
 }
 
 /** The part of the book this account may see. Nothing else leaves the server. */
@@ -314,9 +321,38 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
     case "rejectDraw": case "releaseDraw":
       if (!book.draws.some((draw) => draw.id === action.drawId)) return no(GONE);
       return staffOnly("approve_draw");
-    case "recordPayment":
-      if (!FUNDED.includes(dealOf(action.dealId)?.status ?? "") || !dealOf(action.dealId)?.nextPaymentDue) return no("This loan has no payment due.");
-      return staffOnly("service_loans");
+    case "recordPayment": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      if (!FUNDED.includes(deal.status)) return no("This loan isn't being serviced.");
+      if (!staff || !allowed("service_loans")) return no(NOT_ALLOWED);
+      if (action.receivedOn > servicingDate(new Date())) return no("The date received can't be in the future.");
+      if (action.receivedOn < deal.closingDate) return no("That date is before the loan closed.");
+      if (action.amount > evaluate(deal.app).noteAmount) return no("That's more than the whole loan. A full repayment goes through a payoff.");
+      const reference = action.reference.trim();
+      // The same amount, day and reference twice is a double entry, not two payments.
+      if (deal.payments?.some((payment) => !payment.reversed && payment.amount === action.amount && payment.receivedOn === action.receivedOn && payment.reference === reference)) return no("That payment is already recorded. If it's a second one, add its reference to tell them apart.");
+      return ok({ ...action, reference, by: viewer.name });
+    }
+    case "reversePayment": {
+      const deal = dealOf(action.dealId);
+      const payment = deal?.payments?.find((item) => item.id === action.paymentId);
+      if (!deal || !payment) return no(GONE);
+      if (payment.reversed) return no("That payment is already reversed.");
+      if (!FUNDED.includes(deal.status)) return no("This loan isn't being serviced.");
+      if (!staff || !allowed("service_loans")) return no(NOT_ALLOWED);
+      return ok({ ...action, by: viewer.name });
+    }
+    case "waiveLateFee": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      if (!staff || !allowed("waive_fee")) return no(NOT_ALLOWED);
+      const row = ledger(deal).rows.find((item) => item.due === action.due);
+      if (!row?.late || row.waived) return no("There's no late fee on that payment to waive.");
+      return ok({ ...action, by: viewer.name });
+    }
+    case "settleLoans":
+      return trusted ? ok() : no(NOT_ALLOWED);
     case "requestPayoff": {
       const deal = dealOf(action.dealId);
       if (!deal) return no(GONE);

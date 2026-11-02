@@ -15,6 +15,16 @@ export async function GET() {
   } catch {
     db = "down";
   }
+  // When the nightly servicing check last finished, so an uptime monitor can tell when late payments stop being caught.
+  let servicingCheckedAt: string | null = null;
+  if (db === "ok") {
+    try {
+      const run = await prisma.jobRun.findFirst({ where: { job: "servicing", ok: true }, orderBy: { finishedAt: "desc" }, select: { finishedAt: true } });
+      servicingCheckedAt = run?.finishedAt?.toISOString() ?? null;
+    } catch {
+      servicingCheckedAt = null;
+    }
+  }
   const body = {
     ok: db === "ok",
     db,
@@ -23,6 +33,7 @@ export async function GET() {
     limits: limitStore(),
     encryption: encryptionMode(),
     cron: Boolean(process.env.CRON_SECRET),
+    servicingCheckedAt,
     time: new Date().toISOString(),
   };
   return Response.json(body, { status: db === "ok" ? 200 : 503 });

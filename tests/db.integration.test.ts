@@ -577,4 +577,25 @@ describe("indexes and jobs", () => {
     expect((await lib.jobs.runJob("sessions", now)).skipped).toBe(true);
     expect((await lib.jobs.runJob("sessions", new Date("2026-10-29T06:00:00Z"))).skipped).toBe(false);
   });
+  it("the nightly servicing check marks a missed payment late, saves it, and tells the borrower once", async () => {
+    const { demoBook } = await import("@/lib/book");
+    const { readBook } = await import("@/lib/book-store");
+    const borrower = await prisma.user.create({ data: { email: "late.payer@example.com", name: "Lee Late", passwordHash: "x", roles: { create: [{ role: "BORROWER" }] } } });
+    const base = demoBook().deals.find((deal) => deal.id === "d9")!;
+    const deal = { ...base, id: "late-loan", loanNumber: "LH-2001", borrowerId: borrower.id, borrowerName: "Lee Late", closingDate: "2026-06-10", nextPaymentDue: "2026-07-01", paymentsLate: 0, status: "servicing_current" };
+    await prisma.bookRecord.create({ data: { id: "deals:late-loan", kind: "deals", data: JSON.parse(JSON.stringify(deal)) } });
+
+    // July 1 is due; on July 11 it's still inside the grace days.
+    expect((await lib.jobs.runJob("servicing", new Date("2026-07-11T06:00:00Z"))).summary).toMatch(/0 with payments past due/);
+    expect((await readBook()).book.deals.find((item) => item.id === "late-loan")).toMatchObject({ paymentsLate: 0, servicedThrough: "2026-07-11" });
+    const night = await lib.jobs.runJob("servicing", new Date("2026-07-12T06:00:00Z"));
+    expect(night).toMatchObject({ skipped: false, summary: expect.stringMatching(/1 with payments past due/) });
+    expect((await readBook()).book.deals.find((item) => item.id === "late-loan")).toMatchObject({ paymentsLate: 1, nextPaymentDue: "2026-07-01", servicedThrough: "2026-07-12" });
+    expect(await prisma.notification.count({ where: { toEmail: "late.payer@example.com", eventCode: "payment.late" } })).toBe(1);
+    expect(await prisma.auditEvent.count({ where: { action: "book.settleLoans", entityId: "2026-07-12" } })).toBe(1);
+
+    expect((await lib.jobs.runJob("servicing", new Date("2026-07-12T07:00:00Z"))).skipped).toBe(true);
+    await lib.jobs.runJob("servicing", new Date("2026-07-13T06:00:00Z"));
+    expect(await prisma.notification.count({ where: { toEmail: "late.payer@example.com", eventCode: "payment.late" } })).toBe(1);
+  });
 });

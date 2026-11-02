@@ -4,8 +4,8 @@ import { evaluate, type Application, type BuyBox } from "./engine";
 import { countedDeals, missingDocs, needsList, withSponsor } from "./credit";
 import { approversNeeded, approvalError, defaultScope, drawRequestError, releaseToScope, reviewDraw } from "./draws";
 import { canAdvance, nextStage } from "./loan-stages";
-import { seedDeals, seedBids, seedDraws, seedLoanSales, seedLoanOffers, seedMessages, seedPhotoRequests, DEMO_SPONSORS, capitalSources, partners as seedPartners, brokers as seedBrokers, loanBuyers, BORROWER_ID, DEMO_PARTNER_ID, DEMO_BUYER_ID, DEMO_BROKER_ID, type Broker, type Deal, type Bid, type DrawRequest, type DrawRequestLine, type LoanMessage, type Partner, type PayoffRequest, type DocStatus, type CapitalSource, type LoanBuyer, type LoanOffer, type LoanSale, type PhotoRequest, type RequestPhoto, type ScopeLine, type Sponsor } from "./mockData";
-import { afterPayment, firstDueDate, payoffFor } from "./servicing";
+import { seedDeals, seedBids, seedDraws, seedLoanSales, seedLoanOffers, seedMessages, seedPhotoRequests, DEMO_SPONSORS, capitalSources, partners as seedPartners, brokers as seedBrokers, loanBuyers, BORROWER_ID, DEMO_PARTNER_ID, DEMO_BUYER_ID, DEMO_BROKER_ID, type Broker, type Deal, type Bid, type DrawRequest, type DrawRequestLine, type LoanMessage, type Partner, type PayoffRequest, type DocStatus, type CapitalSource, type LoanBuyer, type LoanOffer, type LoanSale, type LoanPayment, type PaymentMethod, type PhotoRequest, type RequestPhoto, type ScopeLine, type Sponsor } from "./mockData";
+import { DEMO_SERVICING_DAY, firstDueDate, ledger, payoffFor, servicingDate, settle } from "./servicing";
 
 export interface Book { partnerId: string; buyerId: string; brokerId: string; borrowerId: string; loanPrefix: string; deals: Deal[]; bids: Bid[]; partners: Partner[]; buyers: LoanBuyer[]; brokers: Broker[]; sales: LoanSale[]; offers: LoanOffer[]; draws: DrawRequest[]; photoRequests: PhotoRequest[]; payoffs: PayoffRequest[]; messages: LoanMessage[]; sources: CapitalSource[]; audit: { at: string; text: string }[]; sample?: boolean }
 
@@ -37,7 +37,11 @@ export type BookAction =
   | { t: "approveDrawRequest"; drawId: string; by: string }
   | { t: "rejectDraw"; drawId: string; reason: string }
   | { t: "releaseDraw"; drawId: string }
-  | { t: "recordPayment"; dealId: string }
+  | { t: "recordPayment"; dealId: string; amount: number; receivedOn: string; method: PaymentMethod; reference: string; by: string }
+  | { t: "reversePayment"; dealId: string; paymentId: string; reason: string; by: string }
+  | { t: "waiveLateFee"; dealId: string; due: string; reason: string; by: string }
+  /** The nightly check: brings every serviced loan up to a day. Only the server's job sends it. */
+  | { t: "settleLoans"; asOf: string }
   | { t: "requestPayoff"; dealId: string; goodThrough: string; by: string }
   | { t: "sendPayoff"; payoffId: string }
   | { t: "markPaidOff"; payoffId: string }
@@ -64,6 +68,12 @@ const now = () => new Date().toISOString();
 const uid = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 /** Fixed, not now(): /admin is prerendered, so a load-time stamp would not match the server HTML (hydration error). */
 const SEED_AT = "2026-10-18T09:00:00-07:00";
+const DEMO_PREFIX = "LH-DEMO-";
+/** The FAKE demo book, whether a demo seat's or an account's sample data. */
+export const isDemoBook = (s: Book) => s.loanPrefix === DEMO_PREFIX;
+/** Today for servicing. The demo book keeps its own fixed day, so its loans don't fall further behind every month. */
+export const serviceDay = (s: Book) => (isDemoBook(s) ? DEMO_SERVICING_DAY : servicingDate(new Date()));
+const money = (amount: number) => `$${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export function demoBook(): Book {
   const deals = seedDeals.map((d) => {
@@ -72,7 +82,7 @@ export function demoBook(): Book {
   });
   const quoted = payoffFor(deals.find((d) => d.id === "d11")!, "2026-11-15");
   const payoffs: PayoffRequest[] = [{ id: "payoff-1", dealId: "d11", goodThrough: "2026-11-15", requestedAt: "2026-10-22T10:00:00-07:00", by: "Avery Mock (FAKE)", status: "requested", ...quoted }];
-  return { partnerId: DEMO_PARTNER_ID, buyerId: DEMO_BUYER_ID, brokerId: DEMO_BROKER_ID, borrowerId: BORROWER_ID, loanPrefix: "LH-DEMO-", deals, bids: seedBids, partners: seedPartners, buyers: loanBuyers, brokers: seedBrokers, sales: seedLoanSales, offers: seedLoanOffers, draws: seedDraws, photoRequests: seedPhotoRequests, payoffs, messages: seedMessages, sources: capitalSources, audit: [{ at: SEED_AT, text: "Demo data loaded (all records are FAKE)" }] };
+  return { partnerId: DEMO_PARTNER_ID, buyerId: DEMO_BUYER_ID, brokerId: DEMO_BROKER_ID, borrowerId: BORROWER_ID, loanPrefix: DEMO_PREFIX, deals, bids: seedBids, partners: seedPartners, buyers: loanBuyers, brokers: seedBrokers, sales: seedLoanSales, offers: seedLoanOffers, draws: seedDraws, photoRequests: seedPhotoRequests, payoffs, messages: seedMessages, sources: capitalSources, audit: [{ at: SEED_AT, text: "Demo data loaded (all records are FAKE)" }] };
 }
 
 /** A book with no records: a new database, or an account with nothing to see yet. */
@@ -153,7 +163,7 @@ export function reducer(s: Book, a: BookAction): Book {
       const stage = nextStage(deal, evaluate(deal.app));
       if (!stage || !canAdvance(stage)) return s;
       const funding = stage.to === "funded";
-      const today = now().slice(0, 10);
+      const today = serviceDay(s);
       return { ...s, deals: upd(a.dealId, (d) => ({ ...d, status: stage.to, daysInStage: 0, ...(funding ? { capitalStatus: "funded" as const, closingDate: today, nextPaymentDue: firstDueDate(today) } : {}) })), audit: log(`${deal.loanNumber}: moved to ${stage.to.replace(/_/g, " ")}`) };
     }
     case "acceptTermSheet": {
@@ -201,12 +211,41 @@ export function reducer(s: Book, a: BookAction): Book {
       if (draw.status !== "approved" || !draw.approved) return s;
       return { ...s,
         draws: s.draws.map((d) => (d.id === a.drawId ? { ...d, status: "funded", fundedAt: now() } : d)),
-        deals: upd(deal.id, (d) => ({ ...d, disbursedDraws: (d.disbursedDraws ?? 0) + draw.approved!, scope: releaseToScope(d.scope ?? [], d, draw) })),
+        // Brought up to today first, so the payments already due keep the amount they owed before this draw.
+        deals: upd(deal.id, (d) => ({ ...settle(d, serviceDay(s)), disbursedDraws: (d.disbursedDraws ?? 0) + draw.approved!, scope: releaseToScope(d.scope ?? [], d, draw) })),
         audit: log(`${deal.loanNumber}: draw of $${draw.approved.toLocaleString()} released`) };
     }
     case "recordPayment": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
-      return { ...s, deals: upd(a.dealId, afterPayment), audit: log(`${deal.loanNumber}: payment recorded`) };
+      const payment: LoanPayment = { id: `pay${uid()}`, amount: Math.round(a.amount * 100) / 100, receivedOn: a.receivedOn, method: a.method, reference: a.reference, by: a.by, at: now() };
+      const day = a.receivedOn > serviceDay(s) ? a.receivedOn : serviceDay(s);
+      return { ...s, deals: upd(a.dealId, (d) => settle({ ...d, payments: [...(d.payments ?? []), payment] }, day)), audit: log(`${deal.loanNumber}: payment of ${money(payment.amount)} received ${a.receivedOn}`) };
+    }
+    case "reversePayment": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const payment = deal.payments?.find((p) => p.id === a.paymentId);
+      if (!payment || payment.reversed) return s;
+      const reversed = { by: a.by, at: now(), reason: a.reason };
+      return { ...s, deals: upd(a.dealId, (d) => settle({ ...d, payments: (d.payments ?? []).map((p) => (p.id === a.paymentId ? { ...p, reversed } : p)) }, serviceDay(s))), audit: log(`${deal.loanNumber}: payment of ${money(payment.amount)} reversed: ${a.reason}`) };
+    }
+    case "waiveLateFee": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (deal.waivedFees?.some((item) => item.due === a.due)) return s;
+      const waiver = { due: a.due, by: a.by, at: now(), reason: a.reason };
+      return { ...s, deals: upd(a.dealId, (d) => settle({ ...d, waivedFees: [...(d.waivedFees ?? []), waiver] }, serviceDay(s))), audit: log(`${deal.loanNumber}: late fee on the ${a.due} payment waived by ${a.by}`) };
+    }
+    case "settleLoans": {
+      const entries: { at: string; text: string }[] = [];
+      const deals = s.deals.map((d) => {
+        const next = settle(d, a.asOf);
+        if (next === d || JSON.stringify(next) === JSON.stringify(d)) return d;
+        const before = ledger(d); const after = ledger(next);
+        if (after.paymentsLate > before.paymentsLate) entries.push({ at: now(), text: `${d.loanNumber}: ${after.paymentsLate} payment${after.paymentsLate === 1 ? "" : "s"} past due` });
+        if (next.status !== d.status) entries.push({ at: now(), text: `${d.loanNumber}: moved to ${next.status.replace(/_/g, " ")}` });
+        return next;
+      });
+      if (deals.every((d, index) => d === s.deals[index])) return s;
+      return { ...s, deals, audit: [...entries.reverse(), ...s.audit].slice(0, 50) };
     }
     case "requestPayoff": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
