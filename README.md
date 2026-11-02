@@ -53,9 +53,9 @@ Every role signs in with an email and password. Spec v3 10.1 asks for two-factor
 ## Tests
 
 ```bash
-npm test                        # 247 tests: pricing engine (Spec worked examples A–I), foundations, who sees and does what in the loan book, loan stages, draws, payments, loan buyer arithmetic, public site calculators and briefs, photo links, encryption at rest, the borrower profile and credit review, and MongoDB integration
+npm test                        # 250 tests: pricing engine (Spec worked examples A–I), foundations, who sees and does what in the loan book, loan stages, draws, payments, loan buyer arithmetic, public site calculators and briefs, photo links, encryption at rest, the borrower profile and credit review, and MongoDB integration
 npm run build && npm start      # then, with the server up:
-npm run screenshots             # site and panel smoke test (194 checks: the public site, each demo seat, the borrower, staff, broker, loan sale and members journeys, and a temporary non-demo account) + screenshots into ./screenshots
+npm run screenshots             # site and panel smoke test (195 checks: the public site, each demo seat, the borrower, staff, broker, loan sale and members journeys, and a temporary non-demo account) + screenshots into ./screenshots
 npm run smoke:auth              # sign-in, where it returns to, rate limits, audit, cron, health (21 checks; needs db:seed)
 npm run phone:check             # every page at 320, 375, 430 and 768px wide: nothing sticks out and nothing scrolls sideways (needs db:seed)
 npm run smoke:real              # a website brief, then a loan's whole life with real accounts, each in its own browser, including a contractor with no account, what reaches each browser and what's stored encrypted (136 checks; needs db:seed; wipes the local loan book and leads)

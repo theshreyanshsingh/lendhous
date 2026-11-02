@@ -3,7 +3,7 @@ import { nextStep } from "@/lib/approvals";
 import { sessionExpired } from "@/lib/auth";
 import { decryptBytes, decryptField, DEV_FIELD_KEY, encryptBytes, encryptField, fieldKeys, fieldNeedsSealing, fileNeedsSealing, isEncrypted, isEncryptedFile, jsonNeedsSealing, last4, needsRotation, openJson, parseFieldKeys, readField, sealJson } from "@/lib/crypto";
 import { assertMongoUrl, assertReleaseEnv, demoSeedBlocked, DEV_AUTH_SECRET, DEV_DEMO_PASSWORD, isDemoEmail, secureCookies } from "@/lib/deploy";
-import { accessChanges, accessError, accessFor, removeError } from "@/lib/member-rules";
+import { accessChanges, accessError, accessFor, mixesWorkspaces, pickRole, removeError } from "@/lib/member-rules";
 import { can, grantFor, homeFor, viewFor } from "@/lib/permissions";
 import { rateLimit, resetRateLimits } from "@/lib/rate-limit";
 
@@ -240,6 +240,15 @@ describe("loan buyers and per-person access", () => {
     const owner = { id: "o", roleCodes: ["ADMIN_OWNER" as const] };
     const manager = { id: "m", roleCodes: ["PROCESSOR" as const], extraPermissions: ["manage_users"] };
     expect(accessError(owner, null, { roles: [] })).toMatch(/at least one role/);
+    // An account opens one workspace, team first, so a processor who is also a borrower never sees the borrower side.
+    expect(accessError(owner, null, { roles: ["BORROWER", "PROCESSOR"] })).toMatch(/second email/);
+    expect(accessError(owner, null, { roles: ["BROKER", "BORROWER"] })).toMatch(/second email/);
+    expect(accessError(owner, null, { roles: ["BORROWER", "GUARANTOR"] })).toBeNull();
+    expect(accessError(owner, null, { roles: ["UNDERWRITER", "SERVICER"] })).toBeNull();
+    expect(accessError(owner, { id: "mixed", roles: ["BORROWER", "PROCESSOR"] }, { roles: ["BORROWER", "PROCESSOR"] })).toBeNull();
+    expect(accessError(owner, { id: "mixed", roles: ["BORROWER", "PROCESSOR"] }, { roles: ["BORROWER"] })).toBeNull();
+    expect(mixesWorkspaces(["BORROWER", "PROCESSOR"])).toBe(true);
+    expect(mixesWorkspaces(["ADMIN_OWNER", "UNDERWRITER"])).toBe(false);
     expect(accessError(owner, null, { roles: ["ADMIN_OWNER"] })).toBeNull();
     expect(accessError(owner, { id: "o", roles: ["ADMIN_OWNER"] }, { roles: ["UNDERWRITER"] })).toMatch(/your own access/);
     expect(accessError(owner, { id: "o", roles: ["ADMIN_OWNER"] }, { roles: ["ADMIN_OWNER"] })).toBeNull();
@@ -272,5 +281,21 @@ describe("sessions and rate limits (ported from UPB, idle timeout added)", () =>
   it("the memory rate limiter caps attempts", () => {
     resetRateLimits();
     expect([1, 2, 3].map(() => rateLimit("k", 2, 1000, now))).toEqual([true, true, false]);
+  });
+});
+
+describe("the members page's role picker", () => {
+  it("picking a borrower over the default processor leaves just the borrower", () => {
+    expect(pickRole(["PROCESSOR"], "BORROWER")).toEqual(["BORROWER"]);
+  });
+  it("team roles add up, and picking one again takes it off", () => {
+    expect(pickRole(["PROCESSOR"], "SERVICER")).toEqual(["PROCESSOR", "SERVICER"]);
+    expect(pickRole(["PROCESSOR", "SERVICER"], "PROCESSOR")).toEqual(["SERVICER"]);
+  });
+  it("a team role replaces an outside one, and outside roles replace each other", () => {
+    expect(pickRole(["BORROWER"], "UNDERWRITER")).toEqual(["UNDERWRITER"]);
+    expect(pickRole(["BROKER"], "LOAN_BUYER")).toEqual(["LOAN_BUYER"]);
+    expect(pickRole(["BORROWER"], "GUARANTOR")).toEqual(["BORROWER", "GUARANTOR"]);
+    expect(pickRole([], "BORROWER")).toEqual(["BORROWER"]);
   });
 });

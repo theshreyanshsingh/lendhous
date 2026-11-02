@@ -8,7 +8,7 @@ import { PageIntro } from "@/components/page-intro";
 import { SubmitButton } from "@/components/submit-button";
 import { Badge } from "@/components/ui";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
-import { accessFor, isOwner, PERMISSION_GROUPS, ROLE_GROUPS } from "@/lib/member-rules";
+import { accessFor, isOwner, mixesWorkspaces, PERMISSION_GROUPS, pickRole, ROLE_GROUPS } from "@/lib/member-rules";
 import { PERMISSIONS, ROLE_LABEL, type Permission } from "@/lib/permissions";
 
 export type MemberRow = { id: string; name: string; email: string; title: string; roles: RoleCode[]; extraPermissions: string[]; deniedPermissions: string[]; signedIn: boolean };
@@ -56,7 +56,7 @@ export function MembersBoard({ rows, meId, meIsOwner }: { rows: MemberRow[]; meI
                       <span className="min-w-0"><strong className="block font-medium wrap-anywhere">{row.name}</strong><small className="block text-xs wrap-anywhere text-muted-foreground">{row.email}</small></span>
                     </span>
                   </td>
-                  <td data-label="Role"><span className="flex flex-wrap justify-end gap-1 lg:justify-start">{row.roles.map((role) => <Badge key={role}>{ROLE_LABEL[role]}</Badge>)}</span></td>
+                  <td data-label="Role"><span className="flex flex-wrap justify-end gap-1 lg:justify-start">{row.roles.map((role) => <Badge key={role}>{ROLE_LABEL[role]}</Badge>)}</span>{mixesWorkspaces(row.roles) && <small className="mt-1 block text-right text-xs text-warn lg:text-left" data-testid="mixed-roles">Opens the team panel only. Modify it and keep one side.</small>}</td>
                   <td data-label="Access">{custom(row) ? <Badge tone="violet">Custom</Badge> : <span className="text-muted-foreground">Role default</span>}</td>
                   {row.title ? <td data-label="Title">{row.title}</td> : <td className="hidden lg:table-cell">—</td>}
                   <td data-label="Status">{row.signedIn ? <span className="text-muted-foreground">Active</span> : <Badge tone="amber">Invited</Badge>}</td>
@@ -100,7 +100,7 @@ function MemberSheet({ draft, meId, meIsOwner, onChange, onClose, onIssued }: { 
   useEffect(() => { if (linkState.issued) onIssued(linkState.issued); }, [linkState.issued, onIssued]);
   // Choosing roles resets the ticks to what those roles allow, as SynergyFund's role picker does.
   const toggleRole = (role: RoleCode) => {
-    const roles = draft.roles.includes(role) ? draft.roles.filter((item) => item !== role) : [...draft.roles, role];
+    const roles = pickRole(draft.roles, role);
     onChange({ ...draft, roles, permissions: accessFor(roles) });
   };
   const togglePermission = (permission: Permission) => onChange({ ...draft, permissions: draft.permissions.includes(permission) ? draft.permissions.filter((item) => item !== permission) : [...draft.permissions, permission] });
@@ -125,6 +125,7 @@ function MemberSheet({ draft, meId, meIsOwner, onChange, onClose, onIssued }: { 
             <label className="block"><span className="label">Title</span><input data-testid="member-title" name="title" className="desk-input" placeholder="Optional" value={draft.title} onChange={(event) => onChange({ ...draft, title: event.target.value })} /></label>
             <fieldset disabled={isSelf} className="space-y-3">
               <legend className="label">Role</legend>
+              <p className="text-xs text-muted-foreground">Team roles can be combined. Any other role stands on its own, because it opens its own workspace: picking one replaces the rest.</p>
               {ROLE_GROUPS.map((group) => (
                 <div key={group.label}>
                   <p className="mb-1.5 text-xs text-faint">{group.label}</p>
