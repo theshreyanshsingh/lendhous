@@ -26,8 +26,10 @@ const wipe = async () => {
   await prisma.pricingVersion.deleteMany();
   await prisma.sanctionsList.deleteMany();
   await prisma.photoLink.deleteMany();
+  await prisma.payoffLink.deleteMany();
   await prisma.applicationLink.deleteMany();
   await prisma.rateWindow.deleteMany({ where: { key: { startsWith: "lead:" } } });
+  await prisma.rateWindow.deleteMany({ where: { key: { startsWith: "payoff-form:" } } });
   await prisma.user.deleteMany({ where: { email: { endsWith: DOMAIN } } });
   await prisma.rateWindow.deleteMany({ where: { key: { contains: DOMAIN } } });
   await prisma.platformSettings.update({ where: { id: "default" }, data: { offerSampleData: true } });
@@ -52,7 +54,7 @@ const errors = [];
 const person = async (local) => {
   const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, acceptDownloads: true });
   const page = await context.newPage();
-  page.on("pageerror", (error) => errors.push(`${local}: ${error.message}`));
+  page.on("pageerror", (error) => errors.push(`${local} at ${new URL(page.url()).pathname}: ${error.message}`));
   await page.goto(`${BASE}/login`);
   await page.getByTestId("login-email").fill(`${local}@${DOMAIN}`);
   await page.getByTestId("login-password").fill(PASSWORD);
@@ -253,7 +255,7 @@ try {
     await under.getByTestId("advance-loan").filter({ hasText: label }).click();
     await gone(under.getByTestId("advance-loan").filter({ hasText: label }));
   }
-  ok("a term sheet waits for the credit review", (await under.getByTestId("stage-blockers").innerText()).includes("Credit review isn't signed off") && (await under.getByTestId("advance-loan").isDisabled()));
+  ok("a term sheet waits for the credit review", (await under.getByTestId("stage-blockers").innerText()).includes("Credit review isn't signed off") && (await under.getByTestId("advance-loan").count()) === 0);
   await under.getByTestId("tab-Credit review").click();
   ok("the application was screened against the OFAC list when it arrived", (await under.getByTestId("ofac-panel").innerText()).includes("No match") && !(await under.getByTestId("ofac-panel").innerText()).includes("Not checked yet"));
   const creditFlags = await under.getByTestId("credit-flags").innerText();
@@ -264,18 +266,102 @@ try {
   await under.getByTestId("credit-note").fill("Settlement agreement reviewed 5521.");
   await under.getByTestId("sign-off-credit").click();
   ok("the underwriter signs off the credit review", await seen(under.getByTestId("credit-signed")));
-  await under.getByTestId("advance-loan").filter({ hasText: "Issue term sheet" }).click();
-  await gone(under.getByTestId("advance-loan").filter({ hasText: "Issue term sheet" }));
+  // The term sheet: priced below the matrix, it waits for an owner other than the underwriter. The borrower asks for
+  // changes to version 1 and accepts version 2, which locks the rate.
+  await under.getByTestId("build-term-sheet").click();
+  await seen(under.getByTestId("term-sheet-builder"));
+  const matrixLow = Number((await under.getByTestId("sheet-rate").locator("xpath=..").innerText()).match(/Matrix ([\d.]+)%/)[1]);
+  const belowMatrix = (matrixLow - 0.5).toFixed(2);
+  await under.getByTestId("sheet-rate").fill(belowMatrix);
+  ok("pricing below the matrix can't go out on the underwriter's say", (await seen(under.getByTestId("sheet-exception"))) && (await under.getByTestId("issue-term-sheet").isDisabled()));
+  await under.getByTestId("exception-reason").fill("Matching a competing offer 6620");
+  await under.getByTestId("request-exception").click();
+  ok("the underwriter asks an owner for an exception", await seen(under.getByTestId("pricing-exception").getByText("Waiting for an owner")));
+  ok("the owner is told", (await prisma.notification.count({ where: { toEmail: `owner@${DOMAIN}`, eventCode: "pricing.exception_requested" } })) === 1);
+  await go(owner, dealHref);
+  await owner.getByTestId("tab-Term sheet").click();
+  await owner.getByTestId("approve-exception").click();
+  ok("an owner approves it, and who did is kept", await seen(owner.getByTestId("exception-decision").getByText("Approved by Owen Owner")));
+  await go(under, dealHref);
+  await under.getByTestId("build-term-sheet").click();
+  await under.getByTestId("sheet-rate").fill(belowMatrix);
+  await under.getByTestId("issue-term-sheet").click();
+  ok("the underwriter sends version 1 at the approved rate", await seen(under.getByTestId("term-sheet-version").getByText(`Version 1`)));
   ok("staff move the loan to a term sheet", await seen(under.getByTestId("stage-panel").getByText("Waiting for the borrower")));
   await go(borrower, `/admin/borrower/${dealId}`);
   ok("the credit officer's notes never reach the borrower", !(await received(borrower)).includes("reviewed 5521"));
+  ok("nor the reason for the exception", !(await received(borrower)).includes("competing offer 6620"));
+  const firstSheet = await borrower.request.get(BASE + (await borrower.getByTestId("term-sheet-download").getAttribute("href")));
+  ok("the borrower downloads the term sheet as a PDF", firstSheet.headers()["content-type"] === "application/pdf" && (await firstSheet.body()).subarray(0, 5).toString() === "%PDF-");
+  await borrower.getByTestId("term-sheet-mode-changes").click();
+  await borrower.getByTestId("term-sheet-note").fill("Could the points come down a little?");
+  await borrower.getByTestId("request-term-sheet-changes").click();
+  ok("the borrower asks for changes, which sends it back to underwriting", await seen(borrower.getByTestId("term-sheet-changes")));
+  await go(under, dealHref);
+  await under.getByTestId("build-term-sheet").click();
+  ok("the underwriter sees what they asked for", (await under.getByTestId("term-sheet-response").first().innerText()).includes("points come down"));
+  await under.getByTestId("sheet-rate").fill(String(matrixLow));
+  await under.getByTestId("issue-term-sheet").click();
+  ok("version 2 goes out", await seen(under.getByTestId("term-sheet-version").getByText("Version 2")));
+  await go(borrower, `/admin/borrower/${dealId}`);
+  ok("the borrower sees version 2", await seen(borrower.getByText("Term sheet, version 2")));
+  ok("and can't open version 1 any more", (await borrower.request.get(`${BASE}/api/term-sheets/${dealId}?v=1`)).status() === 404);
   await borrower.getByTestId("term-sheet-name").fill("Bonnie Borrower");
   await borrower.getByTestId("term-sheet-agree").check();
   await borrower.getByTestId("accept-term-sheet").click();
   ok("the borrower accepts it from their own browser", await seen(borrower.getByTestId("term-sheet-signed")));
   await go(under, dealHref);
+  await under.getByTestId("tab-Term sheet").click();
+  ok("acceptance locks the rate and points", (await under.getByTestId("term-sheet-builder").innerText()).includes("locked at what the borrower accepted"));
+  await go(under, dealHref);
   await under.getByTestId("advance-loan").filter({ hasText: "Start clearing conditions" }).click();
   ok("the loan can't clear to close yet", await seen(under.getByTestId("stage-blockers").getByText("still open")));
+
+  // Conditions: the library's standard ones arrive. The borrower sends theirs, one is sent back and comes in again, and
+  // the team waives one and clears the rest before the loan can clear to close.
+  ok("starting conditions adds the library's standard ones", await seen(under.getByTestId("stage-blockers").getByText(/conditions to clear before closing/)));
+  ok("and the borrower hears what's theirs", (await prisma.notification.count({ where: { toEmail: `borrower@${DOMAIN}`, eventCode: "condition.added" } })) === 1);
+  await go(borrower, `/admin/borrower/${dealId}`);
+  await seen(borrower.getByTestId("my-conditions"));
+  const myConditions = borrower.getByTestId("my-condition");
+  const borrowerItems = await myConditions.count();
+  const sendCondition = async (row, name) => {
+    const chooser = borrower.waitForEvent("filechooser");
+    await row.getByTestId("condition-upload").click();
+    await (await chooser).setFiles({ name, mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 condition") });
+    return seen(row.getByText("We're reviewing it"));
+  };
+  for (let i = 0; i < borrowerItems; i++) await sendCondition(myConditions.nth(i), `condition-${i}.pdf`);
+  ok("the borrower sends a file for each of theirs", borrowerItems >= 3 && (await borrower.getByTestId("my-conditions").getByText("We're reviewing it").count()) === borrowerItems);
+  ok("the files are stored encrypted", (await prisma.document.count({ where: { documentType: "condition" } })) === borrowerItems && !(await rawRows("Document")).includes("condition-0.pdf"));
+  ok("the team is told each one came in", (await prisma.notification.count({ where: { toEmail: `owner@${DOMAIN}`, eventCode: "condition.submitted" } })) === borrowerItems);
+  await go(under, dealHref);
+  await under.getByTestId("tab-Conditions").click();
+  const insurance = under.getByTestId("condition-row").filter({ hasText: "Insurance naming LendHous" });
+  await insurance.getByTestId("return-condition").click();
+  await under.getByTestId("condition-text").fill("The binder doesn't name LendHous as mortgagee.");
+  await under.getByTestId("confirm-condition").click();
+  ok("a file sent back reopens the condition with why", await seen(insurance.getByText("Sent back by Ursula Under")));
+  await go(borrower, `/admin/borrower/${dealId}`);
+  const again = borrower.getByTestId("my-condition").filter({ hasText: "Insurance naming LendHous" });
+  ok("the borrower sees why", (await again.getByTestId("condition-returned").innerText()).includes("mortgagee"));
+  ok("and sends it again", await sendCondition(again, "binder-corrected.pdf"));
+  await go(under, dealHref);
+  await under.getByTestId("tab-Conditions").click();
+  const titleCondition = under.getByTestId("condition-row").filter({ hasText: "Title commitment reviewed" });
+  await titleCondition.getByTestId("waive-condition").click();
+  await under.getByTestId("condition-text").fill("Handled through the title company's checklist");
+  await under.getByTestId("confirm-condition").click();
+  await seen(titleCondition.getByText(/Waived by Ursula Under/));
+  const beforeClosing = under.locator("section").filter({ has: under.getByRole("heading", { name: /^Prior to/ }) }).getByTestId("condition-row").filter({ has: under.getByTestId("clear-condition") });
+  for (let left = await beforeClosing.count(), tries = 0; left > 0 && tries < 20; left = await beforeClosing.count(), tries++) {
+    await beforeClosing.first().getByTestId("clear-condition").click();
+    await under.getByTestId("confirm-condition").click();
+    await under.waitForTimeout(250);
+  }
+  ok("the team clears or waives everything before closing", await seen(under.getByTestId("conditions-summary").getByText("Everything before closing is cleared or waived")));
+  ok("the borrower hears theirs clear", (await prisma.notification.count({ where: { toEmail: `borrower@${DOMAIN}`, eventCode: "condition.cleared" } })) === borrowerItems);
+  ok("conditions no longer hold up clear to close", !(await under.getByTestId("stage-blockers").innerText()).includes("conditions to clear"));
 
   // Documents, capital, closing
   await under.getByTestId("tab-Documents").click();
@@ -286,8 +372,14 @@ try {
     await under.waitForTimeout(150);
   }
   // The borrower's items are done; the closing checklist is the title company's to send through its link.
-  const waives = under.locator("[data-testid^='waive-']:not([data-testid^='waive-closing-'])");
-  for (let left = await waives.count(); left > 0; left = await waives.count()) { await waives.first().click(); await under.waitForTimeout(150); }
+  // Each waive is saved before the next click, so a reply landing mid-click can't detach the button being clicked.
+  const waiveSelector = "[data-testid^='waive-']:not([data-testid^='waive-closing-'])";
+  const waives = under.locator(waiveSelector);
+  for (let left = await waives.count(), tries = 0; left > 0 && tries < 30; tries++) {
+    await waives.first().click();
+    await under.waitForFunction(([selector, before]) => document.querySelectorAll(selector).length < before, [waiveSelector, left], { timeout: 10_000 }).catch(() => {});
+    left = await waives.count();
+  }
   const acceptAll = async () => { const reviews = under.getByRole("button", { name: "Accept" }); for (let left = await reviews.count(); left > 0; left = await reviews.count()) { await reviews.first().click(); await under.waitForTimeout(150); } };
   await acceptAll();
   await under.getByTestId("tab-Capital Routing").click();
@@ -533,6 +625,51 @@ try {
   await card.getByTestId("record-inspection").click();
   await seen(card.getByTestId("draw-review"));
   await card.getByTestId("approve-draw").click();
+  // Florida's lien law holds the money: the lien file goes in on the Closing tab, a supplier's notice to owner is logged,
+  // the borrower sends both waivers, and the team checks them against the statutory form.
+  ok("an approved draw is held until the lien law is met", (await seen(card.getByTestId("release-held"))) && (await card.getByTestId("draw-holds").innerText()).includes("No Notice of Commencement"));
+  await go(owner, `/admin/deals/${dealId}`);
+  await owner.getByTestId("tab-Closing").click();
+  const today = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+  await owner.getByTestId("lien-contractor").fill("Carl's Construction LLC");
+  await owner.getByTestId("noc-recorded").fill(today);
+  await owner.getByTestId("noc-reference").fill("OR 2026/11 1234");
+  await owner.getByTestId("noc-commenced").fill(today);
+  await owner.getByTestId("noc-lender-named").check();
+  ok("a notice recorded the same day as the mortgage needs the order checked", await seen(owner.getByTestId("noc-mortgage-first")));
+  await owner.getByTestId("noc-mortgage-first").check();
+  await owner.getByTestId("save-noc").click();
+  ok("the Notice of Commencement is on file, after the mortgage", (await seen(owner.getByTestId("noc-summary"))) && (await owner.getByTestId("noc-problems").count()) === 0);
+  await owner.getByTestId("insurance-carrier").fill("Gulf Builders Mutual");
+  await owner.getByTestId("insurance-policy").fill("GBM-77");
+  await owner.getByTestId("insurance-expires").fill(new Date(Date.now() + 180 * 86_400_000).toISOString().slice(0, 10));
+  await owner.getByTestId("save-insurance").click();
+  await seen(owner.getByTestId("insurance-summary"));
+  await owner.getByTestId("add-notice").click();
+  await owner.getByTestId("notice-lienor").fill("Sunny Supply Co");
+  await owner.getByTestId("notice-role").selectOption("supplier");
+  await owner.getByTestId("notice-served").fill(today);
+  await owner.getByTestId("save-notice").click();
+  ok("a notice to owner is logged, and the borrower is told", (await seen(owner.getByTestId("notices-to-owner").getByText("Sunny Supply Co"))) && (await prisma.notification.count({ where: { toEmail: `borrower@${DOMAIN}`, eventCode: "lien.notice_to_owner" } })) === 1);
+  await go(borrower, `/admin/borrower/${dealId}`);
+  const lienParties = borrower.getByTestId("lien-party");
+  ok("the borrower sees the waivers this draw needs", (await seen(borrower.getByTestId("draw-lien"))) && (await lienParties.count()) === 2);
+  for (const [index, name] of [[0, "contractor-waiver.pdf"], [1, "supplier-waiver.pdf"]]) {
+    const chooser = borrower.waitForEvent("filechooser");
+    await lienParties.nth(index).getByTestId("lien-upload").click();
+    await (await chooser).setFiles({ name, mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 waiver") });
+    await seen(lienParties.nth(index).getByText("We're checking it"));
+  }
+  ok("the borrower sends both", (await borrower.getByTestId("lien-party-status").getByText("We're checking it").count()) === 2);
+  ok("the waivers are stored encrypted", (await prisma.document.count({ where: { documentType: "lien_waiver" } })) === 2 && !(await rawRows("Document")).includes("supplier-waiver.pdf"));
+  await go(owner, "/admin/draws");
+  for (let left = await card.getByTestId("check-waiver").count(); left > 0; left = await card.getByTestId("check-waiver").count()) {
+    await card.getByTestId("waiver-amount").first().fill("5000");
+    await card.getByTestId("waiver-through").first().fill(today);
+    await card.getByTestId("check-waiver").first().click();
+    await owner.waitForTimeout(250);
+  }
+  ok("the team checks them against the statutory form, which frees the draw", await seen(card.getByTestId("draw-holds").getByText(/Nothing under the lien law/)));
   await card.getByTestId("release-draw").click();
   await seen(owner.getByTestId("closed-draw"));
   await go(borrower, `/admin/borrower/${dealId}`);
@@ -564,12 +701,62 @@ try {
   await seen(owner.getByText("Reversed by"));
   await go(borrower, `/admin/borrower/${dealId}`);
   ok("a reversed payment puts the due date back for the borrower", (await borrower.getByTestId("next-due").innerText()) === dueBefore);
+  // Payoff letters (Fla. Stat. 701.04): the borrower asks in the portal, servicing sends an itemized letter as a PDF.
   await borrower.getByTestId("request-payoff").click();
-  ok("the borrower requests a payoff", await seen(borrower.getByTestId("my-payoffs")));
+  ok("the borrower asks for a payoff letter and sees when it's due", (await seen(borrower.getByTestId("my-payoffs"))) && (await borrower.getByTestId("my-payoffs").innerText()).includes("send it by"));
   await go(owner, "/admin/servicing");
-  ok("the payoff reaches servicing", await seen(owner.getByTestId("payoff-row").filter({ hasText: "LH-1001" })));
-  await owner.getByTestId("send-payoff").click();
-  await seen(owner.getByTestId("payoff-row").filter({ hasText: "LH-1001" }).getByText("Sent"));
+  const ownPayoff = owner.getByTestId("payoff-row").filter({ hasText: "LH-1001" });
+  ok("the payoff request reaches servicing with Florida's deadline", (await seen(ownPayoff)) && (await ownPayoff.getByTestId("payoff-due").innerText()).includes("Florida gives 10 days"));
+  await ownPayoff.getByTestId("open-payoff").click();
+  await owner.getByTestId("payoff-card").getByTestId("issue-payoff-letter").click();
+  ok("the letter is sent and how sending went is kept", await seen(owner.getByTestId("letter-delivery").getByText(/Emailed to|wasn't emailed/)));
+  await owner.keyboard.press("Escape");
+  await go(borrower, `/admin/borrower/${dealId}`);
+  const myLetter = await borrower.getByTestId("my-letter-pdf").getAttribute("href");
+  const letterFile = await borrower.request.get(BASE + myLetter);
+  ok("the borrower opens their payoff letter as a PDF", letterFile.headers()["content-type"] === "application/pdf" && (await letterFile.body()).subarray(0, 5).toString() === "%PDF-");
+  ok("nobody signed out can", (await (await browser.newContext()).request.get(BASE + myLetter, { maxRedirects: 0 })).status() === 401);
+
+  // A title company asks through the public form with the borrower's signed authorization, and the borrower is told.
+  const payoffTitleContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const payoffTitle = await payoffTitleContext.newPage();
+  await payoffTitle.goto(BASE + "/payoff");
+  await payoffTitle.getByTestId("payoff-kind-title").click();
+  await payoffTitle.getByTestId("payoff-loanNumber").fill("LH-1001");
+  await payoffTitle.getByTestId("payoff-zip").fill("33020");
+  await payoffTitle.getByTestId("payoff-goodThrough").fill(new Date(Date.now() + 12 * 86_400_000).toISOString().slice(0, 10));
+  await payoffTitle.getByTestId("payoff-name").fill("Sunny Closer");
+  await payoffTitle.getByTestId("payoff-company").fill("Sunshine Title");
+  await payoffTitle.getByTestId("payoff-email").fill(`payoffs@${DOMAIN}`);
+  await payoffTitle.getByTestId("payoff-fileNumber").fill("SUN-2026-77");
+  await payoffTitle.getByTestId("payoff-authorization").setInputFiles({ name: "borrower-authorization.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 signed by the borrower") });
+  await payoffTitle.getByTestId("payoff-request-submit").click();
+  ok("a title company asks for a payoff letter without an account", await seen(payoffTitle.getByTestId("payoff-request-sent")));
+  ok("and gets a receipt with the due date", (await prisma.notification.count({ where: { toEmail: `payoffs@${DOMAIN}`, eventCode: "payoff.received" } })) === 1);
+  ok("the borrower is told someone else asked", (await prisma.notification.count({ where: { toEmail: `borrower@${DOMAIN}`, eventCode: "payoff.third_party" } })) === 1);
+  await go(owner, "/admin/servicing");
+  await owner.getByTestId("payoff-row").filter({ hasText: "Sunshine Title" }).getByTestId("open-payoff").click();
+  const payoffCard = owner.getByTestId("payoff-card");
+  ok("its authorization has to be checked before the letter can go", (await seen(payoffCard.getByTestId("payoff-authorization-file"))) && (await payoffCard.getByTestId("issue-payoff-letter").count()) === 0);
+  ok("staff can open the authorization", (await owner.request.get(BASE + (await payoffCard.getByTestId("payoff-authorization-file").getAttribute("href")))).status() === 200);
+  ok("the authorization's file name is encrypted", !(await rawRows("Document")).includes("borrower-authorization.pdf"));
+  await payoffCard.getByTestId("payoff-check-note").fill("Signed by the managing member");
+  await payoffCard.getByTestId("payoff-check-accept").click();
+  await payoffCard.getByTestId("issue-payoff-letter").click();
+  ok("the title company's letter goes out once it's checked", await seen(payoffCard.getByTestId("letter-row")));
+  await owner.keyboard.press("Escape");
+  // A payment after the letters lowers the payoff: both letters are flagged and the team is told; one is corrected.
+  await go(owner, `/admin/deals/${dealId}`);
+  await owner.getByTestId("tab-Servicing").click();
+  await owner.getByTestId("payment-amount").fill("500");
+  await owner.getByTestId("payment-reference").fill("FED-SMOKE-2");
+  await owner.getByTestId("save-payment").click();
+  ok("a payment after the letters flags them as out of date", await seen(owner.getByTestId("payoff-stale")));
+  ok("the team hears a letter is out of date", (await prisma.notification.count({ where: { toEmail: `owner@${DOMAIN}`, eventCode: "payoff.stale" } })) === 2);
+  const staleCard = owner.getByTestId("payoff-card").filter({ hasText: "Sunshine Title" });
+  await staleCard.getByTestId("issue-payoff-letter").click();
+  ok("a corrected letter goes out", (await seen(staleCard.getByText("(corrected)"))) && (await staleCard.getByTestId("payoff-stale").count()) === 0);
+  await payoffTitleContext.close();
   ok("the borrower is told when they can ask for more time", (await borrower.getByTestId("extension-not-yet").innerText()).includes("before maturity"));
 
   // New pricing: the owner publishes a version, the funded loan keeps its own, and the next application gets the new one
@@ -616,12 +803,37 @@ try {
   await go(owner, "/admin/leads");
   ok("the leads page opens the loan", (await owner.locator("tr", { hasText: "Lena Lead" }).getByTestId("lead-loan").getAttribute("href")) === leadDeal);
   // Declining it: the client is told, the team's notes stay encrypted and out of the email, and it can be reopened.
+  // The Reg B notice needs LendHous's address, which lives in Settings.
+  await go(owner, "/admin/settings");
+  await owner.getByTestId("setting-address").fill("100 Smoke Test Way, Fort Lauderdale, FL 33301");
+  await owner.getByTestId("setting-phone").fill("(954) 555-0100");
+  await owner.getByRole("button", { name: "Save settings" }).click();
+  await owner.waitForURL("**notice=settings_saved*");
   await go(owner, leadDeal);
   await owner.getByTestId("close-application").click();
   await owner.getByTestId("close-reason").selectOption("incomplete");
   await owner.getByTestId("close-note").fill("SMOKE-DECLINE-NOTE never sent the bank statements");
+  await owner.getByTestId("close-revenue").fill("650000");
   await owner.getByTestId("confirm-close").click();
   ok("staff decline an application", await seen(owner.getByTestId("application-closed")));
+  const notice = owner.getByTestId("adverse-action");
+  ok("the decline starts the Reg B notice, due in 30 days for a business of $1 million or less", (await seen(notice.getByTestId("notice-due"))) && (await notice.innerText()).includes("$1,000,000 or less"));
+  ok("the team is told when it's due", (await prisma.notification.count({ where: { toEmail: `owner@${DOMAIN}`, eventCode: "adverse_action.due" } })) === 1);
+  await notice.getByTestId("notice-reason-0").fill("Incomplete application: the two most recent bank statements weren't provided");
+  await notice.getByTestId("save-reasons").click();
+  await owner.waitForTimeout(400);
+  const letterUrl = `${BASE}/api/adverse-action/${leadDealId}?kind=notice`;
+  const preview = await owner.request.get(letterUrl);
+  ok("staff preview the notice as a PDF", preview.headers()["content-type"] === "application/pdf" && (await preview.body()).subarray(0, 5).toString() === "%PDF-");
+  ok("nobody signed out can open it", (await (await browser.newContext()).request.get(letterUrl, { maxRedirects: 0 })).status() === 401);
+  // Emailed to a linked account; a client not linked to one gets it by mail.
+  const canEmail = (await notice.getByTestId("email-notice").count()) > 0;
+  await notice.getByTestId(canEmail ? "email-notice" : "mail-notice").click();
+  const noticeOut = await seen(notice.getByTestId("notice-sent"));
+  if (!noticeOut) console.log("the notice panel said:", await notice.getByRole("alert").allInnerTexts().catch(() => []));
+  ok(`the notice goes out (${canEmail ? "emailed" : "marked mailed"}) and is recorded`, noticeOut);
+  ok("its reasons are encrypted in the database", !(await rawRows("BookRecord")).includes("two most recent bank statements"));
+  ok("the send is in the audit log", (await prisma.auditEvent.count({ where: { action: "adverse_action.notice_sent", entityId: leadDealId } })) === 1);
   const declinedMail = await prisma.notification.findMany({ where: { toEmail: `lena@${DOMAIN}`, eventCode: "loan.declined" } });
   ok("the client is told it was declined, without the team's notes", declinedMail.length === 1 && !JSON.stringify(declinedMail).includes("SMOKE-DECLINE-NOTE"));
   ok("the decline notes are encrypted in the database", !(await rawRows("BookRecord")).includes("SMOKE-DECLINE-NOTE"));

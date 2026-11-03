@@ -17,6 +17,8 @@ type Store = {
   dispatch: (action: BookAction) => Promise<boolean>;
   /** Keeps a file with a loan document. Demo and sample data only remember its name. */
   uploadDoc: (dealId: string, docId: string, file: File) => Promise<boolean>;
+  uploadCondition: (dealId: string, conditionId: string, file: File) => Promise<boolean>;
+  uploadLienFile: (dealId: string, drawId: string, party: { key: string; kind: "progress" | "final" } | "affidavit", file: File) => Promise<boolean>;
   /** Stores one draw photo and gives back its id. Demo and sample data keep no file, so they get null. */
   uploadPhoto: (dealId: string, file: File) => Promise<string | null>;
   /** Takes in a reply from a server action that changed the book some other way, like starting a loan. */
@@ -110,6 +112,23 @@ export function StoreProvider({ demo, accountId, viewerName, initialBook, pricin
     return !(await send(form)).error;
   }, [isLocal, send]);
 
+  /** A file for one of a loan's conditions, which marks it sent in. Demo seats keep the name only. */
+  const uploadCondition = useCallback(async (dealId: string, conditionId: string, file: File) => {
+    if (isLocal) { local({ t: "conditionFile", dealId, conditionId, fileName: file.name, by: viewerName }); return true; }
+    const form = new FormData();
+    form.set("dealId", dealId); form.set("conditionId", conditionId); form.set("file", file);
+    return !(await send(form)).error;
+  }, [isLocal, send, viewerName]);
+
+  /** A lien waiver from one party, or the contractor's final affidavit, for a draw. Demo seats keep the name only. */
+  const uploadLienFile = useCallback(async (dealId: string, drawId: string, party: { key: string; kind: "progress" | "final" } | "affidavit", file: File) => {
+    if (isLocal) { local(party === "affidavit" ? { t: "affidavitReceived", drawId, fileName: file.name, by: viewerName } : { t: "lienWaiverReceived", drawId, partyKey: party.key, kind: party.kind, fileName: file.name, by: viewerName }); return true; }
+    const form = new FormData();
+    form.set("dealId", dealId); form.set("drawId", drawId); form.set("file", file);
+    if (party === "affidavit") form.set("affidavit", "1"); else form.set("waiverParty", party.key);
+    return !(await send(form)).error;
+  }, [isLocal, send, viewerName]);
+
   const uploadPhoto = useCallback(async (dealId: string, file: File) => {
     if (isLocal) return null;
     const form = new FormData();
@@ -122,7 +141,7 @@ export function StoreProvider({ demo, accountId, viewerName, initialBook, pricin
     setError(reply.error ?? "");
   }, []);
 
-  const value = useMemo(() => ({ s, dispatch, uploadDoc, uploadPhoto, applyReply, newLeads, local: isLocal, demo, viewerName, error, clearError: () => setError("") }), [s, dispatch, uploadDoc, uploadPhoto, applyReply, newLeads, isLocal, demo, viewerName, error]);
+  const value = useMemo(() => ({ s, dispatch, uploadDoc, uploadCondition, uploadLienFile, uploadPhoto, applyReply, newLeads, local: isLocal, demo, viewerName, error, clearError: () => setError("") }), [s, dispatch, uploadDoc, uploadCondition, uploadLienFile, uploadPhoto, applyReply, newLeads, isLocal, demo, viewerName, error]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 export function useStore() { const c = useContext(Ctx); if (!c) throw new Error("no store"); return c; }

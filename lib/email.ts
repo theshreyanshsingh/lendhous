@@ -6,13 +6,15 @@ import { notDeleted, prisma } from "@/lib/prisma";
 import { deliverable, deskRecipients, resolveMailTransport, type MailTransport } from "@/lib/mail-config";
 import { noticeContext } from "@/lib/notifications";
 
-async function deliver(transport: MailTransport, toEmail: string, subject: string, body: string, replyTo?: string) {
+type Attachment = { filename: string; content: Buffer };
+
+async function deliver(transport: MailTransport, toEmail: string, subject: string, body: string, replyTo?: string, attachments: Attachment[] = []) {
   const from = process.env.EMAIL_FROM || "Lendhous <team@localhost>";
   if (transport === "resend") {
     const response = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from, to: [toEmail], subject, text: body, ...(replyTo ? { reply_to: replyTo } : {}) }),
+      body: JSON.stringify({ from, to: [toEmail], subject, text: body, ...(replyTo ? { reply_to: replyTo } : {}), ...(attachments.length ? { attachments: attachments.map((file) => ({ filename: file.filename, content: file.content.toString("base64") })) } : {}) }),
       signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) {
@@ -30,7 +32,7 @@ async function deliver(transport: MailTransport, toEmail: string, subject: strin
       secure: port === 465,
       auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD || "" } : undefined,
     });
-    await transporter.sendMail({ from, to: toEmail, subject, text: body, replyTo });
+    await transporter.sendMail({ from, to: toEmail, subject, text: body, replyTo, attachments });
   }
 }
 
@@ -63,14 +65,14 @@ export async function notify(toEmail: string, subject: string, body: string, opt
  * For mail that carries something live, a password link. It skips notify(), so the secret never sits
  * in the notifications table or, when delivery fails, in the log. Returns how it went so the screen can say so.
  */
-async function sendSecret(toEmail: string, subject: string, body: string): Promise<"sent" | "logged" | "failed"> {
+async function sendSecret(toEmail: string, subject: string, body: string, attachments: Attachment[] = []): Promise<"sent" | "logged" | "failed"> {
   const transport = deliverable(toEmail) ? resolveMailTransport() : "log";
   if (transport === "log") {
-    console.info(`[lendhous-mail] to=${toEmail} subject=${subject}\n${body}`);
+    console.info(`[lendhous-mail] to=${toEmail} subject=${subject}${attachments.length ? ` attachments=${attachments.map((file) => file.filename).join(",")}` : ""}\n${body}`);
     return "logged";
   }
   try {
-    await deliver(transport, toEmail, subject, body);
+    await deliver(transport, toEmail, subject, body, undefined, attachments);
     return "sent";
   } catch (error) {
     console.error(`[lendhous-mail] ${transport} failed for ${toEmail}:`, error);
@@ -87,6 +89,19 @@ export function sendPasswordLink(toEmail: string, link: string, reason: { invite
 /** A photo link is a live key to one upload page, so like a password link it stays out of the notifications table. */
 export function sendPhotoLinkMail(toEmail: string, details: { to: string; sentBy: string; address: string; link: string; expires: string }) {
   return sendSecret(toEmail, `Photos needed: ${details.address}`, `Hi ${details.to},\n\n${details.sentBy} asked for photos of the finished work at ${details.address}. They go to LendHous.\n\nOpen this link on your phone and it will walk you through what to photograph. You don't need an account:\n${details.link}\n\nThe link works until ${details.expires}. Please don't forward it. If you weren't expecting this, ignore it.`);
+}
+
+/**
+ * A payoff letter, with its PDF, to whoever asked for it. It carries a link to the letter, so like a photo link it stays
+ * out of the notifications table; the loan records who it went to and how sending went.
+ */
+export function sendPayoffLetterMail(toEmail: string, subject: string, body: string, pdf: Attachment) {
+  return sendSecret(toEmail, subject, body, [pdf]);
+}
+
+/** A letter with its PDF attached, like a decline notice. Kept out of the notifications table: the loan records who it went to. */
+export function sendLetterMail(toEmail: string, subject: string, body: string, pdf: Attachment) {
+  return sendSecret(toEmail, subject, body, [pdf]);
 }
 
 /** Team alerts go to every approved owner-admin, and to TEAM_EMAIL when it is set. */

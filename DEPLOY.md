@@ -52,7 +52,7 @@ Optional: `ADMIN_NAME`, `LENDER_NAME`, `TEAM_EMAIL`, `SMTP_PORT`, `SMTP_USER`, `
 
 ## If mail stops working
 
-Sign-in keeps working, but invites, forgot-password links, photo links and alerts don't arrive. An admin can still copy a password link from Members, a photo link from the draw and a title company's link from the Closing tab when it's sent, and website briefs still reach the leads inbox.
+Sign-in keeps working, but invites, forgot-password links, photo links and alerts don't arrive. An admin can still copy a password link from Members, a photo link from the draw and a title company's link from the Closing tab when it's sent, and download a payoff letter's PDF from the loan's Servicing tab (the letter says it wasn't emailed; Florida's 10 days still run), and website briefs still reach the leads inbox.
 
 ## A plain server under pm2
 
@@ -65,13 +65,13 @@ pm2 start node_modules/.bin/tsx --name lendhous-jobs --cron-restart "0 6 * * *" 
 pm2 save
 ```
 
-To update it later. The build regenerates the database client and syncs the indexes, so schema changes need no extra step. Use `npm ci` first if `package.json` added a package.
+To update it later. The build regenerates the database client and syncs the indexes, so schema changes need no extra step. Use `npm ci` first if `package.json` added a package: the payoff letters release added `pdfkit`, which makes the letters' PDFs on the server and needs nothing else installed. Payoff letters carry `LENDER_NAME` as the letterhead, so set it to the lender's legal name. **After the Reg B release, an owner adds LendHous's mailing address (and phone) in Settings**: decline notices can't be sent without it. **Before the first draw after the lien-law release, fill in each funded rehab or construction loan's lien file on its Closing tab** (contractor, Notice of Commencement, insurance, any notices to owner): until then its draws are held, by design. That release also adds an `override_draw_holds` permission (owners by default). The conditions release adds a `waive_conditions` permission (owners and underwriters by default); give it to anyone else who should waive conditions on the Members page.
 
 ```bash
 git pull && LENDHOUS_RELEASE=1 npm run build && pm2 restart lendhous && npm run db:encrypt
 ```
 
-Check `pm2 ls` shows `lendhous-jobs`. It runs the daily jobs at 06:00 UTC, including the servicing check that marks missed payments late, charges late fees and sends late and maturity notices. Without it nothing goes late, and the servicing page warns that the check has stopped. `npm run jobs` runs any job that hasn't run today, straight away.
+Check `pm2 ls` shows `lendhous-jobs`. It runs the daily jobs at 06:00 UTC, including the servicing check that marks missed payments late, charges late fees and sends late and maturity notices, the term sheet check that reminds borrowers two days before a term sheet expires and expires it after its last day, and the insurance check that warns 30 days before a builder's risk or hazard policy ends and again when it lapses. Without it nothing goes late, and the servicing page warns that the check has stopped. `npm run jobs` runs any job that hasn't run today, straight away.
 
 **After the deploy that adds OFAC screening, run `npm run jobs` once.** The sanctions job downloads Treasury's list from `treasury.gov` (the server needs outbound HTTPS to it) and screens every open application and loan. Until it has run, nothing can be screened, applications can't go to underwriting, and loans can't fund or release draws.
 

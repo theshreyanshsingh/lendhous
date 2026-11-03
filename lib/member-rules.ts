@@ -11,8 +11,8 @@ const ALL_ROLES: RoleCode[] = ROLE_GROUPS.flatMap((group) => group.roles);
 export const isRole = (value: string): value is RoleCode => ALL_ROLES.includes(value as RoleCode);
 
 export const PERMISSION_GROUPS: { label: string; items: Permission[] }[] = [
-  { label: "Deals", items: ["view_pipeline", "view_credit", "reveal_sensitive", "review_documents", "manage_conditions", "issue_term_sheet", "approve_matrix_exception"] },
-  { label: "Money", items: ["manage_pricing", "route_capital", "manage_capital", "approve_funding", "approve_draw", "assign_inspection", "service_loans", "waive_fee"] },
+  { label: "Deals", items: ["view_pipeline", "view_credit", "reveal_sensitive", "review_documents", "manage_conditions", "waive_conditions", "issue_term_sheet", "approve_matrix_exception"] },
+  { label: "Money", items: ["manage_pricing", "route_capital", "manage_capital", "approve_funding", "approve_draw", "override_draw_holds", "assign_inspection", "service_loans", "waive_fee"] },
   { label: "Administration", items: ["manage_users", "manage_roles", "view_audit"] },
 ];
 const ALL_PERMISSIONS = Object.keys(PERMISSIONS) as Permission[];

@@ -76,7 +76,8 @@ describe("declining or withdrawing an application", () => {
     const start = book(application({ brokerId: "brk-a" }));
     const declined = run(start, underwriter, decline);
     const told = alertsFor(start, declined.after, declined.action);
-    expect(told.map((alert) => [alert.to, alert.event])).toEqual([["borrower", "loan.declined"], ["broker", "loan.declined"]]);
+    // The team hears when the Reg B notice is due; the clients hear a letter will follow, not the reasons.
+    expect(told.map((alert) => [alert.to, alert.event])).toEqual([["borrower", "loan.declined"], ["broker", "loan.declined"], ["team", "adverse_action.due"]]);
     expect(JSON.stringify(told)).not.toMatch(/cash|20k|liquidity/i);
     const withdrawn = run(start, borrower, withdraw);
     expect(alertsFor(start, withdrawn.after, withdrawn.action).map((alert) => alert.to)).toEqual(["team", "broker"]);

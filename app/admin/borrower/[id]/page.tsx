@@ -14,6 +14,7 @@ import { LoanMessages } from "@/components/loan/LoanMessages";
 import { PaymentsPanel } from "@/components/loan/PaymentsPanel";
 import { ScopeOfWork } from "@/components/loan/ScopeOfWork";
 import { TermSheetCard } from "@/components/loan/TermSheetCard";
+import { BorrowerConditions } from "@/components/loan/BorrowerConditions";
 import Tracker from "@/components/Tracker";
 import { Badge, Section, Stat, usd, pct, productLabel, statusLabel } from "@/components/ui";
 import type { DocStatus } from "@/lib/mockData";
@@ -46,6 +47,7 @@ export default function BorrowerLoan() {
         </div>
       )}
       <TermSheetCard deal={d} canSign />
+      <BorrowerConditions deal={d} canUpload />
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="min-w-0 space-y-4">
         <Section title="Document center" right={<span className="text-xs text-muted-foreground">{d.docs.filter((x) => x.status === "accepted").length}/{d.docs.length} accepted</span>}>

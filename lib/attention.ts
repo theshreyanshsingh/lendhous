@@ -1,8 +1,10 @@
 // What's waiting on the team right now, across every queue. It drives the pipeline's list and the menu's counts.
-import type { Book } from "./book";
+import { serviceDay, type Book } from "./book";
 import { activeWire, wireVerified } from "./closing";
 import { lienReleaseOpen, openExtension, PRE_FUNDING } from "./loan-exits";
 import { latestScreening } from "./ofac";
+import { staleLetter } from "./payoffs";
+import { noticeOwed } from "./adverse-action";
 
 export type AttentionItem = { key: string; label: string; count: number; href: string };
 
@@ -11,7 +13,9 @@ const firstDeal = (ids: string[]) => (ids.length === 1 ? `/admin/deals/${ids[0]}
 export function attentionCounts(s: Book, newLeads: number) {
   const draws = s.draws.filter((draw) => draw.status !== "funded" && draw.status !== "rejected").length;
   const offers = s.offers.filter((offer) => offer.status === "submitted").length;
-  const payoffs = s.payoffs.filter((payoff) => payoff.status === "requested").length;
+  // A letter to send, or one sent whose figures have moved and needs correcting.
+  const today = serviceDay(s);
+  const payoffs = s.payoffs.filter((payoff) => payoff.status === "requested" || (payoff.status === "sent" && s.deals.some((deal) => deal.id === payoff.dealId && staleLetter(deal, payoff, today)))).length;
   const late = s.deals.filter((deal) => deal.paymentsLate).length;
   const matured = s.deals.filter((deal) => deal.status === "matured").length;
   const extensions = s.deals.filter((deal) => openExtension(deal)).length;
@@ -28,12 +32,19 @@ export function attentionItems(s: Book, newLeads: number): AttentionItem[] {
   const funding = s.deals.filter((deal) => deal.status === "closing" && (deal.fundingApprovers?.length ?? 0) < 2);
   const sanctions = s.deals.filter((deal) => { const status = latestScreening(deal)?.status; return status === "review" || status === "match"; });
   const wires = s.deals.filter((deal) => activeWire(deal) && !wireVerified(deal) && PRE_FUNDING.includes(deal.status));
+  const exceptions = s.deals.filter((deal) => deal.pricingException?.status === "pending");
+  const notices = s.deals.filter((deal) => noticeOwed(deal));
+  const submitted = s.deals.filter((deal) => deal.conditions?.some((item) => item.status === "submitted"));
+  const conditionCount = submitted.reduce((sum, deal) => sum + deal.conditions!.filter((item) => item.status === "submitted").length, 0);
   const items: AttentionItem[] = [
     { key: "leads", label: "Quote requests to answer", count: counts.leads, href: "/admin/leads" },
     { key: "sanctions", label: "Possible sanctions matches to review", count: sanctions.length, href: firstDeal(sanctions.map((deal) => deal.id)) },
     { key: "wires", label: "Wire instructions to verify by phone", count: wires.length, href: firstDeal(wires.map((deal) => deal.id)) },
     { key: "applications", label: "New applications", count: newApps.length, href: firstDeal(newApps.map((deal) => deal.id)) },
+    { key: "conditions", label: "Conditions sent in to review", count: conditionCount, href: firstDeal(submitted.map((deal) => deal.id)) },
     { key: "documents", label: "Documents to review", count: docs, href: firstDeal(toReview.map((deal) => deal.id)) },
+    { key: "notices", label: "Decline notices to send (Reg B)", count: notices.length, href: firstDeal(notices.map((deal) => deal.id)) },
+    { key: "exceptions", label: "Pricing exceptions to decide", count: exceptions.length, href: firstDeal(exceptions.map((deal) => deal.id)) },
     { key: "funding", label: "Loans waiting on funding approval", count: funding.length, href: firstDeal(funding.map((deal) => deal.id)) },
     { key: "bids", label: "Partner bids to decide", count: bids.length, href: firstDeal([...new Set(bids.map((bid) => bid.dealId))]) },
     { key: "draws", label: "Draws in progress", count: counts.draws, href: "/admin/draws" },

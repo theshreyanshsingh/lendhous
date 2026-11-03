@@ -767,3 +767,175 @@ describe("indexes and jobs", () => {
     expect(await prisma.notification.count({ where: { toEmail: "late.payer@example.com", eventCode: "payment.late" } })).toBe(1);
   });
 });
+
+describe("payoff letters (Fla. Stat. 701.04)", () => {
+  it("takes a title company's request from the public form, emails the letter with a link, and the link shows the correction", async () => {
+    const { demoBook } = await import("@/lib/book");
+    const store = await import("@/lib/book-store");
+    const route = await import("@/app/api/payoff-requests/route");
+    const pdf = await import("@/app/payoff-letter/[token]/pdf/route");
+    const { deliverPayoffLetter } = await import("@/lib/payoff-delivery");
+    const links = await import("@/lib/payoff-links");
+    const { fundedBalances, evaluate } = await import("@/lib/engine");
+    const { addDays, firstDueDate, servicingDate } = await import("@/lib/servicing");
+    const today = servicingDate(new Date());
+    const borrower = await prisma.user.create({ data: { email: "pat.payoff@example.com", name: "Pat Payoff", passwordHash: "x", roles: { create: [{ role: "BORROWER" }] } } });
+    // A loan that funded four months ago and is current: every payment before the next 1st counts as paid.
+    const base = demoBook().deals.find((deal) => deal.id === "d9")!;
+    const deal = { ...base, id: "payoff-loan", loanNumber: "LH-3001", zip: "33019", borrowerId: borrower.id, borrowerName: "Pat Payoff", closingDate: addDays(today, -120), nextPaymentDue: firstDueDate(today), boardedThrough: undefined, paymentsLate: 0, status: "servicing_current" };
+    await prisma.bookRecord.create({ data: { id: "deals:payoff-loan", kind: "deals", data: JSON.parse(JSON.stringify(deal)) } });
+    const goodThrough = addDays(today, 12);
+    const ask = (changes: Record<string, string> = {}, file?: File) => {
+      const form = new FormData();
+      for (const [key, value] of Object.entries({ loanNumber: "lh-3001", zip: "33019", kind: "title", name: "Terry Title", company: "Sunshine Title", email: "terry@sunshine-title.example.com", phone: "", fileNumber: "ST-77", goodThrough, note: "Closing in ten days", ...changes })) form.set(key, value);
+      if (file) form.set("authorization", file);
+      return route.POST(new Request("http://x/api/payoff-requests", { method: "POST", body: form }));
+    };
+    const authorization = new File([Buffer.from("%PDF-1.4 signed by the borrower")], "authorization.pdf", { type: "application/pdf" });
+
+    expect(await (await ask({ zip: "33020" }, authorization)).json()).toMatchObject({ error: expect.stringMatching(/couldn't find a loan/) });
+    const missing = await ask();
+    expect(missing.status).toBe(400);
+    expect(await missing.json()).toMatchObject({ error: expect.stringMatching(/signed authorization/) });
+    const sent = await ask({}, authorization);
+    expect(sent.status).toBe(200);
+    expect(await sent.json()).toMatchObject({ ok: true, receivedOn: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/), dueBy: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) });
+    const request = (await store.readBook()).book.payoffs.find((item) => item.dealId === "payoff-loan")!;
+    expect(request).toMatchObject({ channel: "web_form", status: "requested", requester: { kind: "title", company: "Sunshine Title", email: "terry@sunshine-title.example.com" }, check: { status: "pending", fileName: "authorization.pdf" } });
+    const stored = await prisma.document.findUniqueOrThrow({ where: { id: request.check!.documentId! } });
+    expect(stored).toMatchObject({ ownerId: "payoff-loan", documentType: "payoff_authorization" });
+    expect(stored.originalName).not.toContain("authorization.pdf");
+    // The borrower hears someone else asked; the title company gets a receipt with the due date.
+    expect(await prisma.notification.count({ where: { toEmail: "pat.payoff@example.com", eventCode: "payoff.third_party" } })).toBe(1);
+    expect(await prisma.notification.count({ where: { toEmail: "terry@sunshine-title.example.com", eventCode: "payoff.received" } })).toBe(1);
+
+    const staff = { id: "staff-p", name: "Sam Servicer", roleCodes: ["ADMIN_OWNER" as const] };
+    expect(await store.runAction(staff, { t: "issuePayoffLetter", payoffId: request.id, goodThrough, reason: "", by: "x" })).toMatchObject({ error: expect.stringMatching(/authorization first/) });
+    await store.runAction(staff, { t: "acceptPayoffCheck", payoffId: request.id, note: "Signed by the managing member", by: "x" });
+    const issued = await store.runAction(staff, { t: "issuePayoffLetter", payoffId: request.id, goodThrough, reason: "", by: "x" });
+    if ("error" in issued) throw new Error(issued.error);
+    const delivered = (await deliverPayoffLetter(request.id))!;
+    expect(delivered.payoffs.find((item) => item.id === request.id)!.letters![0]).toMatchObject({ number: 1, issuedBy: "Sam Servicer", delivery: { to: ["terry@sunshine-title.example.com"], result: "logged" } });
+    expect(await deliverPayoffLetter(request.id)).toBeNull();
+    expect(await prisma.payoffLink.count({ where: { payoffId: request.id, number: 1 } })).toBe(1);
+
+    const { link } = await links.createPayoffLink(request.id, 1, goodThrough);
+    const token = link.split("/").pop()!;
+    expect(JSON.stringify(((await prisma.$runCommandRaw({ find: "PayoffLink", filter: {} })) as { cursor: { firstBatch: unknown[] } }).cursor.firstBatch)).not.toContain(token);
+    expect(await links.openPayoffLink(token)).toMatchObject({ sent: 1, letter: { number: 1 } });
+    const file = await pdf.GET(new Request(`http://x/payoff-letter/${token}/pdf`), { params: Promise.resolve({ token }) });
+    expect(file.headers.get("content-type")).toBe("application/pdf");
+    expect(Buffer.from(await file.arrayBuffer()).subarray(0, 5).toString()).toBe("%PDF-");
+
+    // A payment ahead of the next due date lowers the payoff, so the letter is out of date and a corrected one goes out,
+    // with a copy to the borrower because the title company asked.
+    const monthly = fundedBalances(evaluate(deal.app), deal.app, deal.disbursedDraws).nextPayment;
+    await store.runAction(staff, { t: "recordPayment", dealId: "payoff-loan", amount: monthly, receivedOn: today, method: "wire", reference: "w1", by: "x" });
+    const corrected = await store.runAction(staff, { t: "issuePayoffLetter", payoffId: request.id, goodThrough, reason: "Corrected: a payment arrived", by: "x" });
+    if ("error" in corrected) throw new Error(corrected.error);
+    const second = (await deliverPayoffLetter(request.id))!.payoffs.find((item) => item.id === request.id)!.letters![1];
+    expect(second).toMatchObject({ number: 2, replaces: 1, delivery: { to: ["terry@sunshine-title.example.com", "pat.payoff@example.com"], result: "logged" } });
+    expect(second.total).toBeLessThan(delivered.payoffs.find((item) => item.id === request.id)!.letters![0].total);
+    // The link from the first email now opens the corrected letter.
+    expect(await links.openPayoffLink(token)).toMatchObject({ sent: 1, letter: { number: 2 } });
+
+    await prisma.payoffLink.updateMany({ where: { payoffId: request.id }, data: { expiresAt: new Date(Date.now() - 1000) } });
+    expect(await links.openPayoffLink(token)).toBeNull();
+    expect((await pdf.GET(new Request(`http://x/payoff-letter/${token}/pdf`), { params: Promise.resolve({ token }) })).status).toBe(404);
+    expect(await prisma.auditEvent.count({ where: { action: "payoff.letter_sent", entityId: "payoff-loan" } })).toBe(2);
+  });
+});
+
+describe("term sheets", () => {
+  it("are kept encrypted with the loan, and the nightly job reminds the borrower and then expires one left open", async () => {
+    const { demoBook } = await import("@/lib/book");
+    const store = await import("@/lib/book-store");
+    const { latestSheet, startingTerms } = await import("@/lib/term-sheets");
+    const { addDays, servicingDate } = await import("@/lib/servicing");
+    const pdf = await import("@/app/api/term-sheets/[dealId]/route");
+    const borrower = await prisma.user.create({ data: { email: "terry.terms@example.com", name: "Terry Terms", passwordHash: "x", roles: { create: [{ role: "BORROWER" }] } } });
+    const base = demoBook().deals.find((deal) => deal.id === "d1")!;
+    const deal = { ...base, id: "terms-loan", loanNumber: "LH-4001", borrowerId: borrower.id, borrowerName: "Terry Terms", brokerId: undefined, creditReview: { by: "Uma", at: new Date().toISOString(), note: "", verifiedDeals: base.app.verifiedDeals } };
+    await prisma.bookRecord.create({ data: { id: "deals:terms-loan", kind: "deals", data: JSON.parse(JSON.stringify(deal)) } });
+    const staff = { id: "staff-ts", name: "Uma Underwriter", roleCodes: ["ADMIN_OWNER" as const] };
+    const sent = await store.runAction(staff, { t: "issueTermSheet", dealId: "terms-loan", ...startingTerms(deal), prepay: "min3", by: "x" });
+    if ("error" in sent) throw new Error(sent.error);
+    const sheet = latestSheet((await store.readBook()).book.deals.find((item) => item.id === "terms-loan")!)!;
+    expect(sheet).toMatchObject({ version: 1, status: "sent", issuedBy: "Uma Underwriter", expiresOn: addDays(servicingDate(new Date()), 7), terms: { prepay: "3 months' minimum interest" } });
+    expect(JSON.stringify(((await prisma.$runCommandRaw({ find: "BookRecord", filter: { _id: "deals:terms-loan" } })) as { cursor: { firstBatch: unknown[] } }).cursor.firstBatch)).not.toContain("minimum interest");
+
+    const noon = (day: string) => new Date(`${day}T17:00:00Z`);
+    expect((await lib.jobs.runJob("termSheets", noon(addDays(sheet.expiresOn, -2)))).summary).toMatch(/0 term sheets expired, 1 reminders/);
+    expect(await prisma.notification.count({ where: { toEmail: "terry.terms@example.com", eventCode: "loan.term_sheet_expiring" } })).toBe(1);
+    expect((await lib.jobs.runJob("termSheets", noon(sheet.expiresOn))).summary).toMatch(/no term sheets to remind about or expire/);
+    expect((await lib.jobs.runJob("termSheets", noon(addDays(sheet.expiresOn, 1)))).summary).toMatch(/1 term sheets expired/);
+    const after = (await store.readBook()).book.deals.find((item) => item.id === "terms-loan")!;
+    expect(after.status).toBe("underwriting");
+    expect(latestSheet(after)!.status).toBe("expired");
+    expect(await prisma.notification.count({ where: { toEmail: "terry.terms@example.com", eventCode: "loan.term_sheet_expired" } })).toBe(1);
+
+    const sample = await pdf.GET(new Request("http://x/api/term-sheets/demo"), { params: Promise.resolve({ dealId: "demo" }) });
+    expect(sample.headers.get("content-type")).toBe("application/pdf");
+    expect(Buffer.from(await sample.arrayBuffer()).subarray(0, 5).toString()).toBe("%PDF-");
+  });
+});
+
+describe("conditions", () => {
+  it("keep the library as its own encrypted records, and a loan starting conditions gets it", async () => {
+    const { demoBook } = await import("@/lib/book");
+    const store = await import("@/lib/book-store");
+    const { DEFAULT_LIBRARY, templatesFor } = await import("@/lib/conditions");
+    const owner = { id: "owner-c", name: "Olive Owner", roleCodes: ["ADMIN_OWNER" as const] };
+    const saved = await store.runAction(owner, { t: "saveConditionTemplate", template: { title: "Flood zone certificate 8812", detail: "From the flood determination vendor.", category: "prior_to_docs", owner: "processor", needsUpload: false, products: [], dueDays: 5, active: true }, by: "x" });
+    if ("error" in saved) throw new Error(saved.error);
+    const library = (await store.readBook()).book.conditionLibrary;
+    expect(library).toHaveLength(DEFAULT_LIBRARY.length + 1);
+    expect(await prisma.bookRecord.count({ where: { kind: "conditionLibrary" } })).toBe(DEFAULT_LIBRARY.length + 1);
+    expect(JSON.stringify(((await prisma.$runCommandRaw({ find: "BookRecord", filter: { kind: "conditionLibrary" } })) as { cursor: { firstBatch: unknown[] } }).cursor.firstBatch)).not.toContain("Flood zone certificate 8812");
+
+    const base = demoBook().deals.find((deal) => deal.id === "d8")!;
+    await prisma.bookRecord.create({ data: { id: "deals:conditions-loan", kind: "deals", data: JSON.parse(JSON.stringify({ ...base, id: "conditions-loan", loanNumber: "LH-5001" })) } });
+    const started = await store.runAction(owner, { t: "advanceLoan", dealId: "conditions-loan" });
+    if ("error" in started) throw new Error(started.error);
+    const conditions = (await store.readBook()).book.deals.find((deal) => deal.id === "conditions-loan")!.conditions!;
+    expect(conditions.map((item) => item.title)).toEqual([...templatesFor(DEFAULT_LIBRARY, base.app.product).map((item) => item.title), "Flood zone certificate 8812"]);
+  });
+});
+
+describe("draw protections", () => {
+  it("warn the borrower once, 30 days before the builder's risk policy ends, from the nightly job", async () => {
+    const { demoBook } = await import("@/lib/book");
+    const store = await import("@/lib/book-store");
+    const { addDays, servicingDate } = await import("@/lib/servicing");
+    const borrower = await prisma.user.create({ data: { email: "ida.insured@example.com", name: "Ida Insured", passwordHash: "x", roles: { create: [{ role: "BORROWER" }] } } });
+    const base = demoBook().deals.find((deal) => deal.id === "d12")!;
+    const night = new Date("2026-11-10T06:00:00Z");
+    const today = servicingDate(night);
+    const deal = { ...base, id: "insured-loan", loanNumber: "LH-6001", borrowerId: borrower.id, lienFile: { ...base.lienFile!, insurance: { ...base.lienFile!.insurance!, expiresOn: addDays(today, 12) } } };
+    await prisma.bookRecord.create({ data: { id: "deals:insured-loan", kind: "deals", data: JSON.parse(JSON.stringify(deal)) } });
+    expect((await lib.jobs.runJob("insurance", night)).summary).toMatch(/insurance warnings/);
+    expect(await prisma.notification.count({ where: { toEmail: "ida.insured@example.com", eventCode: "insurance.expiring" } })).toBe(1);
+    expect((await store.readBook()).book.deals.find((item) => item.id === "insured-loan")!.lienFile!.insurance!.remindedOn).toBe(today);
+    await lib.jobs.runJob("insurance", new Date("2026-11-11T06:00:00Z"));
+    expect(await prisma.notification.count({ where: { toEmail: "ida.insured@example.com", eventCode: "insurance.expiring" } })).toBe(1);
+  });
+});
+
+describe("decline notices (Reg B)", () => {
+  it("start with the decline, kept encrypted with the loan, and the sample letter is a PDF", async () => {
+    const { demoBook } = await import("@/lib/book");
+    const store = await import("@/lib/book-store");
+    const route = await import("@/app/api/adverse-action/[dealId]/route");
+    const base = demoBook().deals.find((deal) => deal.id === "d5")!;
+    await prisma.bookRecord.create({ data: { id: "deals:declined-loan", kind: "deals", data: JSON.parse(JSON.stringify({ ...base, id: "declined-loan", loanNumber: "LH-7001", pricingException: undefined })) } });
+    const underwriter = { id: "uw-r", name: "Uma Underwriter", roleCodes: ["UNDERWRITER" as const] };
+    const declined = await store.runAction(underwriter, { t: "closeApplication", dealId: "declined-loan", outcome: "declined", reason: "leverage", note: "", by: "x", byTeam: true, revenue: { amount: 640_000, year: 2025 } });
+    if ("error" in declined) throw new Error(declined.error);
+    const stored = (await store.readBook()).book.deals.find((deal) => deal.id === "declined-loan")!;
+    expect(stored.adverseAction).toMatchObject({ large: false, reasons: ["Value of the collateral not sufficient for the loan amount requested"] });
+    expect(stored.revenue).toMatchObject({ amount: 640_000, year: 2025, by: "Uma Underwriter" });
+    expect(JSON.stringify(((await prisma.$runCommandRaw({ find: "BookRecord", filter: { _id: "deals:declined-loan" } })) as { cursor: { firstBatch: unknown[] } }).cursor.firstBatch)).not.toContain("collateral not sufficient");
+    const sample = await route.GET(new Request("http://x/api/adverse-action/demo"), { params: Promise.resolve({ dealId: "demo" }) });
+    expect(sample.headers.get("content-type")).toBe("application/pdf");
+  });
+});

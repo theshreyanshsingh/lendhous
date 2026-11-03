@@ -304,6 +304,9 @@ model PlatformSettings {
   // Spec v3 Section 1 placeholders: second approver above these amounts.
   dualApprovalDrawCents         Int      @default(5000000)
   dualApprovalDistributionCents Int      @default(25000000)
+  // The lender's mailing address and phone, printed on notices that need them (Reg B adverse action notices).
+  lenderAddress                 String   @default("")
+  lenderPhone                   String   @default("")
   updatedAt                     DateTime @updatedAt
 }
 
@@ -404,4 +407,17 @@ model ClosingLink {
   tokenHash String   @unique
   expiresAt DateTime
   createdAt DateTime @default(now())
+}
+
+// A link to a payoff letter, emailed with it (Fla. Stat. 701.04). Only the token's hash is kept. One row per letter sent,
+// all opening the request's newest letter, so whoever still has an old email sees that it was corrected.
+model PayoffLink {
+  id        String   @id @default(uuid()) @map("_id")
+  payoffId  String
+  number    Int
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([payoffId])
 }

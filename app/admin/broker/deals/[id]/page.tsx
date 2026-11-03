@@ -4,6 +4,7 @@ import { useParams } from "next/navigation";
 import { DocUpload } from "@/components/loan/DocUpload";
 import { LoanMessages } from "@/components/loan/LoanMessages";
 import { TermSheetCard } from "@/components/loan/TermSheetCard";
+import { BorrowerConditions } from "@/components/loan/BorrowerConditions";
 import Tracker from "@/components/Tracker";
 import { Badge, Section, Stat, points, productLabel, statusLabel, usd } from "@/components/ui";
 import { est, useStore } from "@/lib/store";
@@ -25,6 +26,7 @@ export default function BrokerDeal() {
         <div className="mt-4"><Tracker status={deal.status} /></div>
       </div>
       <TermSheetCard deal={deal} canSign={false} />
+      <BorrowerConditions deal={deal} canUpload />
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="min-w-0 space-y-4">
           <Section title="Documents" right={<span className="text-xs text-muted-foreground">{deal.docs.filter((doc) => doc.status === "accepted").length}/{deal.docs.length} accepted</span>}>

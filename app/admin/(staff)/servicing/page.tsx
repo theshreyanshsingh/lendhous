@@ -4,22 +4,25 @@ import { useEffect, useState } from "react";
 import { PageIntro } from "@/components/page-intro";
 import { RecordPayment } from "@/components/loan/RecordPayment";
 import { RecordPayoff } from "@/components/loan/RecordPayoff";
+import { dueLine, PayoffRequestCard } from "@/components/loan/PayoffRequests";
 import { Badge, Section, Stat, k, productLabel, statusLabel, usd } from "@/components/ui";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
-import { isDemoBook } from "@/lib/book";
+import { isDemoBook, serviceDay } from "@/lib/book";
 import { downloadCsv } from "@/lib/csv";
 import { fundedBalances } from "@/lib/engine";
 import type { Deal } from "@/lib/mockData";
+import { dueOf, latestLetter, receivedOf, requesterLine, requestState, staleLetter } from "@/lib/payoffs";
 import { lienReleaseDaysLeft, lienReleaseDue, lienReleaseOpen, maturityAfter, openExtension } from "@/lib/loan-exits";
-import { addDays, balanceOf, ledger, SERVICED, servicingDate } from "@/lib/servicing";
+import { addDays, balanceOf, ledger, SERVICED } from "@/lib/servicing";
 import { est, useStore } from "@/lib/store";
 
 export default function Servicing() {
   const { s, dispatch } = useStore();
-  const [paying, setPaying] = useState<{ id: string; payoff: boolean } | null>(null);
+  const [paying, setPaying] = useState<{ id: string; payoff: boolean; request?: string } | null>(null);
   // Set after the first render: the server and the browser can disagree about today's date.
   const [today, setToday] = useState("");
-  useEffect(() => { setToday(servicingDate(new Date())); }, []);
+  // The demo book keeps its own day, so its deadlines read the same every time.
+  useEffect(() => { setToday(serviceDay(s)); }, [s]);
   const loans = s.deals.filter((deal) => SERVICED.includes(deal.status));
   const books = new Map(loans.map((deal) => [deal.id, ledger(deal)]));
   const of = (deal: Deal) => books.get(deal.id)!;
@@ -27,7 +30,9 @@ export default function Servicing() {
   const fees = loans.reduce((sum, deal) => sum + of(deal).feesOwed, 0);
   const matured = loans.filter((deal) => of(deal).matured);
   const maturing = loans.filter((deal) => !of(deal).matured && of(deal).daysToMaturity <= 60);
-  const payoffs = s.payoffs.filter((payoff) => payoff.status !== "paid");
+  // Waiting for a letter first, by due date; then letters out, while the loan can still be paid off.
+  const payoffs = s.payoffs.filter((payoff) => payoff.status === "requested" || (payoff.status === "sent" && SERVICED.includes(s.deals.find((deal) => deal.id === payoff.dealId)?.status ?? ""))).sort((a, b) => (a.status === b.status ? dueOf(a).localeCompare(dueOf(b)) : a.status === "requested" ? -1 : 1));
+  const reviewing = s.payoffs.find((payoff) => payoff.id === paying?.request);
   const monthly = loans.reduce((sum, deal) => sum + fundedBalances(est(deal.app), deal.app, deal.disbursedDraws).nextPayment, 0);
   // The nightly job stamps each loan it checks. If the newest stamp is old, the job has stopped and nothing is going late.
   const checked = isDemoBook(s) ? undefined : loans.map((deal) => deal.servicedThrough).filter(Boolean).sort().pop();
@@ -52,13 +57,22 @@ export default function Servicing() {
         <ul className="divide-y divide-border">
           {payoffs.map((payoff) => {
             const deal = s.deals.find((item) => item.id === payoff.dealId)!;
+            const state = requestState(payoff);
+            const letter = latestLetter(payoff);
+            const due = dueLine(payoff, today);
+            const stale = today ? staleLetter(deal, payoff, today) : null;
             return (
               <li key={payoff.id} className="flex flex-wrap items-center justify-between gap-2 py-3" data-testid="payoff-row">
-                <div className="min-w-0"><Link href={`/admin/deals/${deal.id}`} className="font-medium text-link hover:underline">{deal.loanNumber}</Link> <span className="text-sm">· {payoff.by}</span><div className="text-xs text-muted-foreground">{usd(payoff.total, 2)} good through {payoff.goodThrough} · {usd(payoff.perDiem, 2)} a day after that</div>{payoff.status === "requested" && <div className={`text-xs ${today && addDays(payoff.requestedAt.slice(0, 10), 10) < today ? "text-bad" : "text-warn"}`} data-testid="payoff-due">Statement due by {addDays(payoff.requestedAt.slice(0, 10), 10)} (Florida gives 10 days)</div>}</div>
+                <div className="min-w-0">
+                  <Link href={`/admin/deals/${deal.id}`} className="font-medium text-link hover:underline">{deal.loanNumber}</Link> <span className="text-sm wrap-anywhere">· {requesterLine(payoff)}</span>
+                  <div className="text-xs text-muted-foreground">{letter ? `Letter ${letter.number}: ${usd(letter.total, 2)} through ${letter.goodThrough}` : `About ${usd(payoff.total, 2)} through ${payoff.goodThrough}`} · received {receivedOf(payoff)}</div>
+                  {payoff.status === "requested" && <div className={`text-xs ${due.tone}`} data-testid="payoff-due">{due.text}. Florida gives 10 days.</div>}
+                  {stale && <div className="text-xs text-bad" data-testid="payoff-row-stale">Out of date: now {usd(stale.now.total, 2)}. Send a corrected letter.</div>}
+                </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <Badge tone={payoff.status === "sent" ? "blue" : "amber"}>{statusLabel(payoff.status)}</Badge>
-                  {payoff.status === "requested" && <button className="btn-primary h-9! px-3! text-xs!" data-testid="send-payoff" onClick={() => dispatch({ t: "sendPayoff", payoffId: payoff.id })}>Mark statement sent</button>}
-                  {SERVICED.includes(deal.status) && <button className={`${payoff.status === "sent" ? "btn-primary" : "btn-ghost"} h-9! px-3! text-xs!`} data-testid="record-payoff" onClick={() => setPaying({ id: deal.id, payoff: true })}>Record payoff</button>}
+                  <Badge tone={stale ? "rose" : state.tone}>{stale ? "Correct it" : state.label}</Badge>
+                  <button className={`${payoff.status === "requested" || stale ? "btn-primary" : "btn-ghost"} h-9! px-3! text-xs!`} data-testid="open-payoff" onClick={() => setPaying({ id: deal.id, payoff: false, request: payoff.id })}>{payoff.status === "requested" ? "Review and send" : "Open"}</button>
+                  {payoff.status === "sent" && SERVICED.includes(deal.status) && <button className="btn-ghost h-9! px-3! text-xs!" data-testid="record-payoff" onClick={() => setPaying({ id: deal.id, payoff: true })}>Record payoff</button>}
                 </div>
               </li>
             );
@@ -124,12 +138,12 @@ export default function Servicing() {
         <Sheet open onOpenChange={(next) => { if (!next) setPaying(null); }}>
           <SheetContent side="right" className="w-full! gap-0! overflow-y-auto p-0 sm:max-w-lg!">
             <header className="border-b border-border p-5 pr-12">
-              <p className="eyebrow">{paying?.payoff ? "Record the payoff" : "Record a payment"}</p>
+              <p className="eyebrow">{reviewing ? "Payoff letter" : paying?.payoff ? "Record the payoff" : "Record a payment"}</p>
               <SheetTitle className="mt-2 font-heading text-2xl font-normal text-foreground wrap-anywhere">{open.loanNumber}</SheetTitle>
               <div className="mt-2 text-sm text-muted-foreground">{open.borrowerName} · {of(open).amountDue ? `${usd(of(open).amountDue, 2)} due now` : "current"}</div>
             </header>
             <div className="p-5">
-              {paying?.payoff ? <RecordPayoff deal={open} onDone={() => setPaying(null)} /> : <RecordPayment deal={open} onDone={() => setPaying(null)} />}
+              {reviewing ? <PayoffRequestCard request={reviewing} deal={open} /> : paying?.payoff ? <RecordPayoff deal={open} onDone={() => setPaying(null)} /> : <RecordPayment deal={open} onDone={() => setPaying(null)} />}
               <Link href={`/admin/deals/${open.id}`} className="mt-4 inline-block text-sm text-link hover:underline">Open the loan&apos;s full payment history</Link>
             </div>
           </SheetContent>

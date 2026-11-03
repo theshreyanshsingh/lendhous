@@ -8,6 +8,7 @@ import { Reveal } from "@/components/motion";
 import { Extensions } from "./Extensions";
 import { LoanDefault } from "./LoanDefault";
 import { PaidOff } from "./PaidOff";
+import { PayoffRequests } from "./PayoffRequests";
 import { RecordPayment } from "./RecordPayment";
 import { RecordPayoff } from "./RecordPayoff";
 
@@ -35,7 +36,7 @@ export function LoanLedger({ deal }: { deal: Deal }) {
   );
   return (
     <div className="space-y-4" data-testid="loan-ledger">
-      {paidOff ? <PaidOff deal={deal} side="team" /> : (
+      {paidOff ? <><PaidOff deal={deal} side="team" /><PayoffRequests deal={deal} /></> : (
         <>
           <Section title="Servicing" right={deal.status === "default" ? <Badge tone="rose">Default</Badge> : l.matured ? <Badge tone="rose">Matured</Badge> : l.paymentsLate ? <Badge tone="rose">{l.paymentsLate} past due</Badge> : <Badge tone="green">Current</Badge>}>
             <div className={statGrid}>
@@ -52,6 +53,7 @@ export function LoanLedger({ deal }: { deal: Deal }) {
           </Section>
           <Extensions deal={deal} side="team" />
           <LoanDefault deal={deal} />
+          <PayoffRequests deal={deal} />
           <Section title="Payoff">
             {!payingOff && (
               <div className="flex flex-wrap items-center justify-between gap-2 text-sm">

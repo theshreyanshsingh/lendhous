@@ -7,11 +7,16 @@ import { activeWire, fundsProblem, missingClosingItems, recordingProblem, verify
 import { latestScreening, ofacBlocker, sameResult, screeningSubjects } from "./ofac";
 import { cureError, defaultError, executeError, extensionFee, extensionRequestError, payoffError, payoffOn, PRE_FUNDING, reopenTo, closureReason, DEFAULT_KINDS } from "./loan-exits";
 import { canAdvance, nextStage } from "./loan-stages";
-import { seedDeals, seedBids, seedDraws, seedLoanSales, seedLoanOffers, seedMessages, seedPhotoRequests, DEMO_SPONSORS, capitalSources, partners as seedPartners, brokers as seedBrokers, loanBuyers, BORROWER_ID, DEMO_PARTNER_ID, DEMO_BUYER_ID, DEMO_BROKER_ID, type Broker, type ClosingAgent, type Closure, type Deal, type DefaultKind, type Bid, type DrawRequest, type DrawRequestLine, type LoanExtension, type LoanMessage, type Screening, type WireInstruction, type Partner, type PayoffRequest, type DocStatus, type CapitalSource, type LoanBuyer, type LoanOffer, type LoanSale, type LoanPayment, type PaymentMethod, type PhotoRequest, type RequestPhoto, type ScopeLine, type Sponsor } from "./mockData";
+import { issueProblem, latestLetter, letterFigures, receivedOnFor } from "./payoffs";
+import { isLarge, noticeDueOn, noticeOwed, reasonsProblem, requestProblem, startAdverseAction, STATEMENT_DAYS } from "./adverse-action";
+import { defaultNocExpiry, drawHolds, insuranceChecks, lienFileProblem, partiesFor, unreleasedHolds, waiverCheckProblem } from "./lien-law";
+import { addProblem, changeProblem, DEFAULT_LIBRARY, fromTemplate, libraryOf, missingStandard, templateProblem, templatesFor, type ConditionInput } from "./conditions";
+import { draftSheet, exceptionDecisionProblem, exceptionReasons, exceptionRequestProblem, issueProblem as sheetProblem, latestSheet, matrixOf, pricedApp, respondProblem, startingTerms, termSheetChecks, type Prepay } from "./term-sheets";
+import { seedDeals, seedBids, seedDraws, seedLoanSales, seedLoanOffers, seedMessages, seedPhotoRequests, DEMO_SPONSORS, capitalSources, partners as seedPartners, brokers as seedBrokers, loanBuyers, BORROWER_ID, DEMO_PARTNER_ID, DEMO_BUYER_ID, DEMO_BROKER_ID, type Broker, type ClosingAgent, type Closure, type Deal, type DefaultKind, type Bid, type DrawRequest, type DrawRequestLine, type LoanExtension, type LoanMessage, type Screening, type WireInstruction, type Partner, type PayoffChannel, type PayoffLetter, type PayoffRequest, type NoticeToOwner, type LienWaiver, type ConditionTemplate, type LoanCondition, type DocStatus, type CapitalSource, type LoanBuyer, type LoanOffer, type LoanSale, type LoanPayment, type PaymentMethod, type PhotoRequest, type RequestPhoto, type ScopeLine, type Sponsor } from "./mockData";
 import { BASE_VERSION, currentPricing, type PricingPayload } from "./pricing-versions";
-import { DEMO_SERVICING_DAY, firstDueDate, ledger, maturityOf, payoffFor, servicingDate, settle } from "./servicing";
+import { addDays, DEMO_SERVICING_DAY, firstDueDate, ledger, maturityOf, payoffFor, SERVICED, servicingDate, settle } from "./servicing";
 
-export interface Book { partnerId: string; buyerId: string; brokerId: string; borrowerId: string; loanPrefix: string; deals: Deal[]; bids: Bid[]; partners: Partner[]; buyers: LoanBuyer[]; brokers: Broker[]; sales: LoanSale[]; offers: LoanOffer[]; draws: DrawRequest[]; photoRequests: PhotoRequest[]; payoffs: PayoffRequest[]; messages: LoanMessage[]; sources: CapitalSource[]; audit: { at: string; text: string }[]; sample?: boolean; /** The pricing its loans use, as sent to a browser. Not part of the records. */ pricing?: PricingPayload }
+export interface Book { partnerId: string; buyerId: string; brokerId: string; borrowerId: string; loanPrefix: string; deals: Deal[]; bids: Bid[]; partners: Partner[]; buyers: LoanBuyer[]; brokers: Broker[]; sales: LoanSale[]; offers: LoanOffer[]; draws: DrawRequest[]; photoRequests: PhotoRequest[]; payoffs: PayoffRequest[]; messages: LoanMessage[]; sources: CapitalSource[]; conditionLibrary: ConditionTemplate[]; audit: { at: string; text: string }[]; sample?: boolean; /** The pricing its loans use, as sent to a browser. Not part of the records. */ pricing?: PricingPayload }
 
 export type BookAction =
   | { t: "submitApp"; app: Application; address: string; city: string; zip: string; entityName: string; exitStrategy: string; client?: { name: string; borrowerId?: string; brokerId?: string; brokerPoints?: number }; source?: string; sponsor?: Sponsor }
@@ -45,6 +50,22 @@ export type BookAction =
   | { t: "removeSource"; id: string }
   | { t: "saveFirm"; kind: "partner" | "buyer"; id: string; name: string; buyBox: BuyBox }
   | { t: "acceptTermSheet"; dealId: string; signedName: string }
+  | { t: "addCondition"; dealId: string; condition: ConditionInput; by: string }
+  | { t: "clearCondition"; dealId: string; conditionId: string; note: string; by: string }
+  | { t: "returnCondition"; dealId: string; conditionId: string; reason: string; by: string }
+  | { t: "waiveCondition"; dealId: string; conditionId: string; reason: string; by: string }
+  /** A file sent in for a condition. The server records it once the file is stored; a demo browser keeps the name only. */
+  | { t: "conditionFile"; dealId: string; conditionId: string; fileName: string; documentId?: string; by: string }
+  /** A standard condition in the library, new or changed. Retiring one sets active to false; nothing is deleted. */
+  | { t: "saveConditionTemplate"; template: Pick<ConditionTemplate, "title" | "detail" | "category" | "owner" | "needsUpload" | "products" | "dueDays" | "active"> & { id?: string }; by: string }
+  /** The underwriter's terms go out as the next version (Spec A9), setting the loan's rate and points. */
+  | { t: "issueTermSheet"; dealId: string; rate: number; points: number; termMonths: number; prepay: Prepay; by: string }
+  | { t: "requestPricingException"; dealId: string; rate: number; points: number; termMonths: number; prepay: Prepay; note: string; by: string }
+  | { t: "decidePricingException"; dealId: string; approve: boolean; note: string; by: string }
+  /** The borrower sends the term sheet back to underwriting with what they'd like changed. */
+  | { t: "requestTermSheetChanges"; dealId: string; note: string; by: string }
+  /** The nightly check: reminds borrowers of term sheets about to expire and expires the ones past their last day. */
+  | { t: "checkTermSheets"; asOf: string }
   | { t: "saveScope"; dealId: string; scope: ScopeLine[]; summary: string }
   | { t: "requestDraw"; dealId: string; by: string; note: string; contact: string; photos: string[]; photoIds?: string[]; lines: DrawRequestLine[] }
   | { t: "askForPhotos"; requestId: string; dealId: string; drawId?: string; to: string; email?: string; who: PhotoRequest["who"]; scopeIds: string[]; by: string; byTeam: boolean; expiresAt: string }
@@ -58,17 +79,50 @@ export type BookAction =
   | { t: "approveDrawRequest"; drawId: string; by: string }
   | { t: "rejectDraw"; drawId: string; reason: string }
   | { t: "releaseDraw"; drawId: string }
+  /** The loan's lien file: the contractor and the Notice of Commencement (Fla. Stat. 713.13). */
+  | { t: "saveLienFile"; dealId: string; contractor: string; noc?: { recordedOn: string; reference: string; expiresOn: string; commencedOn?: string; lenderNamed: boolean; mortgageFirst?: boolean }; mortgageRecordedOn?: string; by: string }
+  | { t: "addNoticeToOwner"; dealId: string; lienor: string; role: NoticeToOwner["role"]; servedOn: string; by: string }
+  | { t: "saveInsurance"; dealId: string; kind: "builders_risk" | "hazard"; carrier: string; policy: string; expiresOn: string; by: string }
+  /** A lien waiver or the final affidavit came in for a draw. The server records it once the file is stored; a demo browser keeps the name only. */
+  | { t: "lienWaiverReceived"; drawId: string; partyKey: string; kind: "progress" | "final"; fileName: string; documentId?: string; by: string }
+  | { t: "affidavitReceived"; drawId: string; fileName: string; documentId?: string; by: string }
+  | { t: "checkLienWaiver"; drawId: string; waiverId: string; amount: number; throughOn?: string; conditional: boolean; by: string }
+  | { t: "rejectLienWaiver"; drawId: string; waiverId: string; reason: string; by: string }
+  | { t: "checkAffidavit"; drawId: string; unpaidLienors: boolean; by: string }
+  | { t: "setFinalDraw"; drawId: string; final: boolean }
+  /** An owner releases a draw past the lien-law holds standing now, with why. */
+  | { t: "overrideDrawHolds"; drawId: string; reason: string; by: string }
+  /** The nightly check: warns about policies lapsing within the notice period, and lapsed ones, once each. */
+  | { t: "checkInsurance"; asOf: string }
   | { t: "recordPayment"; dealId: string; amount: number; receivedOn: string; method: PaymentMethod; reference: string; by: string }
   | { t: "reversePayment"; dealId: string; paymentId: string; reason: string; by: string }
   | { t: "waiveLateFee"; dealId: string; due: string; reason: string; by: string }
   /** The nightly check: brings every serviced loan up to a day. Only the server's job sends it. */
   | { t: "settleLoans"; asOf: string }
   | { t: "requestPayoff"; dealId: string; goodThrough: string; by: string }
-  | { t: "sendPayoff"; payoffId: string }
-  | { t: "recordPayoff"; dealId: string; amount: number; receivedOn: string; method: PaymentMethod; reference: string; by: string }
+  /** A written request that came by email, fax, mail or courier, logged by staff with the day it was sent. */
+  | { t: "logPayoffRequest"; dealId: string; goodThrough: string; channel: "email" | "fax" | "mail" | "courier"; sentOn: string; requester: PayoffRequester; authorized: boolean; note: string; by: string }
+  /** From the public payoff request form. Only the server makes one: it matched the loan and stored the authorization. */
+  | { t: "submitPayoffRequest"; dealId: string; goodThrough: string; sentOn: string; requester: PayoffRequester; check?: NonNullable<PayoffRequest["check"]>; note: string }
+  | { t: "acceptPayoffCheck"; payoffId: string; note: string; by: string }
+  | { t: "refusePayoff"; payoffId: string; reason: string; by: string }
+  | { t: "issuePayoffLetter"; payoffId: string; goodThrough: string; reason: string; by: string }
+  /** How emailing a letter went. Only the server knows. */
+  | { t: "payoffLetterDelivered"; payoffId: string; number: number; to: string[]; result: "sent" | "logged" | "failed" }
+  /** onLetter: the payoff was paid on that letter, which may be less than the payoff that day (701.04(1)(c)3). */
+  | { t: "recordPayoff"; dealId: string; amount: number; receivedOn: string; method: PaymentMethod; reference: string; by: string; onLetter?: { payoffId: string; number: number } }
   | { t: "recordLienRelease"; dealId: string; step: "sent" | "recorded"; on: string; reference: string; by: string }
   /** byTeam comes from the session, never the request: it decides who hears about it. */
-  | { t: "closeApplication"; dealId: string; outcome: "declined" | "withdrawn"; reason: string; note: string; by: string; byTeam: boolean }
+  | { t: "closeApplication"; dealId: string; outcome: "declined" | "withdrawn"; reason: string; note: string; by: string; byTeam: boolean; revenue?: { amount: number; year: number } }
+  /** Reg B (12 CFR 1002.9): the day the application became complete, the business's revenue, and the decline notice. */
+  | { t: "markApplicationComplete"; dealId: string; on: string; by: string }
+  | { t: "saveRevenue"; dealId: string; amount: number; year: number; by: string }
+  | { t: "saveAdverseReasons"; dealId: string; reasons: string[]; by: string }
+  /** The notice or statement went out. The server records it after emailing the PDF; a demo browser just marks it. */
+  | { t: "recordAdverseNotice"; dealId: string; kind: "notice" | "statement"; method: "email" | "mail"; to: string[]; result?: "sent" | "logged" | "failed"; by: string }
+  | { t: "recordReasonsRequest"; dealId: string; receivedOn: string; by: string }
+  /** Keeps the loan's records past retention while an investigation or lawsuit is pending. An empty reason lifts it. */
+  | { t: "setLegalHold"; dealId: string; reason: string; by: string }
   | { t: "reopenApplication"; dealId: string; by: string }
   | { t: "declareDefault"; dealId: string; kind: DefaultKind; effectiveOn: string; note: string; by: string }
   | { t: "cureDefault"; dealId: string; note: string; by: string }
@@ -93,6 +147,8 @@ export type BookAction =
   | { t: "loadSample" }
   | { t: "clearSample" }
   | { t: "reset" };
+
+export type PayoffRequester = NonNullable<PayoffRequest["requester"]>;
 
 const now = () => new Date().toISOString();
 // Two records made in the same millisecond must not share an id, or the second would overwrite the first once saved.
@@ -123,13 +179,53 @@ export function demoBook(): Book {
     const extension: LoanExtension = { id: "ext-demo-1", months: 3, reason: "Kitchen cabinets are back-ordered; listing in February (FAKE)", requestedBy: "Pat Processor (FAKE)", requestedAt: "2026-10-28T10:00:00-07:00", fee: extensionFee(deal, 3), fromMaturity: maturityOf(deal), status: "requested", approvers: [] };
     return { ...deal, extensions: [extension] };
   });
+  // Term sheets: two waiting for the borrower (one is the demo borrower's), one accepted, and an underwriter's request to
+  // price below the matrix waiting for an owner.
+  for (const [i, d] of deals.entries()) {
+    if (d.status === "term_sheet_issued" || d.status === "term_sheet_accepted") {
+      const sheet = draftSheet(d, startingTerms(d), "Uma Underwriter (FAKE)", "2026-10-28", "2026-10-28T10:00:00-07:00");
+      const accepted = d.status === "term_sheet_accepted" ? { status: "accepted" as const, response: { at: "2026-10-29T09:00:00-07:00", by: d.borrowerName, signedName: d.termSheetSignedBy ?? d.borrowerName } } : {};
+      deals[i] = { ...d, app: { ...d.app, termRate: sheet.terms.rate, termPoints: sheet.terms.pointsPct }, termSheets: [{ ...sheet, ...accepted }] };
+    }
+    // Conditions: d3 is working through them; d7 and d15 have cleared everything before closing.
+    if (d.id === "d3" || d.id === "d7" || d.id === "d15") {
+      const conditions = templatesFor(DEFAULT_LIBRARY, d.app.product).map((template, n): LoanCondition => {
+        const made = fromTemplate(template, `cond-demo-${d.id}-${n}`, "Pat Processor (FAKE)", "2026-10-26", "2026-10-26T09:00:00-07:00");
+        if (template.category === "post_closing") return made;
+        if (d.id !== "d3") return { ...made, status: "cleared", cleared: { by: "Uma Underwriter (FAKE)", at: "2026-10-29T11:00:00-07:00", note: "" } };
+        if (template.id === "std-entity") return { ...made, status: "cleared", files: [{ fileName: "Operating agreement (FAKE).pdf", at: "2026-10-27T10:00:00-07:00", by: d.borrowerName }], cleared: { by: "Pat Processor (FAKE)", at: "2026-10-28T09:00:00-07:00", note: "Good standing checked on Sunbiz" } };
+        if (template.id === "std-insurance") return { ...made, status: "submitted", files: [{ fileName: "Insurance binder (FAKE).pdf", at: "2026-10-30T16:00:00-07:00", by: d.borrowerName }] };
+        return made;
+      });
+      deals[i] = { ...deals[i], conditions };
+    }
+    // Lien files on the funded rehab and construction loans: the Notice of Commencement recorded the day after the
+    // mortgage, naming LendHous. One supplier has served a notice to owner, one policy ends soon and one has lapsed.
+    if (SERVICED.includes(d.status) && (d.app.product === "fix_flip" || d.app.product === "ground_up")) {
+      const insuranceEnds = d.id === "d9" ? "2026-11-20" : d.id === "d13" ? "2026-10-15" : "2027-06-30";
+      deals[i] = { ...deals[i], lienFile: {
+        contractor: `${d.entityName.split(" ")[0]} Construction (FAKE)`, mortgageRecordedOn: d.closingDate,
+        noc: { recordedOn: addDays(d.closingDate, 1), reference: `OR ${d.loanNumber.slice(-4)}/${d.closingDate.slice(5, 7)} (FAKE)`, expiresOn: "2027-09-30", commencedOn: addDays(d.closingDate, 7), lenderNamed: true, by: "Pat Processor (FAKE)", at: `${d.closingDate}T16:00:00-07:00` },
+        notices: d.id === "d12" ? [{ id: "nto-demo-1", lienor: "Coastal Lumber Supply (FAKE)", role: "supplier", servedOn: "2026-06-10", by: "Pat Processor (FAKE)", at: "2026-06-12T10:00:00-07:00" }] : [],
+        insurance: { kind: d.app.product === "ground_up" ? "builders_risk" : "hazard", carrier: "Sample Mutual (FAKE)", policy: `SM-${d.loanNumber.slice(-4)}`, expiresOn: insuranceEnds, by: "Pat Processor (FAKE)", at: `${d.closingDate}T16:00:00-07:00` },
+      } };
+    }
+    if (d.id === "d5") {
+      const input = { ...startingTerms(d), rate: matrixOf(d.app).rate[0] - 0.5 };
+      deals[i] = { ...d, pricingException: { rate: input.rate, points: input.points, termMonths: input.termMonths, reasons: exceptionReasons(d.app, input), note: "Fourth loan with us, all paid early; a competing offer at this rate (FAKE)", requestedBy: "Uma Underwriter (FAKE)", requestedAt: "2026-10-30T15:00:00-07:00", status: "pending" } };
+    }
+  }
   const quoted = payoffFor(deals.find((d) => d.id === "d11")!, "2026-11-15");
-  const payoffs: PayoffRequest[] = [{ id: "payoff-1", dealId: "d11", goodThrough: "2026-11-15", requestedAt: "2026-10-22T10:00:00-07:00", by: "Avery Mock (FAKE)", status: "requested", ...quoted }];
-  return { partnerId: DEMO_PARTNER_ID, buyerId: DEMO_BUYER_ID, brokerId: DEMO_BROKER_ID, borrowerId: BORROWER_ID, loanPrefix: DEMO_PREFIX, deals, bids: seedBids, partners: seedPartners, buyers: loanBuyers, brokers: seedBrokers, sales: seedLoanSales, offers: seedLoanOffers, draws: seedDraws, photoRequests: seedPhotoRequests, payoffs, messages: seedMessages, sources: capitalSources, audit: [{ at: SEED_AT, text: "Demo data loaded (all records are FAKE)" }] };
+  // One from a borrower's portal, due in two days, and one from a title company whose authorization still needs a look.
+  const payoffs: PayoffRequest[] = [
+    { id: "payoff-1", dealId: "d11", goodThrough: "2026-11-15", requestedAt: "2026-10-22T10:00:00-07:00", by: "Avery Mock (FAKE)", status: "requested", receivedOn: "2026-10-22", channel: "portal", requester: { kind: "borrower", name: "Avery Mock (FAKE)" }, ...quoted },
+    { id: "payoff-2", dealId: "d10", goodThrough: "2026-11-20", requestedAt: "2026-10-30T14:00:00-07:00", by: "Dana Escrow (FAKE)", status: "requested", receivedOn: "2026-10-30", channel: "web_form", requester: { kind: "title", name: "Dana Escrow (FAKE)", company: "Sample Title & Escrow (FAKE)", email: "closings@sample-title.test", phone: "(954) 555-0142", fileNumber: "ST-1010-B" }, check: { status: "pending", note: "Signed authorization uploaded with the request.", fileName: "borrower-authorization.pdf" }, ...payoffFor(deals.find((d) => d.id === "d10")!, "2026-11-20") },
+  ];
+  return { partnerId: DEMO_PARTNER_ID, buyerId: DEMO_BUYER_ID, brokerId: DEMO_BROKER_ID, borrowerId: BORROWER_ID, loanPrefix: DEMO_PREFIX, deals, bids: seedBids, partners: seedPartners, buyers: loanBuyers, brokers: seedBrokers, sales: seedLoanSales, offers: seedLoanOffers, draws: seedDraws, photoRequests: seedPhotoRequests, payoffs, messages: seedMessages, sources: capitalSources, conditionLibrary: DEFAULT_LIBRARY, audit: [{ at: SEED_AT, text: "Demo data loaded (all records are FAKE)" }] };
 }
 
 /** A book with no records: a new database, or an account with nothing to see yet. */
-export const emptyBook = (): Book => ({ partnerId: "", buyerId: "", brokerId: "", borrowerId: "", loanPrefix: "LH-", deals: [], bids: [], partners: [], buyers: [], brokers: [], sales: [], offers: [], draws: [], photoRequests: [], payoffs: [], messages: [], sources: [], audit: [] });
+export const emptyBook = (): Book => ({ partnerId: "", buyerId: "", brokerId: "", borrowerId: "", loanPrefix: "LH-", deals: [], bids: [], partners: [], buyers: [], brokers: [], sales: [], offers: [], draws: [], photoRequests: [], payoffs: [], messages: [], sources: [], conditionLibrary: [], audit: [] });
 
 export function reducer(s: Book, a: BookAction): Book {
   const log = (text: string) => [{ at: now(), text }, ...s.audit].slice(0, 50);
@@ -222,7 +318,9 @@ export function reducer(s: Book, a: BookAction): Book {
     }
     case "updateDealNumbers": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
-      const app = { ...deal.app, ...a.changes };
+      // The pricing version and the term sheet's rate and points are set by their own steps, never as a number edit.
+      const { pricingVersion: _version, termRate: _rate, termPoints: _points, ...changes } = a.changes;
+      const app = { ...deal.app, ...changes };
       const holdback = evaluate(app).holdback;
       // A new rehab budget starts its scope of work over, because the old split no longer adds up.
       const scope = holdback === evaluate(deal.app).holdback ? deal.scope : defaultScope(app.product, holdback);
@@ -260,7 +358,9 @@ export function reducer(s: Book, a: BookAction): Book {
       // From here the loan is priced on what was checked, not on what was claimed.
       const app = deal.sponsor ? withSponsor(deal.app, deal.sponsor, new Date(), true) : deal.app;
       const verifiedDeals = deal.sponsor ? countedDeals(deal.sponsor.trackRecord, new Date(), true).deals : deal.app.verifiedDeals;
-      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, app, creditReview: { by: a.by, at: now(), note: a.note, verifiedDeals } })), audit: log(`${deal.loanNumber}: credit review signed off by ${a.by}`) };
+      // A signed-off credit review means the application had what a decision needs: it's complete by then at the latest.
+      const completed = deal.completed ?? { at: now(), on: serviceDay(s), by: a.by };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, app, creditReview: { by: a.by, at: now(), note: a.note, verifiedDeals }, completed })), audit: log(`${deal.loanNumber}: credit review signed off by ${a.by}`) };
     }
     case "reopenCreditReview": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
@@ -277,12 +377,14 @@ export function reducer(s: Book, a: BookAction): Book {
     case "advanceLoan": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
       const stage = nextStage(deal, evaluate(deal.app), serviceDay(s));
-      if (!stage || !canAdvance(stage)) return s;
+      // A term sheet goes out with its terms through issueTermSheet, never as a bare status change.
+      if (!stage || !canAdvance(stage) || stage.to === "term_sheet_issued") return s;
       const funding = stage.to === "funded";
       const today = serviceDay(s);
-      // Clearing conditions starts the title company's checklist.
+      // Clearing conditions starts the title company's checklist and adds the library's standard conditions (Spec 4.3).
       const docs = stage.to === "conditions" ? [...deal.docs, ...missingClosingItems(deal)] : deal.docs;
-      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, status: stage.to, daysInStage: 0, docs, ...(funding ? { capitalStatus: "funded" as const, closingDate: today, nextPaymentDue: firstDueDate(today) } : {}) })), audit: log(`${deal.loanNumber}: moved to ${stage.to.replace(/_/g, " ")}`) };
+      const conditions = stage.to === "conditions" ? [...(deal.conditions ?? []), ...missingStandard(deal, libraryOf(s)).map((template) => fromTemplate(template, `cond${uid()}`, "LendHous", today, now()))] : deal.conditions;
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, status: stage.to, daysInStage: 0, docs, conditions, ...(funding ? { capitalStatus: "funded" as const, closingDate: today, nextPaymentDue: firstDueDate(today) } : {}) })), audit: log(`${deal.loanNumber}: moved to ${stage.to.replace(/_/g, " ")}`) };
     }
     case "repriceLoan": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
@@ -290,10 +392,83 @@ export function reducer(s: Book, a: BookAction): Book {
       if (deal.app.pricingVersion === to) return s;
       return { ...s, deals: upd(a.dealId, (d) => ({ ...d, app: { ...d.app, pricingVersion: to } })), audit: log(`${deal.loanNumber}: repriced on ${to} by ${a.by}`) };
     }
+    case "addCondition": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const today = serviceDay(s);
+      if (addProblem(deal, a.condition, today)) return s;
+      const template = a.condition.templateId ? libraryOf(s).find((item) => item.id === a.condition.templateId) : undefined;
+      const added: LoanCondition = template
+        ? { ...fromTemplate(template, `cond${uid()}`, a.by, today, now()), ...(a.condition.dueOn ? { dueOn: a.condition.dueOn } : {}) }
+        : { id: `cond${uid()}`, title: a.condition.title.trim(), detail: a.condition.detail.trim(), category: a.condition.category, owner: a.condition.owner, needsUpload: a.condition.needsUpload, ...(a.condition.dueOn ? { dueOn: a.condition.dueOn } : {}), status: "open", addedBy: a.by, addedAt: now(), files: [] };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, conditions: [...(d.conditions ?? []), added] })), audit: log(`${deal.loanNumber}: condition added: ${added.title}`) };
+    }
+    case "clearCondition": case "returnCondition": case "waiveCondition": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const condition = deal.conditions?.find((item) => item.id === a.conditionId);
+      const to = a.t === "clearCondition" ? "cleared" : a.t === "waiveCondition" ? "waived" : "returned";
+      const text = a.t === "clearCondition" ? a.note : a.reason;
+      if (changeProblem(condition, to, text)) return s;
+      const stamp = { by: a.by, at: now() };
+      const change: Partial<LoanCondition> = a.t === "clearCondition" ? { status: "cleared", cleared: { ...stamp, note: a.note.trim() } } : a.t === "waiveCondition" ? { status: "waived", waived: { ...stamp, reason: a.reason.trim() } } : { status: "open", returned: { ...stamp, reason: a.reason.trim() } };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, conditions: d.conditions!.map((item) => (item.id === a.conditionId ? { ...item, ...change } : item)) })), audit: log(`${deal.loanNumber}: condition ${to}: ${condition!.title}`) };
+    }
+    case "conditionFile": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const condition = deal.conditions?.find((item) => item.id === a.conditionId);
+      if (!condition || condition.status === "cleared" || condition.status === "waived") return s;
+      const file = { fileName: a.fileName, ...(a.documentId ? { documentId: a.documentId } : {}), at: now(), by: a.by };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, conditions: d.conditions!.map((item) => (item.id === a.conditionId ? { ...item, status: "submitted" as const, files: [...item.files, file] } : item)) })), audit: log(`${deal.loanNumber}: file sent for ${condition.title}`) };
+    }
+    case "saveConditionTemplate": {
+      if (templateProblem(a.template)) return s;
+      const library = libraryOf(s);
+      const prior = a.template.id ? library.find((item) => item.id === a.template.id) : undefined;
+      if (a.template.id && !prior) return s;
+      const saved: ConditionTemplate = { ...a.template, id: prior?.id ?? `tpl${uid()}`, title: a.template.title.trim(), detail: a.template.detail.trim(), version: (prior?.version ?? 0) + 1, updatedBy: a.by, updatedAt: now() };
+      return { ...s, conditionLibrary: prior ? library.map((item) => (item.id === prior.id ? saved : item)) : [...library, saved], audit: log(`Conditions library: ${prior ? (saved.active ? "changed" : prior.active ? "retired" : "changed") : "added"} "${saved.title}" (version ${saved.version})`) };
+    }
     case "acceptTermSheet": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
-      if (deal.status !== "term_sheet_issued" || !a.signedName.trim()) return s;
-      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, status: "term_sheet_accepted", daysInStage: 0, termSheetSignedBy: a.signedName.trim(), termSheetSignedAt: now() })), audit: log(`${deal.loanNumber}: term sheet accepted by ${a.signedName.trim()}`) };
+      if (respondProblem(deal, serviceDay(s)) || !a.signedName.trim()) return s;
+      const at = now(); const name = a.signedName.trim();
+      const e = evaluate(deal.app);
+      // Accepting locks the rate and points: nothing priced later moves them (Spec A9).
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, app: { ...d.app, termRate: e.rate, termPoints: e.pointsPct }, status: "term_sheet_accepted", daysInStage: 0, termSheetSignedBy: name, termSheetSignedAt: at,
+        termSheets: d.termSheets?.map((x, i, all) => (i === all.length - 1 ? { ...x, status: "accepted" as const, response: { at, by: name, signedName: name } } : x)) })), audit: log(`${deal.loanNumber}: term sheet${latestSheet(deal) ? ` ${latestSheet(deal)!.version}` : ""} accepted by ${name}`) };
+    }
+    case "issueTermSheet": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const input = { rate: a.rate, points: a.points, termMonths: a.termMonths, prepay: a.prepay };
+      if (sheetProblem(deal, input)) return s;
+      const sheet = draftSheet(deal, input, a.by, serviceDay(s), now());
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, app: pricedApp(d.app, input), status: "term_sheet_issued", daysInStage: 0, pricingException: undefined, termSheetSignedBy: undefined, termSheetSignedAt: undefined,
+        termSheets: [...(d.termSheets ?? []).map((x) => (x.status === "sent" ? { ...x, status: "superseded" as const } : x)), sheet] })),
+        audit: log(`${deal.loanNumber}: term sheet ${sheet.version} sent at ${sheet.terms.rate}% and ${sheet.terms.pointsPct} points, open until ${sheet.expiresOn}`) };
+    }
+    case "requestPricingException": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const input = { rate: a.rate, points: a.points, termMonths: a.termMonths, prepay: a.prepay };
+      if (exceptionRequestProblem(deal, input, a.note)) return s;
+      const pricingException = { rate: a.rate, points: a.points, termMonths: a.termMonths, reasons: exceptionReasons(deal.app, input), note: a.note.trim(), requestedBy: a.by, requestedAt: now(), status: "pending" as const };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, pricingException })), audit: log(`${deal.loanNumber}: pricing exception asked for by ${a.by}: ${a.rate}% and ${a.points} points`) };
+    }
+    case "decidePricingException": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (exceptionDecisionProblem(deal, a.by)) return s;
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, pricingException: { ...d.pricingException!, status: a.approve ? "approved" : "declined", decidedBy: a.by, decidedAt: now(), decision: a.note.trim() } })), audit: log(`${deal.loanNumber}: pricing exception ${a.approve ? "approved" : "declined"} by ${a.by}`) };
+    }
+    case "requestTermSheetChanges": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (respondProblem(deal, serviceDay(s)) || !a.note.trim()) return s;
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, status: "underwriting", daysInStage: 0, termSheets: d.termSheets?.map((x, i, all) => (i === all.length - 1 ? { ...x, status: "changes_requested" as const, response: { at: now(), by: a.by, note: a.note.trim() } } : x)) })), audit: log(`${deal.loanNumber}: changes asked for on the term sheet`) };
+    }
+    case "checkTermSheets": {
+      const { remind, expire } = termSheetChecks(s.deals, a.asOf);
+      if (!remind.length && !expire.length) return s;
+      const last = (d: Deal, change: Partial<NonNullable<Deal["termSheets"]>[number]>) => d.termSheets!.map((x, i, all) => (i === all.length - 1 ? { ...x, ...change } : x));
+      // An expired term sheet sends the loan back to underwriting for a new one (Spec 4.3).
+      return { ...s, deals: s.deals.map((d) => (expire.includes(d.id) ? { ...d, status: "underwriting" as const, daysInStage: 0, termSheets: last(d, { status: "expired" }) } : remind.includes(d.id) ? { ...d, termSheets: last(d, { remindedOn: a.asOf }) } : d)),
+        audit: [...expire.map((id) => ({ at: now(), text: `${s.deals.find((d) => d.id === id)!.loanNumber}: term sheet expired` })), ...s.audit].slice(0, 50) };
     }
     case "saveScope": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
@@ -333,12 +508,103 @@ export function reducer(s: Book, a: BookAction): Book {
     case "releaseDraw": {
       const draw = s.draws.find((d) => d.id === a.drawId)!; const deal = s.deals.find((d) => d.id === draw.dealId)!;
       // No money goes out to anyone not screened in the last few days.
-      if (draw.status !== "approved" || !draw.approved || ofacBlocker(deal, serviceDay(s))) return s;
+      // Nor before the lien law's protections are in place, unless an owner released it past them (Fla. Stat. ch. 713).
+      if (draw.status !== "approved" || !draw.approved || ofacBlocker(deal, serviceDay(s)) || unreleasedHolds(deal, draw, serviceDay(s)).length) return s;
       return { ...s,
         draws: s.draws.map((d) => (d.id === a.drawId ? { ...d, status: "funded", fundedAt: now() } : d)),
         // Brought up to today first, so the payments already due keep the amount they owed before this draw.
         deals: upd(deal.id, (d) => ({ ...settle(d, serviceDay(s)), disbursedDraws: (d.disbursedDraws ?? 0) + draw.approved!, scope: releaseToScope(d.scope ?? [], d, draw) })),
         audit: log(`${deal.loanNumber}: draw of $${draw.approved.toLocaleString()} released`) };
+    }
+    case "saveLienFile": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (lienFileProblem(a, serviceDay(s))) return s;
+      const noc = a.noc ? { ...a.noc, reference: a.noc.reference.trim(), expiresOn: a.noc.expiresOn || defaultNocExpiry(a.noc.recordedOn), by: a.by, at: now() } : deal.lienFile?.noc;
+      const lienFile = { notices: [], ...deal.lienFile, contractor: a.contractor.trim(), noc, ...(a.mortgageRecordedOn ? { mortgageRecordedOn: a.mortgageRecordedOn } : {}) };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, lienFile })), audit: log(`${deal.loanNumber}: lien file saved${a.noc ? `, notice of commencement recorded ${a.noc.recordedOn}` : ""}`) };
+    }
+    case "addNoticeToOwner": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (!a.lienor.trim() || a.servedOn > serviceDay(s)) return s;
+      const notice: NoticeToOwner = { id: `nto${uid()}`, lienor: a.lienor.trim(), role: a.role, servedOn: a.servedOn, by: a.by, at: now() };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, lienFile: { ...d.lienFile, notices: [...(d.lienFile?.notices ?? []), notice] } })), audit: log(`${deal.loanNumber}: notice to owner from ${notice.lienor}`) };
+    }
+    case "saveInsurance": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (!a.carrier.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(a.expiresOn)) return s;
+      const insurance = { kind: a.kind, carrier: a.carrier.trim(), policy: a.policy.trim(), expiresOn: a.expiresOn, by: a.by, at: now() };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, lienFile: { notices: [], ...d.lienFile, insurance } })), audit: log(`${deal.loanNumber}: ${a.kind === "builders_risk" ? "builder's risk" : "hazard"} policy on file to ${a.expiresOn}`) };
+    }
+    case "lienWaiverReceived": case "affidavitReceived": {
+      const draw = s.draws.find((d) => d.id === a.drawId);
+      const deal = draw && s.deals.find((d) => d.id === draw.dealId);
+      if (!draw || !deal || draw.status === "funded" || draw.status === "rejected") return s;
+      if (a.t === "affidavitReceived") return { ...s, draws: s.draws.map((d) => (d.id === a.drawId ? { ...d, affidavit: { fileName: a.fileName, ...(a.documentId ? { documentId: a.documentId } : {}), sentBy: a.by, sentAt: now() } } : d)), audit: log(`${deal.loanNumber}: contractor's final affidavit received`) };
+      const party = partiesFor(deal.lienFile, "9999-12-31").find((item) => item.key === a.partyKey);
+      if (!party) return s;
+      const waiver: LienWaiver = { id: `lw${uid()}`, partyKey: party.key, party: party.name, kind: a.kind, fileName: a.fileName, ...(a.documentId ? { documentId: a.documentId } : {}), sentBy: a.by, sentAt: now() };
+      return { ...s, draws: s.draws.map((d) => (d.id === a.drawId ? { ...d, waivers: [...(d.waivers ?? []), waiver] } : d)), audit: log(`${deal.loanNumber}: ${a.kind} lien waiver from ${party.name} received`) };
+    }
+    case "checkLienWaiver": case "rejectLienWaiver": {
+      const draw = s.draws.find((d) => d.id === a.drawId)!;
+      const waiver = draw.waivers?.find((item) => item.id === a.waiverId);
+      if (a.t === "checkLienWaiver" ? waiverCheckProblem(waiver, a.amount, a.throughOn, serviceDay(s)) : !waiver || waiver.checked || waiver.rejected || !a.reason.trim()) return s;
+      const change = a.t === "checkLienWaiver" ? { checked: { by: a.by, at: now(), amount: a.amount, conditional: a.conditional, ...(a.throughOn ? { throughOn: a.throughOn } : {}) } } : { rejected: { by: a.by, at: now(), reason: a.reason.trim() } };
+      return { ...s, draws: s.draws.map((d) => (d.id === a.drawId ? { ...d, waivers: d.waivers!.map((item) => (item.id === a.waiverId ? { ...item, ...change } : item)) } : d)), audit: log(`Lien waiver from ${waiver!.party} ${a.t === "checkLienWaiver" ? "checked" : "rejected"}`) };
+    }
+    case "checkAffidavit": {
+      const draw = s.draws.find((d) => d.id === a.drawId)!;
+      if (!draw.affidavit || draw.affidavit.checked) return s;
+      return { ...s, draws: s.draws.map((d) => (d.id === a.drawId ? { ...d, affidavit: { ...d.affidavit!, checked: { by: a.by, at: now(), unpaidLienors: a.unpaidLienors } } } : d)), audit: log(`Contractor's final affidavit checked${a.unpaidLienors ? ": it lists unpaid lienors" : ""}`) };
+    }
+    case "setFinalDraw":
+      return { ...s, draws: s.draws.map((d) => (d.id === a.drawId && d.status !== "funded" ? { ...d, final: a.final } : d)) };
+    case "overrideDrawHolds": {
+      const draw = s.draws.find((d) => d.id === a.drawId)!; const deal = s.deals.find((d) => d.id === draw.dealId)!;
+      const holds = drawHolds(deal, draw, serviceDay(s));
+      if (!holds.length || !a.reason.trim() || draw.status === "funded") return s;
+      return { ...s, draws: s.draws.map((d) => (d.id === a.drawId ? { ...d, override: { by: a.by, at: now(), reason: a.reason.trim(), holds } } : d)), audit: log(`${deal.loanNumber}: draw released past ${holds.length} lien-law hold${holds.length === 1 ? "" : "s"} by ${a.by}: ${a.reason.trim()}`) };
+    }
+    case "checkInsurance": {
+      const { remind, lapsed } = insuranceChecks(s.deals, a.asOf, SERVICED);
+      if (!remind.length && !lapsed.length) return s;
+      return { ...s, deals: s.deals.map((d) => (remind.includes(d.id) ? { ...d, lienFile: { ...d.lienFile!, insurance: { ...d.lienFile!.insurance!, remindedOn: a.asOf } } } : lapsed.includes(d.id) ? { ...d, lienFile: { ...d.lienFile!, insurance: { ...d.lienFile!.insurance!, lapseNoticeOn: a.asOf } } } : d)) };
+    }
+    case "markApplicationComplete": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (deal.completed || a.on > serviceDay(s)) return s;
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, completed: { at: now(), on: a.on, by: a.by } })), audit: log(`${deal.loanNumber}: application complete as of ${a.on}`) };
+    }
+    case "saveRevenue": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const revenue = { amount: Math.round(a.amount), year: a.year, by: a.by, at: now() };
+      // A decline whose notice hasn't gone out follows the revenue now known.
+      const adverseAction = deal.adverseAction && !deal.adverseAction.notice ? { ...deal.adverseAction, large: isLarge(revenue), dueOn: noticeDueOn({ completed: deal.completed, revenue }, deal.adverseAction.decidedOn) } : deal.adverseAction;
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, revenue, adverseAction })), audit: log(`${deal.loanNumber}: gross revenue for ${a.year} recorded`) };
+    }
+    case "saveAdverseReasons": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const action = deal.adverseAction;
+      if (!action || reasonsProblem(a.reasons) || (action.large ? action.statement : action.notice)) return s;
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, adverseAction: { ...action, reasons: a.reasons.map((item) => item.trim()).filter(Boolean) } })), audit: log(`${deal.loanNumber}: reasons for the decline set`) };
+    }
+    case "recordAdverseNotice": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const owed = noticeOwed(deal);
+      if (!owed || owed.kind !== a.kind) return s;
+      const sent = { sentOn: serviceDay(s), sentAt: now(), by: a.by, method: a.method, to: a.to, ...(a.result ? { result: a.result } : {}) };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, adverseAction: { ...d.adverseAction!, [a.kind]: sent } })), audit: log(`${deal.loanNumber}: ${a.kind === "notice" ? "adverse action notice" : "statement of reasons"} sent by ${a.method}`) };
+    }
+    case "recordReasonsRequest": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (requestProblem(deal.adverseAction, a.receivedOn, serviceDay(s))) return s;
+      const request = { receivedOn: a.receivedOn, by: a.by, at: now(), dueOn: addDays(a.receivedOn, STATEMENT_DAYS) };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, adverseAction: { ...d.adverseAction!, request } })), audit: log(`${deal.loanNumber}: written request for the decline reasons received ${a.receivedOn}`) };
+    }
+    case "setLegalHold": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const reason = a.reason.trim();
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, legalHold: reason ? { reason, by: a.by, at: now() } : undefined })), audit: log(`${deal.loanNumber}: legal hold ${reason ? "placed" : "lifted"} by ${a.by}`) };
     }
     case "recordPayment": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
@@ -372,17 +638,44 @@ export function reducer(s: Book, a: BookAction): Book {
       if (deals.every((d, index) => d === s.deals[index])) return s;
       return { ...s, deals, audit: [...entries.reverse(), ...s.audit].slice(0, 50) };
     }
-    case "requestPayoff": {
+    case "requestPayoff": case "logPayoffRequest": case "submitPayoffRequest": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
-      const payoff: PayoffRequest = { id: `payoff${uid()}`, dealId: a.dealId, goodThrough: a.goodThrough, requestedAt: now(), by: a.by, status: "requested", ...payoffFor(deal, a.goodThrough) };
-      return { ...s, payoffs: [payoff, ...s.payoffs], audit: log(`${deal.loanNumber}: payoff statement requested, good through ${a.goodThrough}`) };
+      const channel: PayoffChannel = a.t === "requestPayoff" ? "portal" : a.t === "logPayoffRequest" ? a.channel : "web_form";
+      const requester: PayoffRequester = a.t === "requestPayoff" ? { kind: "borrower", name: a.by } : a.requester;
+      // Someone else asking needs the borrower's written authority (701.04(1)(a)); staff logging one say whether it came with it.
+      const check = a.t === "submitPayoffRequest" ? a.check
+        : a.t === "logPayoffRequest" && requester.kind !== "borrower" ? (a.authorized ? { status: "accepted" as const, note: "The borrower's written authorization came with the request.", by: a.by, at: now() } : { status: "pending" as const, note: "Waiting for the borrower's written authorization." })
+        : undefined;
+      const payoff: PayoffRequest = {
+        id: `payoff${uid()}`, dealId: a.dealId, goodThrough: a.goodThrough, requestedAt: now(), by: requester.name, status: "requested",
+        receivedOn: receivedOnFor(channel, a.t === "requestPayoff" ? serviceDay(s) : a.sentOn), channel, requester,
+        ...(check ? { check } : {}), ...(a.t === "logPayoffRequest" ? { loggedBy: a.by } : {}), ...(a.t !== "requestPayoff" && a.note.trim() ? { note: a.note.trim() } : {}),
+        ...payoffFor(deal, a.goodThrough),
+      };
+      return { ...s, payoffs: [payoff, ...s.payoffs], audit: log(`${deal.loanNumber}: payoff letter requested by ${requester.name}, good through ${a.goodThrough}`) };
     }
-    case "sendPayoff": return { ...s, payoffs: s.payoffs.map((p) => (p.id === a.payoffId ? { ...p, status: "sent" } : p)), audit: log("Payoff statement sent") };
+    case "acceptPayoffCheck":
+      return { ...s, payoffs: s.payoffs.map((p) => (p.id === a.payoffId && p.check?.status === "pending" ? { ...p, check: { ...p.check, status: "accepted", note: a.note.trim() || p.check.note, by: a.by, at: now() } } : p)), audit: log("Payoff request checked") };
+    case "refusePayoff":
+      return { ...s, payoffs: s.payoffs.map((p) => (p.id === a.payoffId && p.status === "requested" ? { ...p, status: "refused", refused: { by: a.by, at: now(), reason: a.reason.trim() } } : p)), audit: log(`Payoff request refused: ${a.reason.trim()}`) };
+    case "issuePayoffLetter": {
+      const request = s.payoffs.find((p) => p.id === a.payoffId);
+      const deal = s.deals.find((d) => d.id === request?.dealId);
+      const today = serviceDay(s);
+      if (!request || !deal || issueProblem(deal, request, a.goodThrough, a.reason, today)) return s;
+      const prior = latestLetter(request);
+      const letter: PayoffLetter = { number: (request.letters?.length ?? 0) + 1, issuedAt: now(), issuedBy: a.by, ...letterFigures(deal, a.goodThrough, today), ...(prior ? { replaces: prior.number, reason: a.reason.trim() } : {}) };
+      return { ...s, payoffs: s.payoffs.map((p) => (p.id === request.id ? { ...p, status: "sent", letters: [...(p.letters ?? []), letter] } : p)), audit: log(`${deal.loanNumber}: payoff letter ${letter.number} issued, ${money(letter.total)} good through ${letter.goodThrough}`) };
+    }
+    case "payoffLetterDelivered":
+      return { ...s, payoffs: s.payoffs.map((p) => (p.id === a.payoffId ? { ...p, letters: p.letters?.map((l) => (l.number === a.number ? { ...l, delivery: { to: a.to, result: a.result, at: now() } } : l)) } : p)) };
     case "recordPayoff": {
       const today = serviceDay(s);
       const deal = settle(s.deals.find((d) => d.id === a.dealId)!, a.receivedOn > today ? a.receivedOn : today);
-      if (payoffError(deal, a.amount, a.receivedOn, today)) return s;
-      const paidOff = { amount: Math.round(a.amount * 100) / 100, receivedOn: a.receivedOn, method: a.method, reference: a.reference, by: a.by, at: now(), owed: payoffOn(deal, a.receivedOn).quote.total };
+      const letter = a.onLetter && s.payoffs.find((p) => p.id === a.onLetter!.payoffId && p.dealId === deal.id)?.letters?.find((l) => l.number === a.onLetter!.number);
+      if ((a.onLetter && !letter) || payoffError(deal, a.amount, a.receivedOn, today, letter || undefined)) return s;
+      const owed = payoffOn(deal, a.receivedOn).quote.total;
+      const paidOff = { amount: Math.round(a.amount * 100) / 100, receivedOn: a.receivedOn, method: a.method, reference: a.reference, by: a.by, at: now(), owed, ...(letter ? { letter: { payoffId: a.onLetter!.payoffId, number: letter.number, total: letter.total, shortfall: Math.max(0, Math.round((owed - a.amount) * 100) / 100) } } : {}) };
       const closing = new Set(s.sales.filter((x) => x.dealId === deal.id && x.status === "listed").map((x) => x.id));
       // The money is back, so the loan stops counting against capital, and nothing else can be drawn, sold or extended on it.
       return { ...s,
@@ -404,9 +697,14 @@ export function reducer(s: Book, a: BookAction): Book {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
       if (!PRE_FUNDING.includes(deal.status)) return s;
       const closure: Closure = { outcome: a.outcome, reason: a.reason, note: a.note, by: a.by, at: now(), from: deal.status };
+      // A decline starts the Reg B notice, due by the revenue rule (12 CFR 1002.9).
+      const revenue = a.outcome === "declined" && a.revenue ? { ...a.revenue, by: a.by, at: closure.at } : deal.revenue;
+      const adverseAction = a.outcome === "declined" ? startAdverseAction({ completed: deal.completed, revenue }, closure, serviceDay(s), closure.at) : deal.adverseAction;
       // Whatever capital was held for it goes back, open bids are turned down and its photo links stop working.
       return { ...s,
-        deals: upd(deal.id, (d) => ({ ...d, status: a.outcome, daysInStage: 0, closure, allocations: [], capitalStatus: "not_started", fundingApprovers: undefined })),
+        deals: upd(deal.id, (d) => ({ ...d, status: a.outcome, daysInStage: 0, closure, allocations: [], capitalStatus: "not_started", fundingApprovers: undefined, revenue, adverseAction,
+          // Withdrawing while a term sheet waits is declining it (Spec 4.3).
+          termSheets: a.outcome === "withdrawn" && d.status === "term_sheet_issued" ? d.termSheets?.map((x, i, all) => (i === all.length - 1 && x.status === "sent" ? { ...x, status: "declined" as const, response: { at: now(), by: a.by, note: a.note } } : x)) : d.termSheets })),
         bids: s.bids.map((b) => (b.dealId === deal.id && b.status === "submitted" ? { ...b, status: "declined" } : b)),
         photoRequests: s.photoRequests.map((r) => (r.dealId === deal.id && r.status === "open" ? { ...r, status: "off" } : r)),
         audit: log(`${deal.loanNumber}: ${a.outcome} (${closureReason(closure)})`) };
@@ -415,6 +713,8 @@ export function reducer(s: Book, a: BookAction): Book {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
       if (!deal.closure) return s;
       const to = reopenTo(deal.closure);
+      // Reopened before the notice went out, there's no adverse action to tell them about; one already sent stays on file.
+      if (deal.adverseAction && !deal.adverseAction.notice) s = { ...s, deals: upd(deal.id, (d) => ({ ...d, adverseAction: undefined })) };
       return { ...s, deals: upd(deal.id, (d) => ({ ...d, status: to, daysInStage: 0, closure: undefined })), audit: log(`${deal.loanNumber}: reopened by ${a.by} at ${to.replace(/_/g, " ")}`) };
     }
     case "declareDefault": {

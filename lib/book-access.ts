@@ -2,15 +2,20 @@
 // because the browser can't be trusted to hide a borrower's name or to ask only for what its screen offers.
 // No database code, so the rules can be tested on their own.
 import type { RoleCode } from "@prisma/client";
-import { emptyBook, type Book, type BookAction } from "./book";
+import { emptyBook, serviceDay, type Book, type BookAction } from "./book";
 import { verifyProblem, wireProblem, wireVerified } from "./closing";
 import { latestScreening, ofacBlocker } from "./ofac";
 import { sponsorProblem, withSponsor } from "./credit";
 import { scopeError } from "./draws";
 import { cureError, defaultError, DECLINE_REASONS, executeError, extensionRequestError, isClosedApplication, payoffError, PRE_FUNDING, WITHDRAW_REASONS } from "./loan-exits";
+import { goodThroughProblem, issueProblem } from "./payoffs";
+import { addProblem, changeProblem, libraryOf, templateProblem } from "./conditions";
+import { drawHolds, lienFileProblem, unreleasedHolds, waiverCheckProblem } from "./lien-law";
+import { reasonsProblem, requestProblem, revenueProblem } from "./adverse-action";
+import { exceptionDecisionProblem, exceptionRequestProblem, issueProblem as sheetProblem, latestSheet, pricedApp, respondProblem } from "./term-sheets";
 import { MAX_PHOTOS_PER_LINK, photoRequestState, photosClosed } from "./photo-requests";
 import { evaluate } from "./engine";
-import type { Deal, Doc, LoanPayment, LoanSale } from "./mockData";
+import type { Deal, Doc, LoanPayment, LoanSale, PayoffRequest } from "./mockData";
 import { currentPricing, pricingPayload } from "./pricing-versions";
 import { ledger, servicingDate } from "./servicing";
 import { viewFor, type MemberAccess, type Permission } from "./permissions";
@@ -44,14 +49,41 @@ const quietExits = (deal: Deal): Partial<Deal> => ({
   paidOff: deal.paidOff && { ...deal.paidOff, by: "", release: deal.paidOff.release && { ...deal.paidOff.release, by: "" } },
 });
 
+/** A payoff request as the borrower sees it: who asked and every letter, without who on the team handled it or how it was checked. */
+const quietPayoff = (payoff: PayoffRequest): PayoffRequest => ({
+  ...payoff, loggedBy: undefined, note: undefined,
+  check: payoff.check && { status: payoff.check.status, note: "" },
+  refused: payoff.refused && { ...payoff.refused, by: "" },
+  letters: payoff.letters?.map((letter) => ({ ...letter, issuedBy: "", delivery: letter.delivery && { ...letter.delivery, to: [] } })),
+});
+
 /** Removes what identifies the borrower, for a partner or buyer who hasn't closed on the loan. */
 function blind(deal: Deal): Deal {
-  return { ...deal, borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined, closure: undefined, defaults: undefined, extensions: undefined, paidOff: undefined, closing: undefined, wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, ...quietPayments(deal, false) };
+  return { ...deal, borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined, closure: undefined, defaults: undefined, extensions: undefined, paidOff: undefined, closing: undefined, wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, termSheets: undefined, pricingException: undefined, conditions: undefined, lienFile: undefined, completed: undefined, revenue: undefined, adverseAction: undefined, legalHold: undefined, ...quietPayments(deal, false) };
 }
+
+/** The conditions that are the borrower's to meet (Spec B17), without who on the team handled them or why one was waived. */
+const clientConditions = (deal: Deal): Partial<Deal> => ({
+  conditions: deal.conditions?.filter((item) => item.owner === "borrower").map((item) => ({ ...item, addedBy: "", cleared: item.cleared && { ...item.cleared, by: "", note: "" }, waived: item.waived && { ...item.waived, by: "", reason: "" }, returned: item.returned && { ...item.returned, by: "" }, files: item.files.map((file) => ({ ...file, by: "" })) })),
+});
+
+/** The decline notice as the borrower sees it: what went out and when, without who on the team sent it or any legal hold. */
+const clientRecords = (deal: Deal): Partial<Deal> => ({
+  legalHold: undefined,
+  completed: deal.completed && { ...deal.completed, by: "" },
+  revenue: deal.revenue && { ...deal.revenue, by: "" },
+  adverseAction: deal.adverseAction && { ...deal.adverseAction, notice: deal.adverseAction.notice && { ...deal.adverseAction.notice, by: "", to: [] }, statement: deal.adverseAction.statement && { ...deal.adverseAction.statement, by: "", to: [] }, request: deal.adverseAction.request && { ...deal.adverseAction.request, by: "" } },
+});
+
+/** The newest term sheet only (Spec 13.2), without the matrix's room, the exception or who sent it. */
+const latestForClient = (deal: Deal): Partial<Deal> => {
+  const sheet = latestSheet(deal);
+  return { termSheets: sheet ? [{ ...sheet, issuedBy: "", matrix: { rate: [0, 0], points: [0, 0] }, exception: undefined }] : undefined, pricingException: undefined };
+};
 
 /** What only the team sees on a loan it shares with a client. Wire instructions never leave the team: a client who sees them is a client who can be sent fake ones. */
 function forClient(deal: Deal): Deal {
-  return { ...deal, allocations: [], teaserSentTo: [], route: undefined, capitalStatus: "not_started", contractorIsGtAffiliate: undefined, source: "", fundingApprovers: undefined, creditReview: undefined, ...quietPayments(deal, true), ...quietExits(deal), wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined };
+  return { ...deal, ...latestForClient(deal), ...clientConditions(deal), ...clientRecords(deal), allocations: [], teaserSentTo: [], route: undefined, capitalStatus: "not_started", contractorIsGtAffiliate: undefined, source: "", fundingApprovers: undefined, creditReview: undefined, ...quietPayments(deal, true), ...quietExits(deal), wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined };
 }
 
 /** The part of the book this account may see. Nothing else leaves the server. */
@@ -70,7 +102,7 @@ function scopeRecords(book: Book, viewer: Viewer): Book {
   if (view === "borrower") {
     const mine = book.deals.filter((deal) => deal.borrowerId === viewer.id);
     const ids = new Set(mine.map((deal) => deal.id));
-    return { ...empty, borrowerId: viewer.id, deals: mine.map((deal) => ({ ...forClient(deal), brokerId: undefined, brokerPoints: undefined })), draws: book.draws.filter((draw) => ids.has(draw.dealId)).map((draw) => ({ ...draw, approvers: [] })), photoRequests: book.photoRequests.filter((request) => ids.has(request.dealId)), payoffs: book.payoffs.filter((payoff) => ids.has(payoff.dealId)), messages: shared(ids) };
+    return { ...empty, borrowerId: viewer.id, deals: mine.map((deal) => ({ ...forClient(deal), brokerId: undefined, brokerPoints: undefined })), draws: book.draws.filter((draw) => ids.has(draw.dealId)).map((draw) => ({ ...draw, approvers: [], override: undefined })), photoRequests: book.photoRequests.filter((request) => ids.has(request.dealId)), payoffs: book.payoffs.filter((payoff) => ids.has(payoff.dealId)).map(quietPayoff), messages: shared(ids) };
   }
 
   if (view === "broker") {
@@ -179,7 +211,7 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       const deal = dealOf(action.dealId);
       if (!deal) return no(GONE);
       if (!staff) return no(NOT_ALLOWED);
-      if (deal.status === "underwriting") return allowed("issue_term_sheet", Math.round(evaluate(deal.app).noteAmount * 100)) ? ok() : no("This loan is above your term sheet limit.");
+      if (deal.status === "underwriting") return no("Send the term sheet from the Term sheet tab, with its terms.");
       if (deal.status === "closing") return allowed("approve_funding") ? ok() : no(NOT_ALLOWED);
       return allowed("manage_conditions") || allowed("route_capital") ? ok() : no(NOT_ALLOWED);
     }
@@ -376,10 +408,84 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       return staffOnly("route_capital", "manage_capital");
     }
 
-    case "acceptTermSheet": {
+    case "acceptTermSheet": case "requestTermSheetChanges": {
       const deal = dealOf(action.dealId);
       if (!deal) return no(GONE);
-      return view === "borrower" && deal.borrowerId === viewer.id ? ok() : no("Only the borrower can accept a term sheet.");
+      if (!(view === "borrower" && deal.borrowerId === viewer.id)) return no(`Only the borrower can ${action.t === "acceptTermSheet" ? "accept a term sheet" : "ask for changes to a term sheet"}.`);
+      const refused = respondProblem(deal, serviceDay(book));
+      if (refused) return no(refused);
+      if (action.t === "requestTermSheetChanges" && !action.note.trim()) return no("Say what you'd like changed.");
+      return ok(action.t === "requestTermSheetChanges" ? { ...action, note: action.note.trim(), by: viewer.name } : action);
+    }
+    case "issueTermSheet": case "requestPricingException": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      const input = { rate: action.rate, points: action.points, termMonths: action.termMonths, prepay: action.prepay };
+      // The underwriter's dollar limit applies to the loan as these terms size it (Spec 4.3).
+      if (!staff || !allowed("issue_term_sheet", Math.round(evaluate(pricedApp(deal.app, input)).noteAmount * 100))) return no(staffOnlyAllowed("issue_term_sheet") ? "This loan is above your term sheet limit." : NOT_ALLOWED);
+      const refused = action.t === "issueTermSheet" ? sheetProblem(deal, input) : exceptionRequestProblem(deal, input, action.note);
+      return refused ? no(refused) : ok({ ...action, by: viewer.name });
+    }
+    case "decidePricingException": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      if (!staffOnlyAllowed("approve_matrix_exception")) return no(NOT_ALLOWED);
+      const refused = exceptionDecisionProblem(deal, viewer.name);
+      if (refused) return no(refused);
+      return !action.approve && !action.note.trim() ? no("Say why it's declined.") : ok({ ...action, by: viewer.name });
+    }
+    case "checkTermSheets":
+      return trusted ? ok() : no(NOT_ALLOWED);
+    case "markApplicationComplete": case "saveRevenue": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      if (!staffOnlyAllowed("review_documents", "issue_term_sheet", "manage_conditions")) return no(NOT_ALLOWED);
+      const today = serviceDay(book);
+      if (action.t === "saveRevenue") { const refused = revenueProblem(action.amount, action.year, today); return refused ? no(refused) : ok({ ...action, by: viewer.name }); }
+      if (deal.completed) return no(`It was marked complete on ${deal.completed.on}.`);
+      if (!PRE_FUNDING.includes(deal.status) && !isClosedApplication(deal.status)) return no("This loan is past the application.");
+      return /^\d{4}-\d{2}-\d{2}$/.test(action.on) && action.on <= today ? ok({ ...action, by: viewer.name }) : no("Enter the day it became complete, today or earlier.");
+    }
+    case "saveAdverseReasons": case "recordReasonsRequest": {
+      const deal = dealOf(action.dealId);
+      if (!deal?.adverseAction) return no("This application wasn't declined.");
+      // The decline notice is a credit decision's paperwork: the same authority as declining.
+      if (!staffOnlyAllowed("issue_term_sheet")) return no(NOT_ALLOWED);
+      if (action.t === "recordReasonsRequest") { const refused = requestProblem(deal.adverseAction, action.receivedOn, serviceDay(book)); return refused ? no(refused) : ok({ ...action, by: viewer.name }); }
+      if (deal.adverseAction.large ? deal.adverseAction.statement : deal.adverseAction.notice) return no("The reasons have already gone out.");
+      const refused = reasonsProblem(action.reasons);
+      return refused ? no(refused) : ok({ ...action, by: viewer.name });
+    }
+    case "recordAdverseNotice":
+      return trusted ? ok() : no("Send the notice from the loan's page.");
+    case "setLegalHold": {
+      if (!dealOf(action.dealId)) return no(GONE);
+      return staffOnlyAllowed("manage_roles") ? ok({ ...action, by: viewer.name }) : no(NOT_ALLOWED);
+    }
+    case "addCondition": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      if (!staffOnlyAllowed("manage_conditions")) return no(NOT_ALLOWED);
+      const refused = addProblem(deal, action.condition, serviceDay(book));
+      if (refused) return no(refused);
+      if (action.condition.templateId && !libraryOf(book).some((item) => item.id === action.condition.templateId && item.active)) return no("That standard condition isn't in the library.");
+      return ok({ ...action, by: viewer.name });
+    }
+    case "clearCondition": case "returnCondition": case "waiveCondition": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      // Waiving takes its own permission (Spec A10); clearing and sending back are the people who manage conditions.
+      if (!staffOnlyAllowed(action.t === "waiveCondition" ? "waive_conditions" : "manage_conditions")) return no(NOT_ALLOWED);
+      const refused = changeProblem(deal.conditions?.find((item) => item.id === action.conditionId), action.t === "clearCondition" ? "cleared" : action.t === "waiveCondition" ? "waived" : "returned", action.t === "clearCondition" ? action.note : action.reason);
+      return refused ? no(refused) : ok({ ...action, by: viewer.name });
+    }
+    case "conditionFile":
+      return trusted ? ok() : no("Upload the file itself to send it for a condition.");
+    case "saveConditionTemplate": {
+      if (!staffOnlyAllowed("manage_roles")) return no(NOT_ALLOWED);
+      if (action.template.id && !libraryOf(book).some((item) => item.id === action.template.id)) return no(GONE);
+      const refused = templateProblem(action.template);
+      return refused ? no(refused) : ok({ ...action, by: viewer.name });
     }
     case "saveScope": {
       const deal = dealOf(action.dealId);
@@ -408,8 +514,40 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
     case "rejectDraw": case "releaseDraw": {
       const draw = book.draws.find((item) => item.id === action.drawId);
       if (!draw) return no(GONE);
-      const blocked = action.t === "releaseDraw" ? ofacBlocker(dealOf(draw.dealId)!, servicingDate(new Date())) : null;
-      return blocked ? no(`${blocked}.`) : staffOnly("approve_draw");
+      const blocked = action.t === "releaseDraw" ? ofacBlocker(dealOf(draw.dealId)!, serviceDay(book)) : null;
+      if (blocked) return no(`${blocked}.`);
+      // Florida's lien law and the insurance hold the money until they're met or an owner releases it past them.
+      const holds = action.t === "releaseDraw" ? unreleasedHolds(dealOf(draw.dealId)!, draw, serviceDay(book)) : [];
+      return holds.length ? no(holds[0]) : staffOnly("approve_draw");
+    }
+    case "saveLienFile": case "addNoticeToOwner": case "saveInsurance": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      if (!staffOnlyAllowed("approve_draw", "assign_inspection", "manage_conditions")) return no(NOT_ALLOWED);
+      if (!["term_sheet_accepted", "conditions", "clear_to_close", "closing", ...FUNDED].includes(deal.status)) return no("The lien file is kept from an accepted term sheet until the loan is paid off.");
+      const today = serviceDay(book);
+      if (action.t === "saveLienFile") { const refused = lienFileProblem(action, today); if (refused) return no(refused); }
+      if (action.t === "addNoticeToOwner" && (!action.lienor.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(action.servedOn) || action.servedOn > today)) return no("Add who served it and the day it was served, today or earlier.");
+      if (action.t === "saveInsurance" && !action.carrier.trim()) return no("Add the insurance company.");
+      return ok({ ...action, by: viewer.name });
+    }
+    case "lienWaiverReceived": case "affidavitReceived": case "checkInsurance":
+      return trusted ? ok() : no("Upload the file itself to send it.");
+    case "checkLienWaiver": case "rejectLienWaiver": case "checkAffidavit": case "setFinalDraw": {
+      const draw = book.draws.find((item) => item.id === action.drawId);
+      if (!draw) return no(GONE);
+      if (!staffOnlyAllowed("approve_draw", "assign_inspection")) return no(NOT_ALLOWED);
+      if (action.t === "checkLienWaiver") { const refused = waiverCheckProblem(draw.waivers?.find((item) => item.id === action.waiverId), action.amount, action.throughOn, serviceDay(book)); if (refused) return no(refused); }
+      if (action.t === "rejectLienWaiver" && !action.reason.trim()) return no("Say what's wrong with it.");
+      if (action.t === "checkAffidavit" && !draw.affidavit) return no("The affidavit hasn't come in.");
+      return ok(action.t === "setFinalDraw" ? action : { ...action, by: viewer.name });
+    }
+    case "overrideDrawHolds": {
+      const draw = book.draws.find((item) => item.id === action.drawId);
+      if (!draw) return no(GONE);
+      if (!staffOnlyAllowed("override_draw_holds")) return no(NOT_ALLOWED);
+      if (!drawHolds(dealOf(draw.dealId)!, draw, serviceDay(book)).length) return no("Nothing is holding this draw.");
+      return action.reason.trim() ? ok({ ...action, by: viewer.name }) : no("Say why it should go out anyway.");
     }
     case "recordPayment": {
       const deal = dealOf(action.dealId);
@@ -448,16 +586,39 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       if (!deal) return no(GONE);
       if (!FUNDED.includes(deal.status)) return no("This loan isn't funded.");
       if (!(view === "borrower" && deal.borrowerId === viewer.id) && !(staff && allowed("service_loans"))) return no(NOT_ALLOWED);
-      return ok({ ...action, by: viewer.name });
+      const date = goodThroughProblem(action.goodThrough, serviceDay(book));
+      return date ? no(date) : ok({ ...action, by: viewer.name });
     }
-    case "sendPayoff":
-      if (!book.payoffs.some((payoff) => payoff.id === action.payoffId)) return no(GONE);
-      return staffOnly("service_loans");
+    case "logPayoffRequest": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      if (!staffOnlyAllowed("service_loans")) return no(NOT_ALLOWED);
+      if (!FUNDED.includes(deal.status)) return no("This loan isn't funded.");
+      if (action.sentOn > serviceDay(book)) return no("The day it was sent can't be in the future.");
+      if (action.requester.kind === "title" && !action.requester.company?.trim()) return no("Add the title company or law firm.");
+      const date = goodThroughProblem(action.goodThrough, serviceDay(book));
+      return date ? no(date) : ok({ ...action, by: viewer.name });
+    }
+    case "submitPayoffRequest":
+    case "payoffLetterDelivered":
+      return trusted ? ok() : no(NOT_ALLOWED);
+    case "acceptPayoffCheck": case "refusePayoff": case "issuePayoffLetter": {
+      const request = book.payoffs.find((payoff) => payoff.id === action.payoffId);
+      const deal = request && dealOf(request.dealId);
+      if (!request || !deal) return no(GONE);
+      if (!staffOnlyAllowed("service_loans")) return no(NOT_ALLOWED);
+      if (action.t === "acceptPayoffCheck") return request.check?.status === "pending" ? ok({ ...action, by: viewer.name }) : no("There's nothing to check on this request.");
+      if (action.t === "refusePayoff") return request.status === "requested" ? ok({ ...action, by: viewer.name }) : no("Only a request still waiting for its letter can be refused.");
+      const refused = issueProblem(deal, request, action.goodThrough, action.reason, serviceDay(book));
+      return refused ? no(refused) : ok({ ...action, by: viewer.name });
+    }
     case "recordPayoff": {
       const deal = dealOf(action.dealId);
       if (!deal) return no(GONE);
       if (!staff || !allowed("service_loans")) return no(NOT_ALLOWED);
-      const refused = payoffError(deal, action.amount, action.receivedOn, servicingDate(new Date()));
+      const letter = action.onLetter && book.payoffs.find((payoff) => payoff.id === action.onLetter!.payoffId && payoff.dealId === deal.id)?.letters?.find((item) => item.number === action.onLetter!.number);
+      if (action.onLetter && !letter) return no("That payoff letter isn't on this loan.");
+      const refused = payoffError(deal, action.amount, action.receivedOn, servicingDate(new Date()), letter || undefined);
       return refused ? no(refused) : ok({ ...action, reference: action.reference.trim(), by: viewer.name });
     }
     case "recordLienRelease": {
@@ -481,6 +642,8 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       // Turning a loan down is a credit decision. Withdrawing is the borrower's call, or the team's on their word.
       const team = staff && (allowed("issue_term_sheet") || (action.outcome === "withdrawn" && allowed("manage_conditions")));
       if (!team && !(action.outcome === "withdrawn" && view === "borrower" && deal.borrowerId === viewer.id)) return no(NOT_ALLOWED);
+      if (action.revenue && (action.outcome !== "declined" || !staff)) return ok({ ...action, revenue: undefined, by: viewer.name, byTeam: staff });
+      if (action.revenue && revenueProblem(action.revenue.amount, action.revenue.year, serviceDay(book))) return no(revenueProblem(action.revenue.amount, action.revenue.year, serviceDay(book))!);
       return ok({ ...action, by: viewer.name, byTeam: staff });
     }
     case "reopenApplication": {

@@ -8,6 +8,8 @@ const DEFAULTS: Omit<PlatformSettings, "updatedAt"> = {
   offerSampleData: true,
   dualApprovalDrawCents: 5_000_000,
   dualApprovalDistributionCents: 25_000_000,
+  lenderAddress: "",
+  lenderPhone: "",
 };
 
 let cached: { at: number; value: Omit<PlatformSettings, "updatedAt"> } | null = null;

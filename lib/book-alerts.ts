@@ -1,17 +1,20 @@
 // Who hears about what. Competitors' borrowers get told when their loan moves; so do these, and so does the team.
 // Only names the loan number and what happened: details stay behind sign-in.
-import type { Book, BookAction } from "@/lib/book";
+import { serviceDay, type Book, type BookAction } from "@/lib/book";
 import { notify, notifyTeam } from "@/lib/email";
 import { evaluate } from "@/lib/engine";
 import type { Deal } from "@/lib/mockData";
 import { currentPricing } from "@/lib/pricing-versions";
 import { DEFAULT_KINDS, maturityAfter, WITHDRAW_REASONS } from "@/lib/loan-exits";
+import { latestSheet } from "@/lib/term-sheets";
+import { dueOf, fromThirdParty, letterChanges, receivedOf, requesterLine, staleLetter } from "@/lib/payoffs";
 import { prisma } from "@/lib/prisma";
 import { defaultInterestFrom, defaultRateOf, ledger, maturityOf, servicingTermsOf } from "@/lib/servicing";
 
 const origin = () => (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "");
 
-type Alert = { to: "team" | "borrower" | "broker" | "partner" | "buyer"; dealId?: string; firmId?: string; subject: string; body: string; event: string };
+/** "email" is someone with no account here, like a title company that asked for a payoff letter. */
+type Alert = { to: "team" | "borrower" | "broker" | "partner" | "buyer" | "email"; dealId?: string; firmId?: string; email?: string; subject: string; body: string; event: string };
 
 /** The partner lenders and loan buyers who hold part of a loan, from who it's allocated to. */
 const holdersOf = (deal?: Deal) => (deal?.allocations ?? []).flatMap((item): Pick<Alert, "to" | "firmId">[] => (item.sourceId.startsWith("partner:") ? [{ to: "partner", firmId: item.sourceId.slice(8) }] : item.sourceId.startsWith("buyer:") ? [{ to: "buyer", firmId: item.sourceId.slice(6) }] : []));
@@ -38,8 +41,30 @@ function servicingAlerts(before: Deal, after: Deal): Alert[] {
   return alerts;
 }
 
+/**
+ * A payoff letter whose figures this change moved: a payment, a reversal, a waived fee, a draw, a default. LendHous is
+ * held to a letter it sent, and a correction only takes its place if it reaches them a business day before they pay,
+ * so the team hears straight away.
+ */
+function staleLetterAlerts(before: Book, after: Book): Alert[] {
+  const today = serviceDay(after);
+  return after.payoffs.flatMap((payoff) => {
+    const deal = after.deals.find((item) => item.id === payoff.dealId);
+    const prior = before.deals.find((item) => item.id === payoff.dealId);
+    const was = before.payoffs.find((item) => item.id === payoff.id);
+    if (!deal || !prior || !was || (deal === prior && was === payoff)) return [];
+    const stale = staleLetter(deal, payoff, today);
+    if (!stale || staleLetter(prior, was, today)) return [];
+    return [{ to: "team" as const, subject: `Payoff letter out of date: ${deal.loanNumber}`, body: `Letter ${stale.letter.number} to ${requesterLine(payoff)} says ${dollars(stale.letter.total)} through ${longDate(stale.letter.goodThrough)}; it's now ${dollars(stale.now.total)} (${letterChanges(stale.letter, stale.now).join("; ")}). Send a corrected letter from the loan's Servicing tab today. It only replaces the old one if they get it by 3 p.m. their time at least one business day before they pay.`, event: "payoff.stale" }];
+  });
+}
+
 /** The alerts one action causes. Pure, so it can be tested. */
 export function alertsFor(before: Book, after: Book, action: BookAction): Alert[] {
+  return [...actionAlerts(before, after, action), ...staleLetterAlerts(before, after)];
+}
+
+function actionAlerts(before: Book, after: Book, action: BookAction): Alert[] {
   const loan = (dealId?: string) => after.deals.find((deal) => deal.id === dealId);
   const number = (dealId?: string) => loan(dealId)?.loanNumber ?? "your loan";
   switch (action.t) {
@@ -50,10 +75,117 @@ export function alertsFor(before: Book, after: Book, action: BookAction): Alert[
     case "advanceLoan": {
       const deal = loan(action.dealId);
       if (!deal) return [];
-      const told: Partial<Record<string, string>> = { term_sheet_issued: "Your term sheet is ready to review and accept.", clear_to_close: "Your loan is clear to close.", funded: "Your loan has funded." };
+      // Starting conditions adds the standard ones: the borrower hears what's theirs to send.
+      if (deal.status === "conditions") {
+        const prior = before.deals.find((item) => item.id === deal.id);
+        const mine = (deal.conditions ?? []).filter((item) => item.owner === "borrower" && !prior?.conditions?.some((old) => old.id === item.id));
+        if (!mine.length) return [];
+        const body = `To get to closing we need: ${mine.map((item) => item.title).join("; ")}. Sign in to see what each one needs and send it.`;
+        return [{ to: "borrower", dealId: deal.id, subject: `What we need to close: ${deal.loanNumber}`, body, event: "condition.added" }, { to: "broker", dealId: deal.id, subject: `What we need to close your client's loan: ${deal.loanNumber}`, body, event: "condition.added" }];
+      }
+      const told: Partial<Record<string, string>> = { clear_to_close: "Your loan is clear to close.", funded: "Your loan has funded." };
       const body = told[deal.status];
       return body ? [{ to: "borrower", dealId: deal.id, subject: `Update on ${deal.loanNumber}`, body, event: `loan.${deal.status}` }, { to: "broker", dealId: deal.id, subject: `Update on ${deal.loanNumber}`, body: body.replace("Your", "Your client's"), event: `loan.${deal.status}` }] : [];
     }
+    case "recordReasonsRequest": {
+      const deal = loan(action.dealId);
+      const request = deal?.adverseAction?.request;
+      return deal && request ? [{ to: "team", subject: `Decline reasons requested: ${deal.loanNumber}`, body: `${deal.borrowerName} asked in writing for the reasons their application was declined. The statement of reasons is due by ${longDate(request.dueOn)} (12 CFR 1002.9(a)(3)(ii)).`, event: "adverse_action.requested" }] : [];
+    }
+    case "recordAdverseNotice": {
+      const deal = loan(action.dealId);
+      return deal && action.result === "failed" ? [{ to: "team", subject: `Decline letter not delivered: ${deal.loanNumber}`, body: `The ${action.kind === "notice" ? "notice of action" : "statement of reasons"} to ${deal.borrowerName} couldn't be emailed. Download it from the loan's page and mail it today.`, event: "adverse_action.undelivered" }] : [];
+    }
+    case "addNoticeToOwner": {
+      const deal = loan(action.dealId);
+      return deal ? [{ to: "borrower", dealId: deal.id, subject: `Notice to owner received: ${deal.loanNumber}`, body: `${action.lienor.trim()} served a notice to owner on your project, so each draw from now on needs their lien waiver as well as your contractor's. Make sure your contractor pays them.`, event: "lien.notice_to_owner" }] : [];
+    }
+    case "lienWaiverReceived": case "affidavitReceived": {
+      const draw = after.draws.find((item) => item.id === action.drawId);
+      const deal = draw && loan(draw.dealId);
+      if (!deal) return [];
+      const what = action.t === "affidavitReceived" ? "the contractor's final payment affidavit" : `a ${action.kind} lien waiver from ${draw.waivers?.at(-1)?.party ?? "a lienor"}`;
+      return [{ to: "team", subject: `Draw paperwork received: ${deal.loanNumber}`, body: `${action.by} sent ${what}. Check it against the statutory form on the Draws page.`, event: "lien.waiver_received" }];
+    }
+    case "rejectLienWaiver": {
+      const draw = after.draws.find((item) => item.id === action.drawId);
+      const waiver = draw?.waivers?.find((item) => item.id === action.waiverId);
+      const deal = draw && loan(draw.dealId);
+      return deal && waiver ? [{ to: "borrower", dealId: deal.id, subject: `A lien waiver needs another look: ${deal.loanNumber}`, body: `The ${waiver.kind} lien waiver from ${waiver.party} wasn't accepted: ${action.reason.trim()} It has to be on Florida's statutory form (Fla. Stat. 713.20). Please send a new one.`, event: "lien.waiver_rejected" }] : [];
+    }
+    case "overrideDrawHolds": {
+      const draw = after.draws.find((item) => item.id === action.drawId);
+      const deal = draw && loan(draw.dealId);
+      return deal && draw?.override ? [{ to: "team", subject: `Draw cleared past its holds: ${deal.loanNumber}`, body: `${action.by} cleared the draw to be released despite: ${draw.override.holds.join(" ")} Why: ${draw.override.reason}`, event: "lien.override" }] : [];
+    }
+    case "checkInsurance":
+      return after.deals.flatMap((deal): Alert[] => {
+        const now = deal.lienFile?.insurance; const was = before.deals.find((item) => item.id === deal.id)?.lienFile?.insurance;
+        if (!now || !was) return [];
+        const kind = now.kind === "builders_risk" ? "builder's risk" : "hazard";
+        if (now.lapseNoticeOn && !was.lapseNoticeOn) return [{ to: "borrower", dealId: deal.id, subject: `Your insurance has lapsed: ${deal.loanNumber}`, body: `The ${kind} policy on ${deal.address}, ${deal.city} ended on ${longDate(now.expiresOn)}. No draws can be released until we have the renewal. Please send it now.`, event: "insurance.lapsed" }, { to: "team", subject: `Insurance lapsed: ${deal.loanNumber}`, body: `${deal.borrowerName}'s ${kind} policy (${now.carrier}) ended on ${longDate(now.expiresOn)}. Draws are on hold until it's renewed; consider whether it's a default.`, event: "insurance.lapsed" }];
+        if (now.remindedOn && !was.remindedOn) return [{ to: "borrower", dealId: deal.id, subject: `Your insurance renews soon: ${deal.loanNumber}`, body: `The ${kind} policy on ${deal.address}, ${deal.city} ends on ${longDate(now.expiresOn)}. Please send the renewal before then; draws can't be released on a lapsed policy.`, event: "insurance.expiring" }, { to: "team", subject: `Insurance ending soon: ${deal.loanNumber}`, body: `${deal.borrowerName}'s ${kind} policy (${now.carrier}) ends on ${longDate(now.expiresOn)}.`, event: "insurance.expiring" }];
+        return [];
+      });
+    case "addCondition": {
+      const deal = loan(action.dealId);
+      const added = deal?.conditions?.find((item) => !before.deals.find((old) => old.id === deal.id)?.conditions?.some((prior) => prior.id === item.id));
+      if (!deal || !added || added.owner !== "borrower") return [];
+      const body = `We need one more thing for your loan: ${added.title}.${added.detail ? ` ${added.detail}` : ""}${added.dueOn ? ` Please send it by ${longDate(added.dueOn)}.` : ""} Sign in to send it.`;
+      return [{ to: "borrower", dealId: deal.id, subject: `We need something for your loan: ${deal.loanNumber}`, body, event: "condition.added" }, { to: "broker", dealId: deal.id, subject: `We need something for your client's loan: ${deal.loanNumber}`, body, event: "condition.added" }];
+    }
+    case "conditionFile": {
+      const deal = loan(action.dealId);
+      const condition = deal?.conditions?.find((item) => item.id === action.conditionId);
+      return deal && condition ? [{ to: "team", subject: `Condition sent in: ${deal.loanNumber}`, body: `${action.by} sent ${action.fileName} for "${condition.title}". Clear it or send it back on the loan's Conditions tab.`, event: "condition.submitted" }] : [];
+    }
+    case "returnCondition": case "clearCondition": {
+      const deal = loan(action.dealId);
+      const condition = deal?.conditions?.find((item) => item.id === action.conditionId);
+      if (!deal || condition?.owner !== "borrower") return [];
+      const body = action.t === "returnCondition" ? `What you sent for "${condition.title}" needs another look: ${action.reason.trim()} Sign in to send it again.` : `"${condition.title}" is cleared. Thank you.`;
+      const subject = action.t === "returnCondition" ? `Please send it again: ${deal.loanNumber}` : `Condition cleared: ${deal.loanNumber}`;
+      return [{ to: "borrower", dealId: deal.id, subject, body, event: action.t === "returnCondition" ? "condition.returned" : "condition.cleared" }, { to: "broker", dealId: deal.id, subject, body, event: action.t === "returnCondition" ? "condition.returned" : "condition.cleared" }];
+    }
+    case "issueTermSheet": {
+      const deal = loan(action.dealId);
+      const sheet = deal && latestSheet(deal);
+      if (!deal || !sheet || deal.status !== "term_sheet_issued") return [];
+      const offer = `${dollars(sheet.terms.noteAmount)} at ${sheet.terms.rate}%${deal.app.product === "dscr" ? "" : ` for ${sheet.terms.termMonths} months`}`;
+      const body = `Version ${sheet.version} of the term sheet is ready: ${offer}. Review and accept it, or ask for changes, in the LendHous portal by ${longDate(sheet.expiresOn)}.`;
+      return [{ to: "borrower", dealId: deal.id, subject: `Your term sheet is ready: ${deal.loanNumber}`, body, event: "loan.term_sheet_issued" }, { to: "broker", dealId: deal.id, subject: `Your client's term sheet is ready: ${deal.loanNumber}`, body, event: "loan.term_sheet_issued" }];
+    }
+    case "requestPricingException": {
+      const deal = loan(action.dealId);
+      const exception = deal?.pricingException;
+      if (!deal || exception?.status !== "pending") return [];
+      return [{ to: "team", subject: `Pricing exception to approve: ${deal.loanNumber}`, body: `${action.by} wants to price ${deal.borrowerName}'s loan at ${action.rate}% and ${action.points} points, outside the matrix: ${exception.reasons.join("; ")}. Why: ${exception.note} An owner other than ${action.by} approves it on the loan's Term sheet tab.`, event: "pricing.exception_requested" }];
+    }
+    case "decidePricingException": {
+      const deal = loan(action.dealId);
+      const exception = deal?.pricingException;
+      if (!deal || !exception || exception.status === "pending") return [];
+      return [{ to: "team", subject: `Pricing exception ${exception.status}: ${deal.loanNumber}`, body: `${action.by} ${exception.status} the exception ${exception.requestedBy} asked for (${exception.rate}% and ${exception.points} points)${exception.decision ? `: ${exception.decision}` : "."}`, event: "pricing.exception_decided" }];
+    }
+    case "requestTermSheetChanges": {
+      const deal = loan(action.dealId);
+      return deal ? [{ to: "team", subject: `Changes asked for on the term sheet: ${deal.loanNumber}`, body: `${action.by} asked for changes to the term sheet, so the loan is back in underwriting: "${action.note.trim()}"`, event: "loan.term_sheet_changes" }] : [];
+    }
+    case "checkTermSheets":
+      return after.deals.flatMap((deal): Alert[] => {
+        const prior = before.deals.find((item) => item.id === deal.id);
+        const sheet = latestSheet(deal); const was = prior && latestSheet(prior);
+        if (!sheet || !was || sheet === was) return [];
+        if (sheet.status === "expired" && was.status === "sent") {
+          const body = `The term sheet for ${deal.address}, ${deal.city} expired on ${longDate(sheet.expiresOn)}. Your loan officer can send a new one.`;
+          return [{ to: "borrower", dealId: deal.id, subject: `Your term sheet expired: ${deal.loanNumber}`, body, event: "loan.term_sheet_expired" }, { to: "broker", dealId: deal.id, subject: `Your client's term sheet expired: ${deal.loanNumber}`, body, event: "loan.term_sheet_expired" }, { to: "team", subject: `Term sheet expired: ${deal.loanNumber}`, body: `${deal.borrowerName} didn't accept version ${sheet.version} by ${longDate(sheet.expiresOn)}. The loan is back in underwriting for a new one.`, event: "loan.term_sheet_expired" }];
+        }
+        if (sheet.remindedOn && !was.remindedOn) {
+          const body = `Your term sheet for ${deal.address}, ${deal.city} expires on ${longDate(sheet.expiresOn)}. Review and accept it, or ask for changes, in the LendHous portal before then.`;
+          return [{ to: "borrower", dealId: deal.id, subject: `Your term sheet expires soon: ${deal.loanNumber}`, body, event: "loan.term_sheet_expiring" }, { to: "broker", dealId: deal.id, subject: `Your client's term sheet expires soon: ${deal.loanNumber}`, body, event: "loan.term_sheet_expiring" }];
+        }
+        return [];
+      });
     case "acceptTermSheet":
       return [{ to: "team", subject: `Term sheet accepted: ${number(action.dealId)}`, body: `${action.signedName} accepted the term sheet.`, event: "loan.term_sheet_accepted" }];
     case "docStatus":
@@ -95,11 +227,27 @@ export function alertsFor(before: Book, after: Book, action: BookAction): Alert[
         const prior = before.deals.find((item) => item.id === deal.id);
         return prior && prior !== deal ? servicingAlerts(prior, deal) : [];
       });
-    case "requestPayoff":
-      return [{ to: "team", subject: `Payoff requested: ${number(action.dealId)}`, body: `${action.by} asked for a payoff statement good through ${action.goodThrough}.`, event: "payoff.requested" }];
-    case "sendPayoff": {
+    case "requestPayoff": case "logPayoffRequest": case "submitPayoffRequest": {
+      const payoff = after.payoffs.find((item) => !before.payoffs.some((old) => old.id === item.id));
+      const deal = loan(action.dealId);
+      if (!payoff || !deal) return [];
+      const who = requesterLine(payoff);
+      const check = payoff.check?.status === "pending" ? ` First: ${payoff.check.note.replace(/\.$/, "")}.` : "";
+      const alerts: Alert[] = [{ to: "team", subject: `Payoff letter requested: ${deal.loanNumber}`, body: `${who} asked for a payoff letter good through ${longDate(payoff.goodThrough)}. Florida law gives us until ${longDate(dueOf(payoff))} to send it (received ${longDate(receivedOf(payoff))}).${check}`, event: "payoff.requested" }];
+      // The borrower is told whenever someone else asks (Fla. Stat. 701.04(1)(a)), which also catches a request they never authorized.
+      if (fromThirdParty(payoff)) alerts.push({ to: "borrower", dealId: deal.id, subject: `Payoff letter requested: ${deal.loanNumber}`, body: `${who} asked us for a payoff letter on your loan for ${deal.address}, ${deal.city}. If you didn't authorize this, call your LendHous servicing team right away.`, event: "payoff.third_party" });
+      return alerts;
+    }
+    case "refusePayoff": {
       const payoff = after.payoffs.find((item) => item.id === action.payoffId);
-      return payoff ? [{ to: "borrower", dealId: payoff.dealId, subject: `Your payoff statement: ${number(payoff.dealId)}`, body: `Your payoff is ready, good through ${payoff.goodThrough}. Sign in to see it. We will never email wire instructions.`, event: "payoff.sent" }] : [];
+      if (!payoff || payoff.status !== "refused") return [];
+      const body = `We can't send a payoff letter for ${number(payoff.dealId)} on this request: ${action.reason.trim().replace(/\.$/, "")}. Send a new request once that's sorted out.`;
+      return payoff.requester?.email ? [{ to: "email", email: payoff.requester.email, subject: `Your payoff request: ${number(payoff.dealId)}`, body, event: "payoff.refused" }] : [{ to: "borrower", dealId: payoff.dealId, subject: `Your payoff request: ${number(payoff.dealId)}`, body, event: "payoff.refused" }];
+    }
+    case "payoffLetterDelivered": {
+      const payoff = after.payoffs.find((item) => item.id === action.payoffId);
+      if (!payoff || action.result !== "failed") return [];
+      return [{ to: "team", subject: `Payoff letter not delivered: ${number(payoff.dealId)}`, body: `Letter ${action.number} for ${requesterLine(payoff)} couldn't be emailed. Download it from the loan's Servicing tab and send it today another way; the 10 days still run.`, event: "payoff.undelivered" }];
     }
     case "recordScreening": {
       const deal = loan(action.dealId);
@@ -132,11 +280,15 @@ export function alertsFor(before: Book, after: Book, action: BookAction): Alert[
     case "recordPayoff": {
       const deal = loan(action.dealId);
       if (!deal?.paidOff) return [];
-      const { amount, owed, receivedOn } = deal.paidOff;
+      const { amount, owed, receivedOn, letter } = deal.paidOff;
       const over = amount - owed >= 0.01 ? ` You paid ${dollars(amount - owed)} more than the payoff; your LendHous team will refund it.` : "";
+      const short = letter && letter.shortfall > 0 ? letter.shortfall : 0;
+      // Paid on a letter that came up short: the mortgage still has to be released, but the rest is still owed.
       return [
-        { to: "borrower", dealId: deal.id, subject: `Paid in full: ${deal.loanNumber}`, body: `We received your payoff of ${dollars(amount)} on ${longDate(receivedOn)}. Your loan is paid in full. We'll send the satisfaction of your mortgage to be recorded.${over}`, event: "loan.paid_off" },
-        { to: "team", subject: `Paid off: ${deal.loanNumber}`, body: `${deal.borrowerName} paid off the loan with ${dollars(amount)} received ${longDate(receivedOn)} (${dollars(owed)} owed). Get the satisfaction of mortgage out within ${currentPricing().lienReleaseDays} days.`, event: "loan.paid_off" },
+        short
+          ? { to: "borrower", dealId: deal.id, subject: `Payoff received: ${deal.loanNumber}`, body: `We received your payoff of ${dollars(amount)} on ${longDate(receivedOn)}, as our payoff letter stated. We'll send the satisfaction of your mortgage to be recorded. Our letter left out ${dollars(short)} that's still owed on the loan; your LendHous team will be in touch about it.`, event: "loan.paid_off" }
+          : { to: "borrower", dealId: deal.id, subject: `Paid in full: ${deal.loanNumber}`, body: `We received your payoff of ${dollars(amount)} on ${longDate(receivedOn)}. Your loan is paid in full. We'll send the satisfaction of your mortgage to be recorded.${over}`, event: "loan.paid_off" },
+        { to: "team", subject: `Paid off: ${deal.loanNumber}`, body: `${deal.borrowerName} paid off the loan with ${dollars(amount)} received ${longDate(receivedOn)} (${dollars(owed)} owed).${short ? ` It was paid on payoff letter ${letter!.number}, which came to ${dollars(letter!.total)}: ${dollars(short)} is still owed by the borrower and guarantors, but the mortgage has to be released anyway.` : ""} Get the satisfaction of mortgage out within ${currentPricing().lienReleaseDays} days.`, event: "loan.paid_off" },
         // The allocations are gone once it's paid off, so who held it comes from before.
         ...holdersOf(before.deals.find((item) => item.id === deal.id)).map((holder) => ({ ...holder, subject: `A loan you hold was paid off: ${deal.loanNumber}`, body: `${deal.loanNumber} was paid off on ${longDate(receivedOn)}. Your share follows under your agreement.`, event: "loan.paid_off" })),
       ];
@@ -152,7 +304,10 @@ export function alertsFor(before: Book, after: Book, action: BookAction): Alert[
       const where = `${deal.address}, ${deal.city}`;
       const clients = (subject: string, body: string, event: string): Alert[] => [{ to: "borrower", dealId: deal.id, subject, body, event }, { to: "broker", dealId: deal.id, subject, body: body.replace("your application", "your client's application"), event }];
       // The reasons go out in the notice the attorney approves, so the email doesn't give them.
-      if (action.outcome === "declined") return clients(`About your application: ${deal.loanNumber}`, `After review, LendHous can't offer a loan on your application for ${where}. Your LendHous team will follow up.`, "loan.declined");
+      if (action.outcome === "declined") {
+        const due = deal.adverseAction ? [{ to: "team" as const, subject: `Decline notice due: ${deal.loanNumber}`, body: `${deal.borrowerName}'s application was declined. Reg B's notice is due by ${longDate(deal.adverseAction.dueOn)}${deal.adverseAction.large ? " (a business over $1 million: the reasons follow only if they ask in writing)" : ", with the specific reasons"}. Check the reasons and send it from the loan's page.`, event: "adverse_action.due" }] : [];
+        return [...clients(`About your application: ${deal.loanNumber}`, `After review, LendHous can't offer a loan on your application for ${where}. A letter explaining our decision will follow.`, "loan.declined"), ...due];
+      }
       const reason = (WITHDRAW_REASONS[action.reason] ?? action.reason).toLowerCase();
       if (action.byTeam) return clients(`Your application is closed: ${deal.loanNumber}`, `We've closed your application for ${where} as withdrawn (${reason}). If that's not right, contact your LendHous team.`, "loan.withdrawn");
       const subject = `Application withdrawn: ${deal.loanNumber}`;
@@ -245,6 +400,10 @@ export async function sendAlerts(before: Book, after: Book, action: BookAction) 
       const link = `\n\nSign in: ${origin()}/login`;
       if (alert.to === "team") {
         await notifyTeam(alert.subject, alert.body + link, alert.event);
+        continue;
+      }
+      if (alert.to === "email") {
+        if (alert.email) await notify(alert.email, alert.subject, alert.body, { eventCode: alert.event });
         continue;
       }
       const deal = after.deals.find((item) => item.id === alert.dealId);

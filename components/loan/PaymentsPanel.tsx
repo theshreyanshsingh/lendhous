@@ -3,20 +3,26 @@ import { useEffect, useState } from "react";
 import type { Deal } from "@/lib/mockData";
 import { BILL_LABEL, billTone, balanceOf, defaultInterestFrom, defaultRateOf, ledger, METHODS, openDefault, payoffFor, servicingTermsOf, shownRows } from "@/lib/servicing";
 import { useStore } from "@/lib/store";
-import { Badge, Section, Stat, statusLabel, usd } from "@/components/ui";
+import { dueOf, goodThroughProblem, latestLetter, LETTER_DAYS, MAX_GOOD_THROUGH_DAYS, requesterLine, requestState } from "@/lib/payoffs";
+import { addDays } from "@/lib/servicing";
+import { useServiceDay } from "./use-service-day";
+import { Badge, Section, Stat, usd } from "@/components/ui";
 
 /** The borrower's servicing view: what's due, what's been paid, and what it takes to pay the loan off. */
 export function PaymentsPanel({ deal }: { deal: Deal }) {
-  const { s, dispatch, viewerName } = useStore();
+  const { s, dispatch, viewerName, local } = useStore();
+  const today = useServiceDay();
   const l = ledger(deal);
   const { graceDays, lateFeePct, maturityNoticeDays } = servicingTermsOf(deal);
   const next = l.rows.find((row) => row.due === l.nextDue);
   const received = [...(deal.payments ?? [])].reverse();
   // Set after the first render: the server and the browser can disagree about today's date.
   const [goodThrough, setGoodThrough] = useState("");
-  useEffect(() => { setGoodThrough(new Date(Date.now() + 10 * 86_400_000).toISOString().slice(0, 10)); }, []);
+  useEffect(() => { if (today) setGoodThrough((current) => current || addDays(today, 10)); }, [today]);
   const quote = goodThrough ? payoffFor(deal, goodThrough) : null;
+  const dateProblem = goodThrough && today ? goodThroughProblem(goodThrough, today) : null;
   const requests = s.payoffs.filter((payoff) => payoff.dealId === deal.id);
+  const [asked, setAsked] = useState(false);
   return (
     <Section title="Payments and payoff" right={openDefault(deal) ? <Badge tone="rose">Default</Badge> : l.matured ? <Badge tone="rose">Matured</Badge> : l.paymentsLate ? <Badge tone="rose">{l.paymentsLate} past due</Badge> : <Badge tone="green">Current</Badge>}>
       {openDefault(deal) ? (
@@ -56,7 +62,8 @@ export function PaymentsPanel({ deal }: { deal: Deal }) {
       <p className="mt-3 text-xs text-muted-foreground">Payments are due on the 1st. One that arrives more than {graceDays} days late owes a late fee of {lateFeePct * 100}% of the payment. Paying online isn&apos;t available yet: contact your LendHous servicing team to make a payment.</p>
       <div className="mt-4 border-t border-border pt-4">
         <p className="text-sm font-medium">Paying the loan off?</p>
-        <label className="mt-2 block"><span className="label">Good through</span><input data-testid="payoff-date" type="date" className="desk-input" value={goodThrough} onChange={(event) => setGoodThrough(event.target.value)} /></label>
+        <p className="mt-1 text-xs text-muted-foreground">An estimate for any date. For the figures to pay, ask for a payoff letter.</p>
+        <label className="mt-2 block"><span className="label">Good through</span><input data-testid="payoff-date" type="date" className="desk-input" min={today || undefined} max={today ? addDays(today, MAX_GOOD_THROUGH_DAYS) : undefined} value={goodThrough} onChange={(event) => setGoodThrough(event.target.value)} /></label>
         {quote && (
           <dl className="mt-3 space-y-1 text-sm" data-testid="payoff-quote">
             <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Principal</dt><dd>{usd(quote.principal, 2)}</dd></div>
@@ -68,9 +75,23 @@ export function PaymentsPanel({ deal }: { deal: Deal }) {
             <div className="flex justify-between gap-3 text-xs text-muted-foreground"><dt>Each extra day</dt><dd>{usd(quote.perDiem, 2)}</dd></div>
           </dl>
         )}
-        <button className="btn-ghost mt-3 w-full" data-testid="request-payoff" disabled={!goodThrough} onClick={() => dispatch({ t: "requestPayoff", dealId: deal.id, goodThrough, by: viewerName })}>Request a payoff statement</button>
+        {dateProblem && <p className="mt-2 text-xs text-warn">{dateProblem}</p>}
+        <button className="btn-ghost mt-3 w-full" data-testid="request-payoff" disabled={!goodThrough || Boolean(dateProblem) || asked} onClick={async () => { setAsked(true); await dispatch({ t: "requestPayoff", dealId: deal.id, goodThrough, by: viewerName }); setAsked(false); }}>Request a payoff letter</button>
+        <p className="mt-2 text-xs text-muted-foreground">We email you an itemized payoff letter within {LETTER_DAYS} days, usually much sooner. A title company closing your sale can ask for one on our <a className="text-link underline" href="/payoff">payoff request page</a> with your signed authorization.</p>
         {requests.length > 0 && (
-          <ul className="mt-2 space-y-1 text-xs text-muted-foreground" data-testid="my-payoffs">{requests.map((payoff) => <li key={payoff.id} className="flex flex-wrap justify-between gap-2"><span>{usd(payoff.total, 2)}, good through {payoff.goodThrough}</span><span>{statusLabel(payoff.status)}</span></li>)}</ul>
+          <ul className="mt-3 space-y-2 text-xs" data-testid="my-payoffs">
+            {requests.map((payoff) => {
+              const letter = latestLetter(payoff);
+              return (
+                <li key={payoff.id} className="rounded-[2px] border border-border p-2">
+                  <div className="flex flex-wrap justify-between gap-2"><span className="font-medium">{payoff.requester && payoff.requester.kind !== "borrower" ? requesterLine(payoff) : "You"} asked, good through {payoff.goodThrough}</span><Badge tone={requestState(payoff).tone}>{payoff.status === "requested" ? "Being prepared" : requestState(payoff).label}</Badge></div>
+                  {payoff.status === "requested" && <p className="mt-1 text-muted-foreground">We&apos;ll send it by {dueOf(payoff)}.</p>}
+                  {payoff.refused && <p className="mt-1 text-muted-foreground">We couldn&apos;t send this one: {payoff.refused.reason}</p>}
+                  {letter && <p className="mt-1">Letter {letter.number}{letter.replaces ? " (corrected)" : ""}: {usd(letter.total, 2)} if received by {letter.goodThrough}, then {usd(letter.perDiem, 2)} a day. <a className="text-link underline" data-testid="my-letter-pdf" href={local ? "/payoff-letter/demo" : `/api/payoffs/${payoff.id}/letter?n=${letter.number}`} target="_blank" rel="noreferrer">Open the letter</a></p>}
+                </li>
+              );
+            })}
+          </ul>
         )}
         <p className="mt-3 rounded-md bg-bad/10 p-2 text-xs text-bad">Payoffs are paid by wire. We will never email you wire instructions. Always confirm by phone with a number you already have.</p>
       </div>

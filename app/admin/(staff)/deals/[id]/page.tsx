@@ -12,6 +12,7 @@ import { SERVICED } from "@/lib/servicing";
 import { teaserOf } from "@/lib/teaser";
 import { inviteBorrower } from "@/actions/book";
 import { ApplicationOnFile } from "@/components/loan/ApplicationOnFile";
+import { ApplicationRecord } from "@/components/loan/AdverseAction";
 import { CloseApplication } from "@/components/loan/CloseApplication";
 import { ClosingPanel } from "@/components/loan/ClosingPanel";
 import { OfacPanel } from "@/components/loan/OfacPanel";
@@ -21,13 +22,18 @@ import { LoanLedger } from "@/components/loan/LoanLedger";
 import { LoanMessages } from "@/components/loan/LoanMessages";
 import { PhotoRequests } from "@/components/loan/PhotoRequests";
 import { ScopeOfWork } from "@/components/loan/ScopeOfWork";
+import { TermSheetBuilder } from "@/components/loan/TermSheetBuilder";
+import { ConditionsPanel } from "@/components/loan/ConditionsPanel";
+import { LienProtection } from "@/components/loan/LienProtection";
 import { TermSheetCard } from "@/components/loan/TermSheetCard";
 import { useServiceDay } from "@/components/loan/use-service-day";
 import { Badge, GradeBadge, RatioPill, Section, Stat, usd, pct, k, productLabel, statusLabel, capTone, points, ratioGrid, statGrid } from "@/components/ui";
 
 // Closing starts once the term sheet is accepted, and stays as the record of how the money went out.
 const CLOSING_TAB = ["term_sheet_accepted", "conditions", "clear_to_close", "closing", "funded", "servicing_current", "servicing_delinquent", "matured", "default", "paid_off"];
-const allTabs = ["Numbers & Ratios", "Credit review", "Score & Flags", "Capital Routing", "Documents", "Closing", "Messages", "Servicing"] as const;
+const allTabs = ["Numbers & Ratios", "Credit review", "Score & Flags", "Term sheet", "Conditions", "Capital Routing", "Documents", "Closing", "Messages", "Servicing"] as const;
+// Conditions start in underwriting; before that there's nothing to set yet.
+const BEFORE_UNDERWRITING = ["submitted", "initial_review"];
 type Tab = (typeof allTabs)[number];
 
 export default function DealWorkspace() {
@@ -47,7 +53,7 @@ export default function DealWorkspace() {
   // The loan's own pricing: its limits and assumptions, not whatever was published since.
   const pricingConfig = pricingFor(d.app.pricingVersion);
   // The servicing tab only means something once there's money out.
-  const tabs = allTabs.filter((t) => (t !== "Servicing" || SERVICED.includes(d.status) || d.status === "paid_off") && (t !== "Closing" || CLOSING_TAB.includes(d.status)));
+  const tabs = allTabs.filter((t) => (t !== "Servicing" || SERVICED.includes(d.status) || d.status === "paid_off") && (t !== "Closing" || CLOSING_TAB.includes(d.status)) && (t !== "Term sheet" || ["underwriting", "term_sheet_issued"].includes(d.status) || Boolean(d.termSheets?.length || d.pricingException)) && (t !== "Conditions" || !BEFORE_UNDERWRITING.includes(d.status) || Boolean(d.conditions?.length)));
   const avail = inHouseAvailable(s.deals, s.sources, d.id);
   const rec = recommendRoute({ product: d.app.product, noteAmount: e.noteAmount, grade: e.score.grade, location: e.location, inHouseAvailable: avail });
   const cap = capitalSummary(s.deals, s.sources);
@@ -96,7 +102,8 @@ export default function DealWorkspace() {
               <div className="min-w-0 text-sm"><span className="text-muted-foreground">Next step:</span> <b>{stage.borrowerStep ? stage.action : statusLabel(stage.to)}</b></div>
               <div className="flex w-full flex-wrap gap-2 sm:w-auto">
                 {funding && wireVerified(d) && !d.fundingApprovers?.includes(viewerName) && (d.fundingApprovers?.length ?? 0) < 2 && <button className="btn-ghost flex-1 sm:flex-none" data-testid="approve-funding" onClick={() => dispatch({ t: "approveFunding", dealId: d.id, by: viewerName })}>Approve funding</button>}
-                {!stage.borrowerStep && <button className="btn-primary flex-1 sm:flex-none" data-testid="advance-loan" disabled={!canAdvance(stage)} onClick={() => dispatch({ t: "advanceLoan", dealId: d.id })}>{stage.action}</button>}
+                {stage.to === "term_sheet_issued" ? <button className="btn-primary flex-1 sm:flex-none" data-testid="build-term-sheet" onClick={() => setTab("Term sheet")}>Build the term sheet</button>
+                  : !stage.borrowerStep && <button className="btn-primary flex-1 sm:flex-none" data-testid="advance-loan" disabled={!canAdvance(stage)} onClick={() => dispatch({ t: "advanceLoan", dealId: d.id })}>{stage.action}</button>}
               </div>
             </div>
             {funding && wireVerified(d) && <p className="mt-1 text-xs text-muted-foreground" data-testid="funding-wire">Funds go to {activeWire(d)!.beneficiary}, {activeWire(d)!.bankName}, account {maskAccount(activeWire(d)!.account)}, verified by call-back.</p>}
@@ -112,7 +119,7 @@ export default function DealWorkspace() {
             <button type="button" className="btn-ghost h-9! px-3! text-xs!" data-testid="reprice-loan" disabled={!repriced.eligible} onClick={() => dispatch({ t: "repriceLoan", dealId: d.id, by: viewerName })}>Reprice on current pricing</button>
           </div>
         )}
-        <div className="mt-4 grid grid-cols-2 border-b border-border sm:grid-cols-3 xl:flex xl:gap-1">
+        <div className="mt-4 grid grid-cols-2 border-b border-border sm:grid-cols-3 xl:flex xl:flex-wrap xl:gap-1">
           {tabs.map((t) => <button key={t} data-testid={`tab-${t}`} onClick={() => setTab(t)} className={`border-b-2 px-3 py-2 text-left text-sm font-semibold sm:whitespace-nowrap ${tab === t ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>{t}</button>)}
         </div>
       </div>
@@ -227,8 +234,10 @@ export default function DealWorkspace() {
         </div>
       )}
 
-      {tab === "Credit review" && <div className="space-y-4"><ApplicationOnFile deal={d} /><OfacPanel deal={d} /><CreditReview deal={d} /></div>}
-      {tab === "Closing" && <div className="space-y-4"><ClosingPanel deal={d} /><OfacPanel deal={d} /></div>}
+      {tab === "Term sheet" && <TermSheetBuilder deal={d} />}
+      {tab === "Conditions" && <ConditionsPanel deal={d} />}
+      {tab === "Credit review" && <div className="space-y-4"><ApplicationRecord deal={d} /><ApplicationOnFile deal={d} /><OfacPanel deal={d} /><CreditReview deal={d} /></div>}
+      {tab === "Closing" && <div className="space-y-4"><ClosingPanel deal={d} />{(d.app.product === "fix_flip" || d.app.product === "ground_up" || d.lienFile) && <LienProtection deal={d} />}<OfacPanel deal={d} /></div>}
       {tab === "Servicing" && (SERVICED.includes(d.status) || d.status === "paid_off") && <LoanLedger deal={d} />}
 
       {tab === "Messages" && (

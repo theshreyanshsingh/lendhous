@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Bell, Briefcase, Percent, Building2, ClipboardList, FilePlus, Hammer, Inbox, Landmark, LayoutDashboard, BookOpen, Lock, LogOut, Menu, ReceiptText, RotateCcw, ScrollText, Settings, Store, Tag, Users, type LucideIcon } from "lucide-react";
+import { Bell, Briefcase, Percent, Building2, ClipboardList, FilePlus, Hammer, Inbox, Landmark, LayoutDashboard, ListChecks, BookOpen, Lock, LogOut, Menu, ReceiptText, RotateCcw, ScrollText, Settings, Store, Tag, Users, type LucideIcon } from "lucide-react";
 import { logout } from "@/actions/auth";
 import { attentionCounts } from "@/lib/attention";
 import { useStore } from "@/lib/store";
@@ -47,7 +47,7 @@ export default function Shell({ children, account, view }: { children: React.Rea
     { href: "/admin/account/notifications", label: "Notifications", icon: Bell, section: "Account", count: account.unread },
     ...(account.canManageMembers ? [{ href: "/admin/members", label: "Members", icon: Users, section: "Account" }] : []),
     ...(account.canViewAudit ? [{ href: "/admin/audit", label: "Audit log", icon: ScrollText, section: "Account" }] : []),
-    ...(account.canManageSettings ? [{ href: "/admin/settings", label: "Settings", icon: Settings, section: "Account" }] : []),
+    ...(account.canManageSettings ? [{ href: "/admin/conditions", label: "Conditions library", icon: ListChecks, section: "Account" }, { href: "/admin/settings", label: "Settings", icon: Settings, section: "Account" }] : []),
     { href: "/admin/account/security", label: "Security", icon: Lock, section: "Account" },
   ];
   const logoHref = view ? VIEW_HOME[view] : "/admin/account/security";

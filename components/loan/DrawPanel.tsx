@@ -1,4 +1,5 @@
 "use client";
+import { DrawLienChecklist } from "./DrawLienChecklist";
 import { useState } from "react";
 import { PhotoRequests } from "@/components/loan/PhotoRequests";
 import { drawRequestError } from "@/lib/draws";
@@ -60,6 +61,7 @@ export function DrawPanel({ deal }: { deal: Deal }) {
             <li key={draw.id} className="py-2 text-sm" data-testid="my-draw">
               <div className="flex flex-wrap items-center justify-between gap-2"><b>{usd(draw.status === "funded" || draw.status === "approved" ? draw.approved ?? 0 : drawTotal(draw))}</b><Badge tone={DRAW_STATUS[draw.status].tone}>{DRAW_STATUS[draw.status].label}</Badge></div>
               <div className="text-xs text-muted-foreground">Requested {usd(drawTotal(draw))} on {shortDate(draw.requestedAt)}{draw.reason ? ` · ${draw.reason}` : ""}</div>
+              <DrawLienChecklist deal={deal} draw={draw} side="borrower" />
             </li>
           ))}
         </ul>

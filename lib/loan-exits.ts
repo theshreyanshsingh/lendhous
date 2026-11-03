@@ -3,7 +3,7 @@
 // payoff and the release of the mortgage after it. The reducer, the access rules and the screens all ask these, so the
 // button a screen offers and the rule the server applies can't disagree.
 import { evaluate } from "./engine";
-import type { Closure, Deal, DefaultKind, LoanExtension, LoanStatus } from "./mockData";
+import type { Closure, Deal, DefaultKind, LoanExtension, LoanStatus, PayoffLetter } from "./mockData";
 import { currentPricing, pricingFor } from "./pricing-versions";
 import { addDays, daysBetween, ledgerOf, maturityOf, openDefault, payoffFor, SERVICED, type Ledger } from "./servicing";
 
@@ -39,9 +39,10 @@ export const closureReason = (closure: Closure) => (closure.outcome === "decline
 
 /**
  * Where a reopened application goes back to. Its capital was let go when it closed, so one that had cleared to close
- * starts again at conditions, where the capital is lined up again.
+ * starts again at conditions, where the capital is lined up again. One closed while a term sheet was out needs a new
+ * term sheet, so it goes back to underwriting.
  */
-export const reopenTo = (closure: Closure): LoanStatus => (PRE_FUNDING.indexOf(closure.from) > PRE_FUNDING.indexOf("conditions") ? "conditions" : closure.from);
+export const reopenTo = (closure: Closure): LoanStatus => (PRE_FUNDING.indexOf(closure.from) > PRE_FUNDING.indexOf("conditions") ? "conditions" : closure.from === "term_sheet_issued" ? "underwriting" : closure.from);
 
 export const DEFAULT_KINDS: Record<DefaultKind, string> = {
   monetary: "Missed payments",
@@ -131,11 +132,19 @@ export function payoffOn(deal: Deal, receivedOn: string) {
   return { ledger: l, quote: payoffFor(deal, receivedOn, l) };
 }
 
-/** Why this payoff can't be recorded, or null. Less than the payoff isn't a payoff: it's a payment. */
-export function payoffError(deal: Deal, amount: number, receivedOn: string, today: string) {
+/**
+ * Why this payoff can't be recorded, or null. Less than the payoff isn't a payoff: it's a payment. The exception is money
+ * paid on a payoff letter good through that day: Florida holds LendHous to the letter's figures (Fla. Stat. 701.04(1)(c)3),
+ * so it's a payoff even if the letter came up short, and the rest is still owed.
+ */
+export function payoffError(deal: Deal, amount: number, receivedOn: string, today: string, onLetter?: PayoffLetter) {
   if (!SERVICED.includes(deal.status)) return "This loan isn't being serviced.";
   if (receivedOn > today) return "The date received can't be in the future.";
   if (receivedOn < deal.closingDate) return "That date is before the loan closed.";
+  if (onLetter) {
+    if (onLetter.goodThrough < receivedOn) return `Letter ${onLetter.number} was good through ${onLetter.goodThrough}, before this arrived.`;
+    return amount + 0.005 < onLetter.total ? `That's ${money(onLetter.total - amount)} short of the ${money(onLetter.total)} on letter ${onLetter.number}.` : null;
+  }
   const { total } = payoffOn(deal, receivedOn).quote;
   if (amount + 0.005 < total) return `That's ${money(total - amount)} short of the ${money(total)} payoff on ${receivedOn}. Record it as a payment, or collect the rest first.`;
   return null;

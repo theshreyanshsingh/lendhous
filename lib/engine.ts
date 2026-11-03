@@ -219,6 +219,11 @@ export interface Application {
   valuationSource?: "appraisal" | "bpo" | "avm" | "borrower_estimate";
   /** The pricing version this loan was quoted on (lib/pricing-versions.ts). Set when it's saved; never from a browser. */
   pricingVersion?: string;
+  /**
+   * The rate and points set on the term sheet (lib/term-sheets.ts), in place of the matrix's. Only the server's term sheet
+   * step sets them, and they're locked once the borrower accepts.
+   */
+  termRate?: number; termPoints?: number;
 }
 
 const pick = (r: Range, p: "low" | "mid" | "high") => (p === "low" ? r[0] : p === "high" ? r[1] : (r[0] + r[1]) / 2);
@@ -234,6 +239,8 @@ export interface Estimate {
   eligible: boolean; hardStops: string[]; flags: string[];
   tier: Tier; location: "core" | "expansion" | "partner_only";
   rateRange: Range; pointsRange: Range; rate: number; pointsPct: number;
+  /** The matrix's rate for this loan, and the range around it the matrix allows, with this loan's adjustments. */
+  matrixRate: number; rateLimits: Range;
   noteAmount: number; maxLoan: number; binding: string; initialAdvance: number; holdback: number; financedReserve: number;
   points: number; lenderFees: number; cashToClose: number; monthlyPayment: number; termMonths: number;
   ratios: Ratio[]; allIn: number;
@@ -269,7 +276,7 @@ export function evaluate(app: Application, cfg: PricingConfig = pricingFor(app.p
   let noteAmount = 0, maxLoan = 0, binding = "", initialAdvance = 0, holdback = 0, financedReserve = 0;
   let ratios: Ratio[] = []; let sizingCandidates: Record<string, number> | undefined; let dscrVal: number | undefined;
   let monthlyPayment = 0;
-  let rate = 0, pointsPct = 0;
+  let rate = 0, pointsPct = 0, matrixRate = 0;
 
   if (app.product === "fix_flip" || app.product === "ground_up") {
     let lim: { maxLTC: number; maxLTARV: number; maxInitialLTV: number; rehabFinanced: number };
@@ -293,7 +300,8 @@ export function evaluate(app: Application, cfg: PricingConfig = pricingFor(app.p
       app = { ...app, rehab: hard + soft, purchasePrice: land };
     }
     const s = sizeFixFlip({ purchasePrice: app.purchasePrice, rehab: app.rehab, arv: app.arv, asIs: app.product === "ground_up" ? app.purchasePrice : V, costBasis: C, limits: lim, requested: app.requestedAmount, cap });
-    rate = pick(rateRange, pp) + rateAdd + smallLoanAdd(s.loan); pointsPct = pick(pointsRange, pp);
+    matrixRate = pick(rateRange, pp) + rateAdd + smallLoanAdd(s.loan);
+    rate = app.termRate ?? matrixRate; pointsPct = app.termPoints ?? pick(pointsRange, pp);
     if (app.interestReserve === "financed") {
       // reserve is CARVED OUT of the note (Spec 5.1 ex. B), so sizing limits still hold
       financedReserve = round2(app.accrual === "full_boat" ? fullBoatReserve(s.loan, rate, termMonths) :
@@ -317,7 +325,8 @@ export function evaluate(app: Application, cfg: PricingConfig = pricingFor(app.p
     if (maxLoan > cap) { maxLoan = cap; binding = "Max loan size"; }
     noteAmount = maxLoan;
     if (app.requestedAmount && app.requestedAmount < noteAmount) { noteAmount = app.requestedAmount; binding = "Requested amount"; }
-    rate = pick(rateRange, pp) + rateAdd + smallLoanAdd(noteAmount); pointsPct = pick(pointsRange, pp);
+    matrixRate = pick(rateRange, pp) + rateAdd + smallLoanAdd(noteAmount);
+    rate = app.termRate ?? matrixRate; pointsPct = app.termPoints ?? pick(pointsRange, pp);
     holdback = 0; initialAdvance = noteAmount;
     ratios = [{ key: "ltv", label: "LTV", actual: ltv(noteAmount, V), limit: maxL, kind: "max", color: "green" }];
     monthlyPayment = ioPayment(noteAmount, rate);
@@ -325,24 +334,25 @@ export function evaluate(app: Application, cfg: PricingConfig = pricingFor(app.p
     // DSCR
     const d = cfg.dscr; termMonths = 360;
     rateRange = d.baseRate; pointsRange = d.points; minFico = d.ficoBands[d.ficoBands.length - 1];
-    pointsPct = pick(pointsRange, pp);
+    pointsPct = app.termPoints ?? pick(pointsRange, pp);
     const row = d.ficoBands.findIndex((b) => app.fico >= b);
     const cashOutCut = app.purpose === "refi_co" ? d.cashOutLtvReduction : 0;
-    let chosen: { col: number; loan: number; rate: number; dscr: number; maxLTV: number } | null = null;
+    let chosen: { col: number; loan: number; rate: number; matrixRate: number; dscr: number; maxLTV: number } | null = null;
     if (row >= 0) {
       for (let col = 0; col < d.dscrBands.length; col++) {
         const cell = d.grid[row][col]; if (!cell) continue;
         const maxL = cell.maxLTV - levCut - cashOutCut;
         let loan = Math.min(Math.floor(maxL * V), cap);
         if (app.requestedAmount && app.requestedAmount < loan) loan = app.requestedAmount;
-        const r = pick(d.baseRate, pp) + cell.rateAdd + rateAdd + smallLoanAdd(loan);
+        const cellRate = pick(d.baseRate, pp) + cell.rateAdd + rateAdd + smallLoanAdd(loan);
+        const r = app.termRate ?? cellRate;
         const pay = d.qualifyOn === "io" ? ioPayment(loan, r) : amortizingPayment(loan, r, d.amortizationMonths);
         const x = dscr({ monthlyRent: app.monthlyRent ?? 0, payment: pay, taxesAnnual: app.taxesAnnual ?? 0, insuranceAnnual: app.insuranceAnnual ?? 0, hoaMonthly: app.hoaMonthly }).dscr;
-        if (x >= d.dscrBands[col] - 1e-9) { chosen = { col, loan, rate: r, dscr: x, maxLTV: maxL }; break; }
+        if (x >= d.dscrBands[col] - 1e-9) { chosen = { col, loan, rate: r, matrixRate: cellRate, dscr: x, maxLTV: maxL }; break; }
       }
     }
-    if (!chosen) { hardStops.push("Not eligible on the DSCR grid (FICO/DSCR)"); chosen = { col: 0, loan: 0, rate: pick(d.baseRate, pp), dscr: 0, maxLTV: 0 }; }
-    rate = chosen.rate; noteAmount = chosen.loan; maxLoan = Math.min(Math.floor(chosen.maxLTV * V), cap); binding = `DSCR column ≥ ${d.dscrBands[chosen.col]}`;
+    if (!chosen) { hardStops.push("Not eligible on the DSCR grid (FICO/DSCR)"); chosen = { col: 0, loan: 0, rate: app.termRate ?? pick(d.baseRate, pp), matrixRate: pick(d.baseRate, pp), dscr: 0, maxLTV: 0 }; }
+    rate = chosen.rate; matrixRate = chosen.matrixRate; noteAmount = chosen.loan; maxLoan = Math.min(Math.floor(chosen.maxLTV * V), cap); binding = `DSCR column ≥ ${d.dscrBands[chosen.col]}`;
     initialAdvance = noteAmount; dscrVal = chosen.dscr;
     monthlyPayment = d.qualifyOn === "io" ? ioPayment(noteAmount, rate) : amortizingPayment(noteAmount, rate, d.amortizationMonths);
     ratios = [
@@ -384,7 +394,9 @@ export function evaluate(app: Application, cfg: PricingConfig = pricingFor(app.p
   const score = dealScore({ product: app.product, leverageActual: lev.actual, leverageLimit: lev.limit, fico: app.fico, tier, profitMargin: flip?.margin, dscr: dscrVal, reserveMonths, location, valuationSource: app.valuationSource ?? "borrower_estimate" }, cfg);
   if (ratios.some((r) => r.color === "red")) flags.push("A ratio is over its limit");
 
-  return { eligible: hardStops.length === 0, hardStops, flags, tier, location, rateRange: rateRange!, pointsRange: pointsRange!, rate, pointsPct, noteAmount, maxLoan, binding, initialAdvance, holdback, financedReserve, points, lenderFees, cashToClose: round2(cashToClose), monthlyPayment: round2(monthlyPayment), termMonths: termMonths!, ratios, allIn, flip, dscr: dscrVal, score, reserveMonths, sizingCandidates };
+  // The tier's range, moved by whatever adjusted this loan's rate: the room the matrix gives around its own rate.
+  const rateLimits: Range = [round2(matrixRate - (pick(rateRange!, pp) - rateRange![0])), round2(matrixRate + (rateRange![1] - pick(rateRange!, pp)))];
+  return { eligible: hardStops.length === 0, hardStops, flags, tier, location, rateRange: rateRange!, pointsRange: pointsRange!, rate, pointsPct, matrixRate, rateLimits, noteAmount, maxLoan, binding, initialAdvance, holdback, financedReserve, points, lenderFees, cashToClose: round2(cashToClose), monthlyPayment: round2(monthlyPayment), termMonths: termMonths!, ratios, allIn, flip, dscr: dscrVal, score, reserveMonths, sizingCandidates };
 }
 
 /** Balances on a funded loan (Spec 5.1): Dutch interest accrues on disbursed principal, full-boat on the note amount. */

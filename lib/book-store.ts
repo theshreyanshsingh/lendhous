@@ -10,7 +10,7 @@ import { prisma } from "@/lib/prisma";
 import { loadPricing } from "@/lib/pricing-store";
 import { BASE_VERSION } from "@/lib/pricing-versions";
 
-const LISTS = ["deals", "bids", "partners", "buyers", "brokers", "sales", "offers", "draws", "payoffs", "messages", "sources", "photoRequests"] as const;
+const LISTS = ["deals", "bids", "partners", "buyers", "brokers", "sales", "offers", "draws", "payoffs", "messages", "sources", "photoRequests", "conditionLibrary"] as const;
 const AUDIT_ID = "activity:feed";
 const VERSION_ID = "main";
 const ATTEMPTS = 6;

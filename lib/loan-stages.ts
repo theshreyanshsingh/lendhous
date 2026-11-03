@@ -1,6 +1,7 @@
 // How a loan moves from application to servicing (Spec 4). Staff move it forward; only the borrower can accept a term
 // sheet; and a loan can't clear to close with documents open or its capital not committed.
 import { activeWire, wireVerified } from "./closing";
+import { blockingConditions } from "./conditions";
 import type { Estimate } from "./engine";
 import { ofacBlocker } from "./ofac";
 import type { Deal, LoanStatus } from "./mockData";
@@ -38,6 +39,9 @@ export function nextStage(deal: Deal, e: Estimate, today?: string): NextStage | 
     // Signed loan documents come at closing and the recorded mortgage after, so neither holds up clear to close.
     const open = deal.docs.filter((doc) => !doc.stage && doc.status !== "accepted" && doc.status !== "waived").length;
     if (open) blockers.push(`${open} document${open > 1 ? "s" : ""} still open`);
+    // Every condition before the loan documents and before funding is cleared or waived first (Spec 4.3).
+    const conditions = blockingConditions(deal).length;
+    if (conditions) blockers.push(`${conditions} condition${conditions > 1 ? "s" : ""} to clear before closing (Conditions tab)`);
     const allocated = deal.allocations.reduce((sum, item) => sum + item.amount, 0);
     if (allocated !== e.noteAmount) blockers.push("Capital doesn't cover the whole loan yet");
   }

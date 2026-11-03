@@ -44,6 +44,7 @@ export function SiteFooter() {
         <div>
           <h3>GET STARTED</h3>
           <Link href="/start">Get a quote</Link>
+          <Link href="/payoff">Request a payoff letter</Link>
           <Link href="/login">Portal login</Link>
         </div>
       </nav>

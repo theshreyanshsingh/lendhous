@@ -25,6 +25,8 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         </label>
         <label className="block"><span className="label">Sign staff out after this many idle minutes</span><input name="staffIdleMinutes" data-testid="setting-idle" type="number" min={5} max={480} className="desk-input w-32!" defaultValue={settings.staffIdleMinutes} required /></label>
         <label className="block"><span className="label">Delete read notifications after this many years</span><input name="retentionYears" data-testid="setting-retention" type="number" min={1} max={30} className="desk-input w-32!" defaultValue={settings.retentionYears} required /><span className="mt-1 block text-[11px] text-faint">Loan files and the audit log are never deleted by this.</span></label>
+        <label className="block"><span className="label">LendHous&apos;s mailing address, for letters</span><input name="lenderAddress" data-testid="setting-address" className="desk-input" maxLength={300} defaultValue={settings.lenderAddress} placeholder="Street, city, state ZIP" /><span className="mt-1 block text-[11px] text-faint">Printed on decline notices, which Reg B requires to carry the lender&apos;s address. They can&apos;t be sent without it.</span></label>
+        <label className="block"><span className="label">Phone for those letters (optional)</span><input name="lenderPhone" data-testid="setting-phone" className="desk-input w-56!" maxLength={40} defaultValue={settings.lenderPhone} /></label>
         <SubmitButton className="h-11 text-[13px] font-medium" pendingLabel="Saving…">Save settings</SubmitButton>
       </form>
     </div>

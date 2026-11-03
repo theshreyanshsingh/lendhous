@@ -2,7 +2,7 @@
  * SEEDED MOCK DATA — 100% FAKE. Every person, company, address and number below is invented for the demo.
  * Names are tagged "(FAKE)" / "Sample" / "Demo" on purpose so nobody mistakes them for real records.
  */
-import type { Application, BuyBox } from "./engine";
+import type { Application, BuyBox, Product } from "./engine";
 
 export type LoanStatus =
   | "submitted" | "initial_review" | "underwriting" | "term_sheet_issued" | "term_sheet_accepted" | "conditions"
@@ -31,6 +31,22 @@ export interface Deal {
   teaserSentTo: string[]; docs: Doc[]; source: string; contractorIsGtAffiliate?: boolean;
   disbursedDraws?: number; nextPaymentDue?: string; paymentsLate?: number; exitStrategy: string; closingDate: string;
   scope?: ScopeLine[]; scopeSummary?: string; brokerId?: string; brokerPoints?: number; termSheetSignedBy?: string; termSheetSignedAt?: string;
+  /** Every term sheet sent, oldest first (Spec A9, B16). The borrower sees only the newest. */
+  termSheets?: TermSheet[];
+  /** What has to happen before the loan documents, before funding, and after closing (Spec A10, B17). */
+  conditions?: LoanCondition[];
+  /** Florida construction lien protections for draws (Fla. Stat. ch. 713): the contractor, the Notice of Commencement, notices to owner, insurance. */
+  lienFile?: LienFile;
+  /** When the application became complete, which starts Reg B's 30 days (12 CFR 1002.9(a)(1)). */
+  completed?: { at: string; on: string; by: string };
+  /** The borrowing business's gross revenue in its last fiscal year, which decides which notice rule applies (1002.9(a)(3)). */
+  revenue?: { amount: number; year: number; by: string; at: string };
+  /** The notice of a decline (Reg B adverse action), its deadline, and any written request for the reasons. */
+  adverseAction?: AdverseAction;
+  /** Keep this loan's records past the retention period: an investigation, enforcement or lawsuit is pending (1002.12(b)(4)). */
+  legalHold?: { reason: string; by: string; at: string };
+  /** Pricing outside the matrix asked for by an underwriter, and an owner's answer (Spec A9). */
+  pricingException?: PricingException;
   /** People who approved funding this loan. It always takes two different people (Spec 6, dual control). */
   fundingApprovers?: string[];
   sponsor?: Sponsor; creditReview?: CreditReview;
@@ -92,6 +108,20 @@ export interface Screening {
   status: "clear" | "review" | "cleared" | "match";
   decided?: { by: string; at: string; reason: string };
 }
+/** A sent notice or statement: when, how, to whom, and how sending went. */
+export interface NoticeSent { sentOn: string; sentAt: string; by: string; method: "email" | "mail"; to: string[]; result?: "sent" | "logged" | "failed" }
+export interface AdverseAction {
+  decidedAt: string; decidedOn: string;
+  /** The principal reasons, specific (1002.9(b)(2)), at most four. */
+  reasons: string[];
+  /** Over $1 million in revenue: notice in a reasonable time, and the reasons only on a written request (1002.9(a)(3)(ii)). */
+  large: boolean;
+  dueOn: string;
+  notice?: NoticeSent;
+  /** The applicant's written request for the reasons, and when the statement is due. */
+  request?: { receivedOn: string; by: string; at: string; dueOn: string };
+  statement?: NoticeSent;
+}
 export interface Closure { outcome: "declined" | "withdrawn"; reason: string; note: string; by: string; at: string; from: LoanStatus }
 export type DefaultKind = "monetary" | "maturity" | "covenant" | "insurance_lapse" | "tax_delinquency";
 export interface DefaultCase { kind: DefaultKind; effectiveOn: string; note: string; by: string; at: string; cured?: { by: string; at: string; note: string } }
@@ -108,6 +138,8 @@ export interface Payoff {
   amount: number; receivedOn: string; method: PaymentMethod; reference: string; by: string; at: string;
   /** What the payoff came to on the day it arrived. Anything over it is owed back to the borrower. */
   owed: number;
+  /** Paid on a payoff letter that came to less than the payoff: the mortgage is released, and the rest is still owed. */
+  letter?: { payoffId: string; number: number; total: number; shortfall: number };
   release?: { sentOn?: string; recordedOn?: string; reference: string; by: string };
 }
 export type PaymentMethod = "wire" | "ach" | "check" | "other";
@@ -117,10 +149,106 @@ export interface FeeWaiver { due: string; by: string; at: string; reason: string
 /** One division of a project's rehab or construction budget. Draws are requested against these. */
 export interface ScopeLine { id: string; division: string; budget: number; released: number }
 export interface DrawRequestLine { scopeId: string; requested: number; observedPct?: number }
-export interface DrawRequest { id: string; dealId: string; requestedAt: string; by: string; note: string; contact: string; photos: string[]; lines: DrawRequestLine[]; status: "submitted" | "inspecting" | "inspected" | "approved" | "funded" | "rejected"; approved?: number; approvers: string[]; reason?: string; fundedAt?: string; photoIds?: string[] }
+export interface DrawRequest {
+  id: string; dealId: string; requestedAt: string; by: string; note: string; contact: string; photos: string[]; lines: DrawRequestLine[];
+  status: "submitted" | "inspecting" | "inspected" | "approved" | "funded" | "rejected"; approved?: number; approvers: string[]; reason?: string; fundedAt?: string; photoIds?: string[];
+  /** Lien waivers sent for this draw (Fla. Stat. 713.20), and for the last draw the contractor's final payment affidavit (713.06(3)(d)). */
+  waivers?: LienWaiver[]; affidavit?: FinalAffidavit;
+  /** Marked as the last draw, which takes final waivers and the affidavit. A draw that uses up the holdback is the last anyway. */
+  final?: boolean;
+  /** An owner's release past the lien-law holds listed, with why. */
+  override?: { by: string; at: string; reason: string; holds: string[] };
+}
+export interface LienFile {
+  contractor?: string;
+  noc?: { recordedOn: string; reference: string; expiresOn: string; commencedOn?: string; lenderNamed: boolean; mortgageFirst?: boolean; by: string; at: string };
+  /** When the mortgage was recorded, if the title company's link didn't record it. */
+  mortgageRecordedOn?: string;
+  notices: NoticeToOwner[];
+  insurance?: { kind: "builders_risk" | "hazard"; carrier: string; policy: string; expiresOn: string; by: string; at: string; remindedOn?: string; lapseNoticeOn?: string };
+}
+/** A notice to owner from a lienor not hired by the borrower directly (713.06(2)). Each one needs a waiver for every draw after it. */
+export interface NoticeToOwner { id: string; lienor: string; role: "subcontractor" | "supplier" | "sub_subcontractor" | "other"; servedOn: string; by: string; at: string }
+export interface LienWaiver {
+  id: string; partyKey: string; party: string; kind: "progress" | "final"; fileName: string; documentId?: string; sentBy: string; sentAt: string;
+  /** Checked against the statutory form: through what date and for how much, and whether it's conditional on the check clearing (713.20(7)). */
+  checked?: { by: string; at: string; throughOn?: string; amount: number; conditional: boolean };
+  rejected?: { by: string; at: string; reason: string };
+}
+export interface FinalAffidavit { fileName: string; documentId?: string; sentBy: string; sentAt: string; checked?: { by: string; at: string; unpaidLienors: boolean } }
 export interface RequestPhoto { id: string; scopeId: string; shot: string; name: string; at: string; takenAt?: string; lat?: number; lng?: number }
 export interface PhotoRequest { id: string; dealId: string; drawId?: string; to: string; email?: string; who: "contractor" | "borrower"; scopeIds: string[]; sentBy: string; byTeam?: boolean; sentAt: string; expiresAt: string; status: "open" | "received" | "off"; finishedAt?: string; finishedBy?: string; note?: string; photos: RequestPhoto[] }
-export interface PayoffRequest { id: string; dealId: string; goodThrough: string; principal: number; accrued: number; defaultAccrued?: number; fees?: number; credit?: number; perDiem: number; total: number; requestedAt: string; by: string; status: "requested" | "sent" | "paid" }
+export type ConditionCategory = "prior_to_docs" | "prior_to_funding" | "post_closing";
+export type ConditionOwner = "borrower" | "processor" | "underwriter" | "title";
+/** A standard condition in the library (Spec A23). Loans get the ones for their product when they start clearing conditions. */
+export interface ConditionTemplate {
+  id: string; title: string; detail: string; category: ConditionCategory; owner: ConditionOwner; needsUpload: boolean;
+  /** The products it applies to; empty means all. */
+  products: Product[];
+  /** Days from being added to when it's due. */
+  dueDays: number; active: boolean; version: number; updatedBy: string; updatedAt: string;
+}
+export interface LoanCondition {
+  id: string; templateId?: string; title: string; detail: string; category: ConditionCategory; owner: ConditionOwner; needsUpload: boolean;
+  dueOn?: string; status: "open" | "submitted" | "cleared" | "waived"; addedBy: string; addedAt: string;
+  files: { documentId?: string; fileName: string; at: string; by: string }[];
+  /** Sent back to open, with what was wrong. */
+  returned?: { by: string; at: string; reason: string };
+  cleared?: { by: string; at: string; note: string };
+  waived?: { by: string; at: string; reason: string };
+}
+/** What a term sheet offers, fixed when it's sent. */
+export interface TermSheetTerms {
+  noteAmount: number; initialAdvance: number; holdback: number; financedReserve: number;
+  rate: number; pointsPct: number; points: number; lenderFees: number; termMonths: number; monthlyPayment: number; cashToClose: number;
+  interestReserve: "none" | "financed"; accrual: "full_boat" | "dutch"; prepay: string;
+}
+/** An exception to the pricing matrix: the rate and points asked for, why they're outside it, and who approved them. */
+export interface PricingException {
+  rate: number; points: number; termMonths: number; reasons: string[]; note: string; requestedBy: string; requestedAt: string;
+  status: "pending" | "approved" | "declined"; decidedBy?: string; decidedAt?: string; decision?: string;
+}
+export interface TermSheet {
+  version: number; issuedAt: string; issuedOn: string; issuedBy: string;
+  /** The last day it can be accepted. */
+  expiresOn: string;
+  status: "sent" | "accepted" | "changes_requested" | "declined" | "expired" | "superseded";
+  pricingVersion: string; terms: TermSheetTerms;
+  /** The matrix's room for this loan when it was sent, and the approved exception if it went outside it. */
+  matrix: { rate: [number, number]; points: [number, number] };
+  exception?: PricingException;
+  /** What was still needed from the borrower when it was sent. */
+  conditions: string[];
+  /** The day the borrower was reminded it's about to expire. */
+  remindedOn?: string;
+  response?: { at: string; by: string; signedName?: string; note?: string };
+}
+/** How a payoff request arrived, which decides the day it counts as received (Fla. Stat. 701.04(1)(f)). */
+export type PayoffChannel = "portal" | "web_form" | "email" | "fax" | "mail" | "courier";
+/** One payoff letter (an estoppel letter in the statute's words): the figures as of the day it was issued, good through a date. */
+export interface PayoffLetter {
+  number: number; issuedAt: string; issuedOn: string; issuedBy: string; goodThrough: string;
+  principal: number; accrued: number; defaultAccrued: number; fees: number; credit: number; perDiem: number; total: number;
+  rate: number; interestFrom: string; interestDays: number; defaultRate?: number; defaultFrom?: string; defaultDays?: number;
+  /** The letter this one corrects or brings forward, and why. */
+  replaces?: number; reason?: string;
+  delivery?: { to: string[]; result: "sent" | "logged" | "failed"; at: string };
+}
+export interface PayoffRequest {
+  id: string; dealId: string; goodThrough: string;
+  /** The estimate when it was asked for. The letters hold the figures that count. */
+  principal: number; accrued: number; defaultAccrued?: number; fees?: number; credit?: number; perDiem: number; total: number;
+  requestedAt: string; by: string; status: "requested" | "sent" | "paid" | "refused";
+  /** The day it counts as received, which starts the 10 days. Requests from before this was kept use requestedAt. */
+  receivedOn?: string; channel?: PayoffChannel;
+  /** Who asked and where the letter goes. A request from the borrower's portal has no email: it goes to their sign-in. */
+  requester?: { kind: "borrower" | "title" | "other"; name: string; company?: string; email?: string; phone?: string; fileNumber?: string };
+  /** What has to be checked before a letter goes out: someone else's written authority, or that it's really the borrower. */
+  check?: { status: "pending" | "accepted"; note: string; documentId?: string; fileName?: string; by?: string; at?: string };
+  loggedBy?: string; note?: string;
+  letters?: PayoffLetter[];
+  refused?: { by: string; at: string; reason: string };
+}
 export interface LoanMessage { id: string; dealId: string; from: string; side: "team" | "borrower" | "broker" | "internal"; text: string; at: string }
 export interface Broker { id: string; name: string }
 export interface CapitalSource { id: string; name: string; type: "gt_balance_sheet" | "gt_credit_line" | "partner_lender"; commitment: number; baseDeployed: number; baseUnfunded: number; lineUndrawn?: number; orgId?: string }

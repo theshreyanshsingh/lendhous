@@ -5,6 +5,7 @@ import { alertsFor } from "@/lib/book-alerts";
 import { demoBook, reducer, type Book, type BookAction } from "@/lib/book";
 import { attentionItems } from "@/lib/attention";
 import { toCsv } from "@/lib/csv";
+import { startingTerms } from "@/lib/term-sheets";
 import { can, type Permission } from "@/lib/permissions";
 
 const person = (id: string, roles: Viewer["roleCodes"], organizationId?: string): Viewer => ({ id, name: `${id} name`, roleCodes: roles, organizationId });
@@ -138,9 +139,12 @@ describe("what each account may do", () => {
     expect(check(b, blocked, { t: "docStatus", dealId: "d1", docId: "id", status: "accepted" })).toHaveProperty("error");
   });
   it("a term sheet above the underwriter's limit is refused", () => {
-    const big = { ...b, deals: b.deals.map((deal) => (deal.id === "d3" ? { ...deal, status: "underwriting" as const, app: { ...deal.app, purchasePrice: 2_000_000, rehab: 800_000, arv: 4_000_000 } } : deal)) };
-    expect(check(big, underwriter, { t: "advanceLoan", dealId: "d3" })).toEqual({ error: expect.stringMatching(/above your term sheet limit/) });
-    expect(check(big, owner, { t: "advanceLoan", dealId: "d3" })).toHaveProperty("action");
+    const big = { ...b, deals: b.deals.map((deal) => (deal.id === "d3" ? { ...deal, status: "underwriting" as const, creditReview: { by: "x", at: "2026-10-30T00:00:00Z", note: "", verifiedDeals: 4 }, app: { ...deal.app, purchasePrice: 2_000_000, rehab: 800_000, arv: 4_000_000 } } : deal)) };
+    const sheet: BookAction = { t: "issueTermSheet", dealId: "d3", ...startingTerms(big.deals.find((deal) => deal.id === "d3")!), by: "x" };
+    expect(check(big, underwriter, sheet)).toEqual({ error: expect.stringMatching(/above your term sheet limit/) });
+    expect(check(big, owner, sheet)).toHaveProperty("action");
+    // A term sheet only goes out with its terms, never as a bare move to the next stage.
+    expect(check(big, owner, { t: "advanceLoan", dealId: "d3" })).toMatchObject({ error: expect.stringMatching(/Term sheet tab/) });
   });
   it("funding takes two different people", () => {
     expect(check(b, owner, { t: "advanceLoan", dealId: "d15" })).toHaveProperty("action");
@@ -226,8 +230,9 @@ describe("alerts", () => {
     expect(alertsFor(b, applied, { t: "submitApp", app: b.deals[0].app, address: "1 St", city: "Miami", zip: "33101", entityName: "x", exitStrategy: "Sell" })[0]).toMatchObject({ to: "team", event: "loan.submitted" });
     // A term sheet goes out only after the credit review is signed off.
     const reviewed = reducer(b, { t: "signOffCredit", dealId: "d1", by: "Uma", note: "" });
-    const issued = reducer(reviewed, { t: "advanceLoan", dealId: "d1" });
-    expect(alertsFor(reviewed, issued, { t: "advanceLoan", dealId: "d1" }).map((alert) => alert.to)).toEqual(["borrower", "broker"]);
+    const sheet: BookAction = { t: "issueTermSheet", dealId: "d1", ...startingTerms(reviewed.deals.find((deal) => deal.id === "d1")!), by: "Uma" };
+    const issued = reducer(reviewed, sheet);
+    expect(alertsFor(reviewed, issued, sheet).map((alert) => alert.to)).toEqual(["borrower", "broker"]);
     expect(alertsFor(b, b, { t: "sendMessage", dealId: "d1", from: "Uma", side: "team", text: "secret detail" }).map((alert) => alert.to)).toEqual(["borrower", "broker"]);
     expect(JSON.stringify(alertsFor(b, b, { t: "sendMessage", dealId: "d1", from: "Uma", side: "team", text: "secret detail" }))).not.toContain("secret detail");
     expect(alertsFor(b, b, { t: "sendMessage", dealId: "d1", from: "Uma", side: "internal", text: "note" })).toEqual([]);

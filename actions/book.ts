@@ -13,6 +13,10 @@ import type { Book, BookAction } from "@/lib/book";
 import { isDemoEmail } from "@/lib/deploy";
 import { prisma } from "@/lib/prisma";
 import { borrowerFor, screenAutomatically } from "@/lib/loan-intake";
+import { deliverPayoffLetter } from "@/lib/payoff-delivery";
+import { fileProblem } from "@/lib/conditions";
+import { isFinalDraw, partiesFor } from "@/lib/lien-law";
+import { viewFor } from "@/lib/permissions";
 import { screenDeal } from "@/lib/sanctions-store";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import { extensionOf, mimeFor, putBytes, safeBasename } from "@/lib/storage";
@@ -41,7 +45,9 @@ async function perform(viewer: Viewer, action: BookAction, options: { trusted?: 
   // New names on a loan are screened straight away, so a possible sanctions match surfaces before anyone works on it.
   const named = result.action.t === "submitApp" ? result.after.deals.find((deal) => !result.before.deals.some((old) => old.id === deal.id))?.id : result.action.t === "saveSponsor" ? result.action.dealId : undefined;
   const screened = named ? await screenAutomatically(named) : null;
-  return { book: scopeBook(screened ?? result.after, viewer) };
+  // A payoff letter goes out the moment it's issued: the 10 days are about sending it, not writing it.
+  const delivered = result.action.t === "issuePayoffLetter" ? await deliverPayoffLetter(result.action.payoffId) : null;
+  return { book: scopeBook(screened ?? delivered ?? result.after, viewer) };
 }
 
 /** Screens a loan against the OFAC list now, as the person asking. */
@@ -83,6 +89,19 @@ export async function uploadLoanFile(form: FormData): Promise<BookReply & { docu
   if (!canUploadFile(book, viewer, dealId, allowed)) return { error: "Your account can't upload to this loan." };
   const doc = docId ? docOf(book, dealId, docId) : undefined;
   if (docId && !doc) return { error: "That document is no longer on this loan." };
+  // A lien waiver or the contractor's final affidavit for a draw that hasn't gone out yet (Fla. Stat. 713.20, 713.06).
+  const drawId = String(form.get("drawId") || "");
+  const waiverParty = String(form.get("waiverParty") || "");
+  const affidavit = form.get("affidavit") === "1";
+  const lienDraw = drawId ? book.draws.find((item) => item.id === drawId && item.dealId === dealId && item.status !== "funded" && item.status !== "rejected") : undefined;
+  if (drawId && (!lienDraw || (!affidavit && !partiesFor(book.deals.find((item) => item.id === dealId)?.lienFile, "9999-12-31").some((party) => party.key === waiverParty)))) return { error: "That draw or lienor is no longer waiting for a waiver." };
+  // A file for a condition: the borrower and their broker send only the borrower's; staff can send any (Spec B17).
+  const conditionId = String(form.get("conditionId") || "");
+  if (conditionId) {
+    const condition = book.deals.find((item) => item.id === dealId)?.conditions?.find((item) => item.id === conditionId);
+    const refused = fileProblem(condition, viewFor(viewer.roleCodes) !== "admin");
+    if (refused) return { error: refused };
+  }
   const bytes = Buffer.from(await file.arrayBuffer());
   const problem = uploadProblem(file.name, file.size, bytes);
   if (problem) return { error: problem };
@@ -92,9 +111,15 @@ export async function uploadLoanFile(form: FormData): Promise<BookReply & { docu
   const mime = mimeFor(ext, file.type);
   const fileKeyId = await putBytes(key, bytes);
   await prisma.document.create({
-    data: { id, ownerType: "LOAN", ownerId: dealId, documentType: docId || "draw_photo", originalName: encryptField(attachmentName(file.name), documentNameContext(id)), storageKey: key, fileKeyId, mime, size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex"), uploadedById: viewer.id },
+    data: { id, ownerType: "LOAN", ownerId: dealId, documentType: docId || (conditionId ? "condition" : lienDraw ? (affidavit ? "final_affidavit" : "lien_waiver") : "draw_photo"), originalName: encryptField(attachmentName(file.name), documentNameContext(id)), storageKey: key, fileKeyId, mime, size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex"), uploadedById: viewer.id },
   });
-  await audit({ actorId: viewer.id, action: "document.uploaded", entityType: "Document", entityId: id, after: { dealId, documentType: docId || "draw_photo", size: bytes.length } });
+  await audit({ actorId: viewer.id, action: "document.uploaded", entityType: "Document", entityId: id, after: { dealId, documentType: docId || (conditionId ? "condition" : lienDraw ? (affidavit ? "final_affidavit" : "lien_waiver") : "draw_photo"), size: bytes.length } });
+  if (lienDraw) {
+    const deal = book.deals.find((item) => item.id === dealId)!;
+    const action: BookAction = affidavit ? { t: "affidavitReceived", drawId, fileName: attachmentName(file.name), documentId: id, by: viewer.name } : { t: "lienWaiverReceived", drawId, partyKey: waiverParty, kind: isFinalDraw(deal, lienDraw) ? "final" : "progress", fileName: attachmentName(file.name), documentId: id, by: viewer.name };
+    return { ...(await perform(viewer, action, { trusted: true })), documentId: id };
+  }
+  if (conditionId) return { ...(await perform(viewer, { t: "conditionFile", dealId, conditionId, fileName: attachmentName(file.name), documentId: id, by: viewer.name }, { trusted: true })), documentId: id };
   if (!docId) return { documentId: id };
   const reply = await perform(viewer, { t: "uploadDoc", dealId, docId, fileName: attachmentName(file.name), documentId: id }, { trusted: true });
   return { ...reply, documentId: id };

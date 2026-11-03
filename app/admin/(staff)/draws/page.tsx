@@ -2,11 +2,13 @@
 import Link from "next/link";
 import { useState } from "react";
 import { DRAW_STATUS, drawTotal } from "@/components/loan/DrawPanel";
+import { DrawLienChecklist } from "@/components/loan/DrawLienChecklist";
 import { PhotoRequests } from "@/components/loan/PhotoRequests";
 import { PageIntro } from "@/components/page-intro";
 import { Badge, Section, Stat, k, shortDate, usd } from "@/components/ui";
 import { approvalError, approversNeeded, reviewDraw } from "@/lib/draws";
 import type { Deal, DrawRequest } from "@/lib/mockData";
+import { unreleasedHolds } from "@/lib/lien-law";
 import { ofacBlocker } from "@/lib/ofac";
 import { useStore } from "@/lib/store";
 import { useServiceDay } from "@/components/loan/use-service-day";
@@ -48,6 +50,8 @@ function DrawCard({ draw, deal }: { draw: DrawRequest; deal: Deal }) {
   const today = useServiceDay();
   // No money goes out to people not screened against the sanctions list in the last few days.
   const sanctions = draw.status === "approved" && today ? ofacBlocker(deal, today) : null;
+  // Nor before Florida's lien law and the insurance are satisfied, unless an owner released it past them.
+  const holds = draw.status === "approved" && today ? unreleasedHolds(deal, draw, today) : [];
   return (
     <section className="glass min-w-0 p-4 sm:p-5" data-testid="draw-card">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -82,6 +86,7 @@ function DrawCard({ draw, deal }: { draw: DrawRequest; deal: Deal }) {
         </tbody>
       </table>
       <div className="mt-3 border-t border-border pt-3"><PhotoRequests deal={deal} draw={draw} /></div>
+      <DrawLienChecklist deal={deal} draw={draw} side="team" />
       {draw.status === "inspected" && (
         <p className="mt-3 text-sm" data-testid="draw-review"><b>{usd(review.approved)}</b> supported of {usd(drawTotal(draw))} requested, after retainage.{needed > 1 ? ` Needs two approvers${draw.approvers.length ? `; ${draw.approvers[0]} has approved` : ""}.` : ""}{review.blocked ? ` ${review.blocked}.` : ""}</p>
       )}
@@ -90,7 +95,8 @@ function DrawCard({ draw, deal }: { draw: DrawRequest; deal: Deal }) {
         {draw.status === "submitted" && <button className="btn-primary" data-testid="send-inspector" onClick={() => dispatch({ t: "sendInspector", drawId: draw.id })}>Order inspection</button>}
         {draw.status === "inspecting" && <button className="btn-primary" data-testid="record-inspection" disabled={draw.lines.some((line) => observed[line.scopeId] === undefined)} onClick={() => dispatch({ t: "recordInspection", drawId: draw.id, observed: Object.fromEntries(Object.entries(observed).map(([id, percent]) => [id, Math.min(100, Math.max(0, percent)) / 100])) })}>Record inspection</button>}
         {draw.status === "inspected" && <button className="btn-primary" data-testid="approve-draw" disabled={Boolean(refusal)} onClick={() => dispatch({ t: "approveDrawRequest", drawId: draw.id, by: viewerName })}>Approve</button>}
-        {draw.status === "approved" && <button className="btn-primary" data-testid="release-draw" disabled={Boolean(sanctions)} onClick={() => dispatch({ t: "releaseDraw", drawId: draw.id })}>Release funds</button>}
+        {draw.status === "approved" && <button className="btn-primary" data-testid="release-draw" disabled={Boolean(sanctions) || holds.length > 0} onClick={() => dispatch({ t: "releaseDraw", drawId: draw.id })}>Release funds</button>}
+        {draw.status === "approved" && !sanctions && holds.length > 0 && <span className="text-xs text-warn" data-testid="release-held">Held: {holds.length} lien-law or insurance item{holds.length === 1 ? "" : "s"} above.</span>}
         {draw.status === "approved" && sanctions && <span className="text-xs text-bad" data-testid="release-blocked">{sanctions}. <Link href={`/admin/deals/${deal.id}`} className="underline">Screen on the loan&apos;s Credit review tab</Link>.</span>}
         {draw.status !== "approved" && (
           <span className="flex min-w-0 flex-1 basis-56 flex-wrap items-center gap-2">

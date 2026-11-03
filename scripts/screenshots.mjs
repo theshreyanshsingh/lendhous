@@ -137,6 +137,27 @@ ok("the application link moves on from a complete step", (await page.getByTestId
 await page.getByTestId("app-next").click();
 ok("and won't move on from an incomplete one", (await page.getByTestId("app-problems").waitFor({ timeout: 5000 }).then(() => true, () => false)) && (await page.getByTestId("app-step").innerText()).toLowerCase() === "step 2 of 5");
 await shot(page, "00e-application-link.png");
+// The public payoff request: anyone but the borrower attaches the borrower's authorization, and the loan has to be found.
+await page.goto(BASE + "/payoff");
+await page.getByTestId("payoff-request-submit").click();
+ok("the payoff request asks for the loan number first", await page.getByTestId("payoff-request-error").getByText(/loan number/).waitFor({ timeout: 5000 }).then(() => true, () => false));
+await page.getByTestId("payoff-loanNumber").fill("LH-0000");
+await page.getByTestId("payoff-zip").fill("33020");
+await page.getByTestId("payoff-goodThrough").fill(new Date(Date.now() + 10 * 86_400_000).toISOString().slice(0, 10));
+await page.getByTestId("payoff-name").fill("Terry Title (FAKE)");
+await page.getByTestId("payoff-company").fill("Sample Title & Escrow (FAKE)");
+await page.getByTestId("payoff-email").fill("closings@sample-title.test");
+await page.getByTestId("payoff-request-submit").click();
+ok("a title company has to attach the borrower's authorization", await page.getByTestId("payoff-request-error").getByText(/authorization/).waitFor({ timeout: 5000 }).then(() => true, () => false));
+await page.getByTestId("payoff-authorization").setInputFiles({ name: "authorization.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 fake") });
+await shot(page, "00f-site-payoff-request.png");
+await page.getByTestId("payoff-request-submit").click();
+ok("a loan the payoff form can't find is refused plainly", await page.getByTestId("payoff-request-error").getByText(/couldn't find a loan/).waitFor({ timeout: 5000 }).then(() => true, () => false));
+await page.goto(BASE + "/payoff-letter/demo");
+ok("the sample payoff letter itemizes the payoff", (await page.getByTestId("payoff-letter").waitFor({ timeout: 5000 }).then(() => true, () => false)) && (await page.getByTestId("letter-total").innerText()).startsWith("$"));
+const samplePdf = await page.request.get(BASE + "/payoff-letter/demo/pdf");
+ok("the sample payoff letter downloads as a PDF", samplePdf.headers()["content-type"] === "application/pdf" && (await samplePdf.body()).subarray(0, 5).toString() === "%PDF-");
+await shot(page, "00g-payoff-letter.png");
 
 await page.evaluate(() => localStorage.setItem("lendhous-theme", "dark"));
 await page.goto(BASE + "/");
@@ -259,7 +280,8 @@ ok("bid accepted", (await page.locator("main").innerText()).includes("accepted")
 
 await actAs(SEATS.partner);
 await page.goto(BASE + "/admin/partner/teasers/d1");
-ok("deal room unlocks for the winning partner", await page.getByTestId("deal-room-open").isVisible());
+// The demo book comes back from the browser's storage after the page loads, so this waits for it.
+ok("deal room unlocks for the winning partner", await page.getByTestId("deal-room-open").waitFor({ timeout: 5000 }).then(() => true, () => false));
 await shot(page, "08-partner-deal-room-unlocked.png");
 
 // 6. Loan buyer seat: browses blind loans, prices one and makes an offer; staff sell it; the file unlocks
@@ -402,6 +424,9 @@ await page.goto(BASE + "/admin/borrower/d18");
 await seen(page.getByTestId("term-sheet"));
 ok("the borrower sees the term sheet's numbers", (await page.getByTestId("term-sheet").innerText()).includes("Cash to close"));
 ok("a term sheet can't be accepted without a name and agreement", await page.getByTestId("accept-term-sheet").isDisabled());
+ok("the borrower sees how long the term sheet is open", (await page.getByTestId("term-sheet-expires").innerText()).includes("2026-11-04"));
+const sampleSheet = await page.request.get(BASE + (await page.getByTestId("term-sheet-download").getAttribute("href")));
+ok("the term sheet downloads as a PDF", sampleSheet.headers()["content-type"] === "application/pdf" && (await sampleSheet.body()).subarray(0, 5).toString() === "%PDF-");
 await page.getByTestId("term-sheet-name").fill("Alex Sample");
 await page.getByTestId("term-sheet-agree").check();
 await shot(page, "16-borrower-term-sheet.png");
@@ -433,10 +458,11 @@ await page.getByTestId("draw-certify").check();
 await shot(page, "17-borrower-request-draw.png");
 await page.getByTestId("submit-draw").click();
 ok("the borrower requests a draw against the budget", await page.getByTestId("my-draw").nth(1).waitFor({ timeout: 5000 }).then(() => true, () => false));
+ok("the borrower sees which lien waivers a draw needs", (await page.getByTestId("draw-lien").count()) >= 1 && (await page.getByTestId("draw-lien").first().innerText()).includes("statutory form"));
 await page.getByTestId("payoff-date").fill("2026-11-15");
 ok("the borrower sees a payoff figure", (await page.getByTestId("payoff-total").innerText()).startsWith("$"));
 await page.getByTestId("request-payoff").click();
-ok("the borrower requests a payoff statement", await seen(page.getByTestId("my-payoffs")));
+ok("the borrower asks for a payoff letter and sees when it's due", (await seen(page.getByTestId("my-payoffs"))) && (await page.getByTestId("my-payoffs").innerText()).includes("send it by"));
 ok("no dead draw button is left", (await page.getByText("coming soon").count()) === 0);
 // d2 matures well over 60 days out, so the borrower is told when they can ask for more time.
 ok("the borrower is told when they can ask for an extension", (await seen(page.getByTestId("extension-not-yet"))) && (await page.getByTestId("extension-not-yet").innerText()).includes("before maturity"));
@@ -494,18 +520,40 @@ await draw.getByTestId("record-inspection").click();
 await seen(draw.getByTestId("draw-review"));
 ok(`the inspection decides the amount, not the request (${(await draw.getByTestId("draw-review").innerText()).split(" supported")[0]})`, (await draw.getByTestId("draw-review").innerText()).includes("of $20,000 requested"));
 await draw.getByTestId("approve-draw").click();
+// Florida's lien law: the contractor's statutory progress waiver, checked, before the money goes out.
+ok("an approved draw waits for the contractor's lien waiver", (await seen(draw.getByTestId("release-held"))) && (await draw.getByTestId("release-draw").isDisabled()));
+const waiverChooser = page.waitForEvent("filechooser");
+await draw.getByTestId("lien-party").first().getByTestId("lien-upload").click();
+await (await waiverChooser).setFiles({ name: "Progress waiver (FAKE).pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 waiver") });
+await seen(draw.getByTestId("check-waiver"));
+await draw.getByTestId("waiver-amount").fill("18000");
+await draw.getByTestId("waiver-through").fill("2026-10-30");
+ok("a waiver can't cover work after today", await (async () => { await draw.getByTestId("waiver-through").fill("2026-11-15"); const blocked = await draw.getByTestId("check-waiver").isDisabled(); await draw.getByTestId("waiver-through").fill("2026-10-30"); return blocked; })());
+await draw.getByTestId("check-waiver").click();
+ok("a checked statutory waiver frees the draw", await seen(draw.getByTestId("draw-holds").getByText(/Nothing under the lien law/)));
+await shot(page, "18f-admin-draw-lien-waivers.png", false);
 await draw.getByTestId("release-draw").click();
 ok("staff release an approved draw", await seen(page.getByTestId("closed-draw").first()));
 const large = page.getByTestId("draw-card").filter({ hasText: "LH-DEMO-1012" });
 ok("a large draw shows it needs two approvers", (await large.getByTestId("draw-review").innerText()).includes("Needs two approvers"));
 await large.getByTestId("approve-draw").click();
 ok("the second approver completes a large draw", (await seen(large.getByTestId("draw-approved"))) && (await large.getByTestId("draw-approved").innerText()).includes("Cam Capital"));
+ok("a supplier who served a notice to owner needs a waiver too", (await large.getByTestId("draw-holds").innerText()).includes("Coastal Lumber Supply"));
 const behind = page.getByTestId("draw-card").filter({ hasText: "LH-DEMO-1013" });
 await behind.getByTestId("send-inspector").click();
 await behind.getByTestId("observed-bathrooms").fill("100");
 await behind.getByTestId("record-inspection").click();
 ok("nothing is released on a loan that is past due", (await seen(behind.getByTestId("draw-refusal"))) && (await behind.getByTestId("approve-draw").isDisabled()));
 
+await page.goto(BASE + "/admin/deals/d9");
+await page.getByTestId("tab-Closing").click();
+ok("the loan's lien file shows the notice of commencement and the policy ending soon", (await seen(page.getByTestId("noc-summary"))) && (await seen(page.getByTestId("insurance-summary").getByText(/20 days left/))));
+await page.getByTestId("add-notice").click();
+await page.getByTestId("notice-lienor").fill("Bay Plumbing (FAKE)");
+await page.getByTestId("notice-served").fill("2026-10-28");
+await page.getByTestId("save-notice").click();
+ok("staff log a notice to owner", await seen(page.getByTestId("notices-to-owner").getByText("Bay Plumbing (FAKE)")));
+await shot(page, "19g-admin-lien-file.png");
 await page.goto(BASE + "/admin/servicing");
 const lateLoan = page.getByTestId("serviced-loan").filter({ hasText: "LH-DEMO-1013" });
 await seen(lateLoan);
@@ -568,10 +616,34 @@ await page.getByTestId("execute-extension").click();
 ok("a signed extension moves the maturity", (await seen(page.getByTestId("ledger-maturity").getByText("2027-04-15"))) && (await page.getByTestId("extensions-used").innerText()).startsWith("1 of 2"));
 await actAs(SEATS.staff);
 
-// Paying a loan off: a short amount is refused, the payoff closes the loan, then the mortgage release is tracked.
+// Payoff letters: Florida's deadline shows, a title company's authorization is checked before its letter goes out, and
+// a letter whose figures move is flagged and corrected.
 await page.goto(BASE + "/admin/servicing");
 const payoffRow = page.getByTestId("payoff-row").filter({ hasText: "LH-DEMO-1011" });
-await payoffRow.getByTestId("send-payoff").click();
+ok("a payoff request shows Florida's 10-day deadline", (await payoffRow.getByTestId("payoff-due").innerText()).includes("2026-11-02"));
+await page.getByTestId("payoff-row").filter({ hasText: "LH-DEMO-1010" }).getByTestId("open-payoff").click();
+const payoffCard = page.getByTestId("payoff-card");
+ok("a title company's request waits for its authorization to be checked", (await seen(payoffCard.getByTestId("payoff-check"))) && (await payoffCard.getByTestId("issue-payoff-letter").count()) === 0);
+await payoffCard.getByTestId("payoff-check-note").fill("Signed by the managing member (FAKE)");
+await payoffCard.getByTestId("payoff-check-accept").click();
+await payoffCard.getByTestId("issue-payoff-letter").click();
+ok("the title company's letter goes out once it's checked", await seen(payoffCard.getByTestId("letter-row")));
+await shot(page, "19e-admin-payoff-letter.png", false);
+await page.keyboard.press("Escape");
+await payoffRow.getByTestId("open-payoff").click();
+await payoffCard.getByTestId("issue-payoff-letter").click();
+ok("the borrower's payoff letter goes out", await seen(payoffCard.getByTestId("letter-row")));
+await page.keyboard.press("Escape");
+await page.goto(BASE + "/admin/deals/d11");
+await page.getByTestId("tab-Servicing").click();
+await page.getByTestId("payment-amount").fill("1000");
+await page.getByTestId("save-payment").click();
+ok("a payment after the letter flags it as out of date", await seen(page.getByTestId("payoff-stale")));
+await page.getByTestId("payoff-requests").getByTestId("issue-payoff-letter").click();
+ok("a corrected letter replaces it", (await seen(page.getByTestId("letter-row").getByText("(corrected)"))) && (await page.getByTestId("payoff-stale").count()) === 0);
+
+// Paying a loan off: a short amount is refused, the payoff closes the loan, then the mortgage release is tracked.
+await page.goto(BASE + "/admin/servicing");
 const capitalBeforePayoff = await capitalNow();
 await page.goto(BASE + "/admin/servicing");
 await page.getByTestId("payoff-row").filter({ hasText: "LH-DEMO-1011" }).getByTestId("record-payoff").click();
@@ -656,6 +728,19 @@ await page.getByTestId("close-note").fill("First flip; ask them back after one w
 await shot(page, "19g-admin-decline.png", false);
 await page.getByTestId("confirm-close").click();
 ok("staff decline an application with a reason", (await seen(page.getByTestId("application-closed"))) && (await page.getByTestId("application-closed").innerText()).includes("Not enough experience"));
+// Reg B: the decline starts its notice, due by the revenue rule, with specific reasons.
+const notice = page.getByTestId("adverse-action");
+ok("a decline starts the Reg B notice with its deadline", (await seen(notice.getByTestId("notice-due"))) && (await notice.getByTestId("notice-due").innerText()).includes("due by"));
+await notice.getByTestId("notice-reason-0").fill("Doesn't meet our internal standards");
+ok("a reason has to be specific, not internal standards", await notice.getByTestId("save-reasons").isDisabled());
+await notice.getByTestId("notice-reason-0").fill("No completed renovation projects in the last three years (FAKE)");
+await notice.getByTestId("save-reasons").click();
+await page.waitForTimeout(300);
+await notice.getByTestId("mail-notice").click();
+ok("the notice is recorded as sent", await seen(notice.getByTestId("notice-sent")));
+const declineLetter = await page.request.get(BASE + "/api/adverse-action/demo");
+ok("the notice is a PDF letter", declineLetter.headers()["content-type"] === "application/pdf" && (await declineLetter.body()).subarray(0, 5).toString() === "%PDF-");
+await shot(page, "19h-admin-decline-notice.png", false);
 await page.goto(BASE + "/admin");
 // The page first draws the seed book, then the one this browser saved, so wait for the row to go.
 ok("a declined application leaves the active pipeline", await page.getByTestId("pipeline-table").getByText("LH-DEMO-1016").waitFor({ state: "detached", timeout: 5000 }).then(() => true, () => false));
@@ -671,6 +756,48 @@ ok("the accepted term sheet moves the loan on", (await page.getByTestId("stage-p
 await page.getByTestId("advance-loan").click();
 ok("staff move a loan to its next stage", await seen(page.getByTestId("stage-blockers")));
 ok("a loan with open documents can't clear to close", (await page.getByTestId("stage-blockers").innerText()).includes("still open") && (await page.getByTestId("advance-loan").isDisabled()));
+ok("starting conditions adds the library's standard ones, which hold up clear to close", (await page.getByTestId("stage-blockers").innerText()).includes("conditions to clear before closing"));
+// The borrower sees what's theirs to send and uploads one (Spec B17).
+await actAs(SEATS.borrower);
+await page.goto(BASE + "/admin/borrower/d18");
+ok("the borrower sees the conditions that are theirs", (await seen(page.getByTestId("my-conditions"))) && (await page.getByTestId("my-condition").count()) >= 2);
+const conditionRow = page.getByTestId("my-condition").first();
+const conditionChooser = page.waitForEvent("filechooser");
+await conditionRow.getByTestId("condition-upload").click();
+await (await conditionChooser).setFiles({ name: "Articles of organization (FAKE).pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 articles") });
+ok("an upload marks the condition for review", await seen(conditionRow.getByText("We're reviewing it")));
+await shot(page, "16b-borrower-conditions.png");
+await actAs(SEATS.staff);
+// The team's side (Spec A10): send one back with why, waive one with a reason, add one for this loan only.
+await page.goto(BASE + "/admin/deals/d3");
+await page.getByTestId("tab-Conditions").click();
+const sentIn = page.getByTestId("condition-row").filter({ hasText: "Insurance naming LendHous" });
+await sentIn.getByTestId("return-condition").click();
+ok("sending one back needs a reason", await page.getByTestId("confirm-condition").isDisabled());
+await page.getByTestId("condition-text").fill("The binder doesn't name LendHous as mortgagee (FAKE).");
+await page.getByTestId("confirm-condition").click();
+ok("a condition sent back reopens with why", await seen(sentIn.getByText(/Sent back by Olivia Owner/)));
+const titleCondition = page.getByTestId("condition-row").filter({ hasText: "Title commitment reviewed" });
+await titleCondition.getByTestId("waive-condition").click();
+await page.getByTestId("condition-text").fill("Covered by the closing checklist (FAKE)");
+await page.getByTestId("confirm-condition").click();
+ok("a waived condition says who waived it and why", await seen(titleCondition.getByText(/Waived by Olivia Owner.*closing checklist/)));
+await page.getByTestId("add-condition").click();
+await page.getByTestId("condition-title").fill("HOA estoppel letter");
+await page.getByTestId("condition-detail").fill("From the condo association, showing dues paid (FAKE).");
+await page.getByTestId("save-condition").click();
+ok("staff add a condition for one loan", await seen(page.getByTestId("condition-row").filter({ hasText: "HOA estoppel letter" })));
+await shot(page, "21b-admin-conditions.png");
+// The library: a new standard condition, and one retired.
+await page.goto(BASE + "/admin/conditions");
+await page.getByTestId("new-template").click();
+await page.getByTestId("template-title").fill("Flood zone certificate");
+await page.getByTestId("template-category").selectOption("prior_to_docs");
+await page.getByTestId("template-owner").selectOption("processor");
+await page.getByTestId("save-template").click();
+ok("the owner adds a standard condition", await seen(page.getByTestId("template-row").filter({ hasText: "Flood zone certificate" })));
+await page.getByTestId("template-row").filter({ hasText: "Final title policy" }).getByTestId("retire-template").click();
+ok("and retires one, which can be brought back", await seen(page.getByTestId("template-row").filter({ hasText: "Final title policy" }).getByTestId("restore-template")));
 await page.goto(BASE + "/admin/deals/d15");
 await seen(page.getByTestId("approve-funding"));
 ok("a loan can't fund on one person's say", await page.getByTestId("advance-loan").isDisabled());
@@ -720,6 +847,18 @@ await shot(page, "05b-admin-credit-review.png");
 await page.getByTestId("credit-note").fill("Track record checked against HUDs (FAKE).");
 await page.getByTestId("sign-off-credit").click();
 ok("signing off clears the way for a term sheet", (await page.getByTestId("credit-signed").isVisible()) && !(await page.getByTestId("stage-panel").innerText()).includes("Credit review isn't signed off"));
+ok("signing off marks the application complete for Reg B", await seen(page.getByTestId("application-complete")));
+// An underwriter asked to price this one below the matrix: the owner approves it, and the term sheet goes out at that rate.
+await page.getByTestId("build-term-sheet").click();
+ok("pricing outside the matrix waits for an owner", await seen(page.getByTestId("pricing-exception").getByText("Waiting for an owner")));
+const exceptionRate = (await page.getByTestId("pricing-exception").innerText()).match(/Pricing exception: ([\d.]+)%/)[1];
+await page.getByTestId("approve-exception").click();
+ok("the owner approves it", await seen(page.getByTestId("exception-decision").getByText("Approved by Olivia Owner")));
+await page.getByTestId("sheet-rate").fill(exceptionRate);
+ok("the approved rate can go out", (await seen(page.getByTestId("sheet-exception").getByText(/approved by Olivia Owner/))) && !(await page.getByTestId("issue-term-sheet").isDisabled()));
+await shot(page, "05c-admin-term-sheet.png");
+await page.getByTestId("issue-term-sheet").click();
+ok("the term sheet goes out as version 1", (await seen(page.getByTestId("term-sheet-version").getByText("Version 1"))) && (await page.getByTestId("stage-panel").innerText()).includes("Waiting for the borrower"));
 await page.goto(BASE + "/admin/deals/d6");
 await page.getByTestId("tab-Credit review").click();
 ok("a yes answer shows with its explanation", (await page.getByTestId("declaration-answers").innerText()).includes("Party to a lawsuit") && (await page.getByTestId("declaration-answers").innerText()).includes("Settled in August"));

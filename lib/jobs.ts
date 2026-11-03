@@ -9,6 +9,9 @@ import { readBook, runAction } from "@/lib/book-store";
 import { PRE_FUNDING } from "@/lib/loan-exits";
 import { refreshSanctionsList, screenDeal } from "@/lib/sanctions-store";
 import { encryptStoredData } from "@/lib/encrypt-data";
+import { notifyTeam } from "@/lib/email";
+import { payoffReminders } from "@/lib/payoffs";
+import { noticeReminders } from "@/lib/adverse-action";
 import { prisma } from "@/lib/prisma";
 import { SERVICED, servicingDate } from "@/lib/servicing";
 import { getSettings } from "@/lib/settings";
@@ -16,13 +19,14 @@ import { getSettings } from "@/lib/settings";
 type Job = (now: Date) => Promise<string>;
 
 async function purgeSessions(now: Date) {
-  const [sessions, links, photoLinks, windows] = await Promise.all([
+  const [sessions, links, photoLinks, payoffLinks, windows] = await Promise.all([
     prisma.serverSession.deleteMany({ where: { expiresAt: { lt: now } } }),
     prisma.passwordLink.deleteMany({ where: { expiresAt: { lt: now } } }),
     prisma.photoLink.deleteMany({ where: { expiresAt: { lt: now } } }),
+    prisma.payoffLink.deleteMany({ where: { expiresAt: { lt: now } } }),
     prisma.rateWindow.deleteMany({ where: { expiresAt: { lt: now } } }),
   ]);
-  return `removed ${sessions.count} expired sessions, ${links.count} password links, ${photoLinks.count} photo links, ${windows.count} rate windows`;
+  return `removed ${sessions.count} expired sessions, ${links.count} password links, ${photoLinks.count} photo links, ${payoffLinks.count} payoff links, ${windows.count} rate windows`;
 }
 
 async function cleanRetention(now: Date) {
@@ -47,13 +51,42 @@ const SERVICING: Viewer = { id: "system", name: "LendHous servicing", roleCodes:
 // or matured, and borrowers and the team hear about each. Recording a payment does the same for one loan straight away.
 async function checkServicing(now: Date) {
   const asOf = servicingDate(now);
+  // Letters first: payoff letters due within two days or late, payoff letters already out of date, and decline notices
+  // due within five days or late. Payoff letters tonight's check makes out of date are alerted on their own.
+  const book = (await readBook()).book;
+  const reminders = [...payoffReminders(book, asOf), ...noticeReminders(book.deals, asOf)];
+  if (reminders.length) await notifyTeam(`Letters due: ${reminders.length}`, `${reminders.join("\n")}\n\nPayoff letters are due 10 days after a request is received (Fla. Stat. 701.04); decline notices 30 days after a completed application (12 CFR 1002.9). Send them from the loan's page.`, "letters.reminder");
   const result = await runAction(SERVICING, { t: "settleLoans", asOf }, { trusted: true });
-  if ("error" in result) return `no loans changed as of ${asOf}`;
+  if ("error" in result) return `no loans changed as of ${asOf}${reminders.length ? `; ${reminders.length} payoff reminders` : ""}`;
   const changed = result.after.deals.filter((deal) => !result.before.deals.includes(deal));
   await audit({ actorId: null, action: "book.settleLoans", entityType: "LoanBook", entityId: asOf, after: { loans: changed.map((deal) => ({ loan: deal.loanNumber, status: deal.status, paymentsLate: deal.paymentsLate ?? 0 })) } });
   await sendAlerts(result.before, result.after, result.action);
   const late = changed.filter((deal) => deal.paymentsLate).length;
-  return `checked ${changed.length} loans as of ${asOf}; ${late} with payments past due`;
+  return `checked ${changed.length} loans as of ${asOf}; ${late} with payments past due${reminders.length ? `; ${reminders.length} payoff reminders` : ""}`;
+}
+
+// Term sheets left open: the borrower and broker are reminded two days before one expires, and one past its last day
+// expires and sends the loan back to underwriting for a new one (Spec 4.3, 12.1).
+async function checkTermSheets(now: Date) {
+  const asOf = servicingDate(now);
+  const result = await runAction(SERVICING, { t: "checkTermSheets", asOf }, { trusted: true });
+  if ("error" in result) return `no term sheets to remind about or expire as of ${asOf}`;
+  await sendAlerts(result.before, result.after, result.action);
+  const changed = result.after.deals.filter((deal) => !result.before.deals.includes(deal));
+  const expired = changed.filter((deal) => deal.status === "underwriting").length;
+  await audit({ actorId: null, action: "book.checkTermSheets", entityType: "LoanBook", entityId: asOf, after: { loans: changed.map((deal) => deal.loanNumber), expired } });
+  return `${expired} term sheets expired, ${changed.length - expired} reminders as of ${asOf}`;
+}
+
+// Builder's risk and hazard policies on loans being serviced: the borrower and the team hear 30 days before one ends, and
+// again once it has lapsed, which holds every draw until it's renewed.
+async function checkInsurance(now: Date) {
+  const asOf = servicingDate(now);
+  const result = await runAction(SERVICING, { t: "checkInsurance", asOf }, { trusted: true });
+  if ("error" in result) return `no insurance to warn about as of ${asOf}`;
+  await sendAlerts(result.before, result.after, result.action);
+  const changed = result.after.deals.filter((deal) => !result.before.deals.includes(deal));
+  return `${changed.length} insurance warnings as of ${asOf}`;
 }
 
 const SCREENER: Viewer = { id: "system", name: "Nightly sanctions check", roleCodes: [] };
@@ -77,7 +110,7 @@ async function checkSanctions(now: Date) {
   return `list of ${refreshed.names} names${refreshed.changed ? " (updated)" : ""}; screened ${active.length} loans; ${flagged} possible matches`;
 }
 
-export const JOBS: Record<string, Job> = { sanctions: checkSanctions, servicing: checkServicing, sessions: purgeSessions, retention: cleanRetention, encryption: sealStoredData };
+export const JOBS: Record<string, Job> = { sanctions: checkSanctions, servicing: checkServicing, termSheets: checkTermSheets, insurance: checkInsurance, sessions: purgeSessions, retention: cleanRetention, encryption: sealStoredData };
 
 export const runKeyFor = (job: string, now: Date) => `${job}:${now.toISOString().slice(0, 10)}`;
 

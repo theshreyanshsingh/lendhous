@@ -27,7 +27,8 @@ export const PERMISSIONS = {
   view_credit: "See credit reports",
   reveal_sensitive: "Reveal full SSN, DOB, EIN and bank numbers (logged)",
   review_documents: "Accept or reject documents",
-  manage_conditions: "Add, clear and waive conditions",
+  manage_conditions: "Add and clear conditions",
+  waive_conditions: "Waive conditions (reason required)",
   issue_term_sheet: "Issue term sheets (up to the limit)",
   approve_matrix_exception: "Approve exceptions to the pricing matrix",
   manage_pricing: "Edit and publish pricing matrices",
@@ -35,6 +36,7 @@ export const PERMISSIONS = {
   manage_capital: "Manage capital sources and allocations",
   approve_funding: "Approve a loan funding (always one of two approvers)",
   approve_draw: "Approve draws (second approver above the threshold)",
+  override_draw_holds: "Release a draw past a lien-law or insurance hold (reason required, logged)",
   assign_inspection: "Assign draw inspections",
   service_loans: "Record payments, statements and payoffs",
   waive_fee: "Waive fees (reason required)",
@@ -56,7 +58,7 @@ const all = Object.fromEntries((Object.keys(PERMISSIONS) as Permission[]).map((k
 // PLACEHOLDER defaults, like the pricing matrix: GT replaces the limits.
 export const DEFAULT_MATRIX: Matrix = {
   ADMIN_OWNER: all,
-  UNDERWRITER: { view_pipeline: on, view_credit: on, review_documents: on, manage_conditions: on, issue_term_sheet: { enabled: true, limitCents: 150_000_000 }, route_capital: on, approve_funding: on, approve_draw: on, approve_extension: on, clear_ofac: on },
+  UNDERWRITER: { view_pipeline: on, view_credit: on, review_documents: on, manage_conditions: on, waive_conditions: on, issue_term_sheet: { enabled: true, limitCents: 150_000_000 }, route_capital: on, approve_funding: on, approve_draw: on, approve_extension: on, clear_ofac: on },
   PROCESSOR: { view_pipeline: on, review_documents: on, manage_conditions: on },
   CAPITAL_MANAGER: { view_pipeline: on, route_capital: on, manage_capital: on, approve_funding: on },
   SERVICER: { view_pipeline: on, service_loans: on, waive_fee: on },
