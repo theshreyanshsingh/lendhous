@@ -85,6 +85,12 @@ export default function BorrowerLoan() {
           {funded && <PaymentsPanel deal={d} />}
           {funded && <Extensions deal={d} side="borrower" />}
           {d.status === "paid_off" && <PaidOff deal={d} side="borrower" />}
+          {d.closing && PRE_FUNDING.includes(d.status) && (
+            <Section title="Closing">
+              <div className="text-sm" data-testid="borrower-closing"><p className="font-medium">{d.closing.company}</p><p className="text-muted-foreground">{[d.closing.contact, d.closing.phone].filter(Boolean).join(" · ")}{d.closing.fileNumber ? ` · file ${d.closing.fileNumber}` : ""}</p><p className="mt-1 text-muted-foreground">Target closing {d.closingDate}.</p></div>
+              <p className="mt-2 rounded-md bg-bad/10 p-2 text-xs text-bad">If you&apos;re wiring money to close, call the title company at a number you looked up yourself to confirm their instructions before you send it. Instructions that change by email are a scam.</p>
+            </Section>
+          )}
           <Section title="Your team">{local && <div className="text-sm">Processor: Pat Processor (FAKE)<br />Underwriter: Uma Underwriter (FAKE)</div>}<div className="rounded-md bg-bad/10 p-2 text-xs text-bad">Wire-fraud warning: we will never email you wire instructions. Always confirm by phone with a number you already have.</div></Section>
         </div>
       </div>

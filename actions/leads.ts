@@ -4,39 +4,41 @@ import { revalidatePath } from "next/cache";
 import { audit } from "@/lib/audit";
 import { requirePermission } from "@/lib/auth";
 import { notifyTeam } from "@/lib/email";
-import { sealLead } from "@/lib/lead-store";
-import { leadSummary, parseLead } from "@/lib/leads";
+import { sealLead, sealQuote } from "@/lib/lead-store";
 import { prisma } from "@/lib/prisma";
+import { EXPERIENCE_LABEL, LOAN_TYPES, quoteProblem, quoteSummary } from "@/lib/quote";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import { requestMeta } from "@/lib/request-meta";
 
-export type LeadFormState = { sent: boolean; error: string };
+export type QuoteReply = { sent: boolean; error: string };
 
-/** The public site's project brief. Open to anyone, so it is rate limited and has a honeypot field. */
-export async function sendLead(_prev: LeadFormState, formData: FormData): Promise<LeadFormState> {
-  // Only bots fill the hidden field. They get a normal-looking reply and nothing is kept.
-  if (String(formData.get("leave_blank") || "")) return { sent: true, error: "" };
-  const parsed = parseLead(Object.fromEntries(formData));
-  if (!parsed.ok) return { sent: false, error: parsed.error };
+/**
+ * The public quote request. Open to anyone, so it's rate limited and has the same honeypot. The visitor's indicative terms
+ * are worked out in their browser from the pricing the page was sent; this keeps the request for the team.
+ */
+export async function sendQuote(raw: unknown, honeypot = ""): Promise<QuoteReply> {
+  if (honeypot) return { sent: true, error: "" };
+  const checked = quoteProblem(raw);
+  if ("error" in checked) return { sent: false, error: checked.error };
+  const { quote } = checked;
   const meta = await requestMeta();
-  // Behind a proxy that doesn't pass the visitor's address along, everyone looks like one visitor, and five an hour would turn real people away.
   const shared = /^(unknown|127\.|::1$|::ffff:127\.)/.test(meta.ipAddress);
-  if (!(await consumeRateLimit(`lead:${meta.ipAddress}`, shared ? 60 : 5, 60 * 60 * 1000))) {
-    return { sent: false, error: "Too many briefs from this connection. Try again in an hour." };
-  }
+  if (!(await consumeRateLimit(`lead:${meta.ipAddress}`, shared ? 60 : 5, 60 * 60 * 1000))) return { sent: false, error: "Too many requests from this connection. Try again in an hour." };
+  // The person to reply to: the broker who sent it, or the borrower.
+  const contact = quote.submitter === "broker" && quote.broker ? { name: `${quote.broker.name} (broker for ${quote.borrower.firstName} ${quote.borrower.lastName})`, email: quote.broker.email, phone: quote.broker.phone } : { name: `${quote.borrower.firstName} ${quote.borrower.lastName}`, email: quote.borrower.email, phone: quote.borrower.phone };
+  const details = { ...contact, strategy: LOAN_TYPES[quote.loanType], experience: EXPERIENCE_LABEL[quote.experience], city: quote.address.city, state: quote.address.state, propertyValueCents: Math.round(quote.purchasePrice * 100), renovationCents: Math.round(quote.rehab * 100), requestedLoanCents: Math.round((quote.requestedAmount ?? 0) * 100), targetClosing: quote.fundingDate, notes: quote.notes || "(no notes)" };
   let leadId: string;
   try {
-    leadId = (await prisma.lead.create({ data: sealLead(parsed.lead) })).id;
+    const sealed = sealLead(details);
+    leadId = (await prisma.lead.create({ data: { ...sealed, submitter: quote.submitter, arvCents: quote.arv ? Math.round(quote.arv * 100) : null, quote: sealQuote(quote, sealed.id) } })).id;
   } catch (error) {
-    console.error("[lendhous-leads] could not save a brief:", error);
+    console.error("[lendhous-leads] could not save a quote request:", error);
     return { sent: false, error: "We couldn't send this just now. Please try again in a few minutes." };
   }
-  // The brief is saved by now, so a failure here only costs the log line or the alert: it still shows in the staff inbox.
   try {
-    await audit({ actorId: null, action: "lead.created", entityType: "Lead", entityId: leadId });
+    await audit({ actorId: null, action: "lead.created", entityType: "Lead", entityId: leadId, after: { kind: "quote", submitter: quote.submitter } });
     const origin = process.env.NEXT_PUBLIC_APP_URL || "";
-    // Replying to the alert reaches the person who sent the brief.
-    await notifyTeam(`New project brief: ${parsed.lead.city}, ${parsed.lead.state}`, `${leadSummary(parsed.lead)}\n\nOpen the leads inbox: ${origin}/admin/leads`, "lead.new", parsed.lead.email);
+    await notifyTeam(`New quote request: ${LOAN_TYPES[quote.loanType]}, ${quote.address.city}, ${quote.address.state}`, `${quoteSummary(quote)}\n\nOpen the leads inbox: ${origin}/admin/leads`, "lead.new", contact.email);
   } catch (error) {
     console.error("[lendhous-leads] could not alert the team:", error);
   }

@@ -17,10 +17,13 @@ export async function GET() {
   }
   // When the nightly servicing check last finished, so an uptime monitor can tell when late payments stop being caught.
   let servicingCheckedAt: string | null = null;
+  // And when Treasury's sanctions list was last downloaded: screenings against a stale list prove less every day.
+  let sanctionsListAt: string | null = null;
   if (db === "ok") {
     try {
       const run = await prisma.jobRun.findFirst({ where: { job: "servicing", ok: true }, orderBy: { finishedAt: "desc" }, select: { finishedAt: true } });
       servicingCheckedAt = run?.finishedAt?.toISOString() ?? null;
+      sanctionsListAt = (await prisma.sanctionsList.findUnique({ where: { id: "sdn" }, select: { fetchedAt: true } }))?.fetchedAt.toISOString() ?? null;
     } catch {
       servicingCheckedAt = null;
     }
@@ -34,6 +37,7 @@ export async function GET() {
     encryption: encryptionMode(),
     cron: Boolean(process.env.CRON_SECRET),
     servicingCheckedAt,
+    sanctionsListAt,
     time: new Date().toISOString(),
   };
   return Response.json(body, { status: db === "ok" ? 200 : 503 });

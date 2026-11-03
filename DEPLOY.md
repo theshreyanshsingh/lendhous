@@ -16,7 +16,7 @@ Lendhous will hold SSNs, credit reports and bank details, so it gets stricter is
 2. In Vercel, import the repo. Framework preset: Next.js. Build command: `npm run build`.
 3. Set the required variables below for **Production** and **Preview**. A build without them fails closed.
 4. Deploy, then sign in at `https://<domain>/login` with `ADMIN_EMAIL` and `ADMIN_PASSWORD`. Use an inbox you can read for `ADMIN_EMAIL`, since password links and team alerts go there.
-5. Check `https://<domain>/api/health`: `db` is `ok`, `storage` is `s3` or `blob`, `encryption` is `keys`. After the first night, `servicingCheckedAt` shows when the servicing check last ran; point an uptime monitor at it, since late payments go unnoticed while the daily job is stopped.
+5. Check `https://<domain>/api/health`: `db` is `ok`, `storage` is `s3` or `blob`, `encryption` is `keys`. After the first night, `servicingCheckedAt` shows when the servicing check last ran; point an uptime monitor at it, since late payments go unnoticed while the daily job is stopped. `sanctionsListAt` shows when Treasury's OFAC list was last downloaded; alert if it's more than two days old, because loans can't fund or release draws on a screening older than three days.
 
 `vercel.json` schedules `GET /api/cron` daily at 06:00 UTC. Vercel sends `Authorization: Bearer $CRON_SECRET`.
 
@@ -48,7 +48,7 @@ Demo seats can't exist on a release database, so to see another role there, invi
 | Storage | `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_ENDPOINT`, `S3_REGION=auto` (R2), or a private Vercel Blob store (`BLOB_READ_WRITE_TOKEN`) |
 | Mail | `RESEND_API_KEY` + `EMAIL_FROM`, or `SMTP_HOST` + `EMAIL_FROM`. Invites, forgot-password links and alerts go this way |
 
-Optional: `ADMIN_NAME`, `LENDER_NAME`, `TEAM_EMAIL`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `S3_PREFIX`, `RATE_LIMIT_STORE`.
+Optional: `ADMIN_NAME`, `LENDER_NAME`, `TEAM_EMAIL`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `S3_PREFIX`, `RATE_LIMIT_STORE`, `GOOGLE_MAPS_API_KEY` (a Places API (New) key, restricted to that API, for address suggestions; without it people type the address).
 
 ## If mail stops working
 
@@ -72,6 +72,8 @@ git pull && LENDHOUS_RELEASE=1 npm run build && pm2 restart lendhous && npm run 
 ```
 
 Check `pm2 ls` shows `lendhous-jobs`. It runs the daily jobs at 06:00 UTC, including the servicing check that marks missed payments late, charges late fees and sends late and maturity notices. Without it nothing goes late, and the servicing page warns that the check has stopped. `npm run jobs` runs any job that hasn't run today, straight away.
+
+**After the deploy that adds OFAC screening, run `npm run jobs` once.** The sanctions job downloads Treasury's list from `treasury.gov` (the server needs outbound HTTPS to it) and screens every open application and loan. Until it has run, nothing can be screened, applications can't go to underwriting, and loans can't fund or release draws.
 
 `db:encrypt` encrypts anything saved before encryption was switched on. It has to come after the restart, because the build it replaces can't read encrypted records. It's safe to run on every update, and it changes nothing once everything is encrypted. The daily job does the same as a backstop.
 

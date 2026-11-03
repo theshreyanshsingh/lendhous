@@ -54,7 +54,7 @@ export default function Servicing() {
             const deal = s.deals.find((item) => item.id === payoff.dealId)!;
             return (
               <li key={payoff.id} className="flex flex-wrap items-center justify-between gap-2 py-3" data-testid="payoff-row">
-                <div className="min-w-0"><Link href={`/admin/deals/${deal.id}`} className="font-medium text-link hover:underline">{deal.loanNumber}</Link> <span className="text-sm">· {payoff.by}</span><div className="text-xs text-muted-foreground">{usd(payoff.total, 2)} good through {payoff.goodThrough} · {usd(payoff.perDiem, 2)} a day after that</div></div>
+                <div className="min-w-0"><Link href={`/admin/deals/${deal.id}`} className="font-medium text-link hover:underline">{deal.loanNumber}</Link> <span className="text-sm">· {payoff.by}</span><div className="text-xs text-muted-foreground">{usd(payoff.total, 2)} good through {payoff.goodThrough} · {usd(payoff.perDiem, 2)} a day after that</div>{payoff.status === "requested" && <div className={`text-xs ${today && addDays(payoff.requestedAt.slice(0, 10), 10) < today ? "text-bad" : "text-warn"}`} data-testid="payoff-due">Statement due by {addDays(payoff.requestedAt.slice(0, 10), 10)} (Florida gives 10 days)</div>}</div>
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge tone={payoff.status === "sent" ? "blue" : "amber"}>{statusLabel(payoff.status)}</Badge>
                   {payoff.status === "requested" && <button className="btn-primary h-9! px-3! text-xs!" data-testid="send-payoff" onClick={() => dispatch({ t: "sendPayoff", payoffId: payoff.id })}>Mark statement sent</button>}

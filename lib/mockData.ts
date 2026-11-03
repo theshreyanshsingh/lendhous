@@ -51,6 +51,36 @@ export interface Deal {
   extensions?: LoanExtension[];
   /** The money that paid the loan off, and the release of the mortgage after it. */
   paidOff?: Payoff;
+  /** Who's closing the loan: the title company or closing attorney. */
+  closing?: ClosingAgent;
+  /** Wire instructions for funding, oldest first. Only the newest is live; a change replaces it and has to be verified again. */
+  wires?: WireInstruction[];
+  /** The verified wire the funding approvals were given on. A new wire clears them. */
+  fundingWireId?: string;
+  /** Sanctions (OFAC) screenings of the people and company on the loan, oldest first. */
+  screenings?: Screening[];
+}
+export interface ClosingAgent { company: string; contact: string; phone: string; email: string; fileNumber: string }
+export interface WireInstruction {
+  id: string; bankName: string; routing: string; account: string; beneficiary: string; reference: string;
+  /** How the instructions arrived. Never by email. */
+  source: string;
+  enteredBy: string; enteredAt: string;
+  /** The call-back: a number found independently, not one printed on the instructions. */
+  verification?: { by: string; at: string; phone: string; phoneSource: string; spokeWith: string };
+  replaced?: { by: string; at: string };
+}
+export type ScreeningRole = "entity" | "borrower" | "guarantor";
+export interface ScreeningHit { uid: number; name: string; type: string; program: string; score: number }
+export interface Screening {
+  id: string; at: string; by: string;
+  /** When the same result was last confirmed, by a later check that found nothing new. */
+  checkedAt: string;
+  /** The sanctions list it was checked against: when it was downloaded, and how many names it had. */
+  list: { fetchedAt: string; names: number };
+  subjects: { name: string; role: ScreeningRole; hits: ScreeningHit[] }[];
+  status: "clear" | "review" | "cleared" | "match";
+  decided?: { by: string; at: string; reason: string };
 }
 export interface Closure { outcome: "declined" | "withdrawn"; reason: string; note: string; by: string; at: string; from: LoanStatus }
 export type DefaultKind = "monetary" | "maturity" | "covenant" | "insurance_lapse" | "tax_delinquency";

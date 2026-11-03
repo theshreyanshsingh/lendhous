@@ -565,6 +565,119 @@ describe("a photo link", () => {
   });
 });
 
+describe("published pricing", () => {
+  it("a published version prices new loans, while a loan saved before versions keeps the original numbers", async () => {
+    const { demoBook } = await import("@/lib/book");
+    const { readBook, runAction } = await import("@/lib/book-store");
+    const { pricingConfig } = await import("@/lib/pricing-config");
+    const { applyDraft, draftOf } = await import("@/lib/pricing-draft");
+    const { BASE_VERSION, currentPricing } = await import("@/lib/pricing-versions");
+    const { evaluate } = await import("@/lib/engine");
+    const { sealJson } = await import("@/lib/crypto");
+    const { rowContext } = await import("@/lib/book-store");
+    // A loan written before pricing had versions: its app has no pricingVersion.
+    const { pricingVersion: _version, ...legacyApp } = demoBook().deals.find((deal) => deal.id === "d9")!.app;
+    const legacy = { ...demoBook().deals.find((deal) => deal.id === "d9")!, id: "legacy-priced", loanNumber: "LH-3001", app: legacyApp };
+    await prisma.bookRecord.create({ data: { id: "deals:legacy-priced", kind: "deals", data: sealJson(legacy, rowContext("deals:legacy-priced")) as never } });
+    const draft = draftOf(pricingConfig);
+    draft.fixFlip.tiers[2].rate = [13, 14];
+    const config = applyDraft(pricingConfig, draft, "2026-11-03-v1");
+    await prisma.pricingVersion.create({ data: { version: config.version, config: config as never, note: "Test", publishedBy: "Owen" } });
+    // Another process priced a loan on it: reading that loan makes this one load the version straight away.
+    const other = { ...legacy, id: "other-priced", loanNumber: "LH-3002", app: { ...legacyApp, pricingVersion: config.version } };
+    await prisma.bookRecord.create({ data: { id: "deals:other-priced", kind: "deals", data: sealJson(other, rowContext("deals:other-priced")) as never } });
+
+    const read = (await readBook()).book;
+    expect(currentPricing().version).toBe("2026-11-03-v1");
+    const stored = read.deals.find((deal) => deal.id === "legacy-priced")!;
+    expect(stored.app.pricingVersion).toBe(BASE_VERSION);
+    expect(evaluate(stored.app).rate).toBe(evaluate({ ...stored.app, pricingVersion: BASE_VERSION }).rate);
+    const staff = { id: "staff-p", name: "Pat Pricing", roleCodes: ["ADMIN_OWNER" as const] };
+    const done = await runAction(staff, { t: "submitApp", app: { ...legacyApp, verifiedDeals: 3 }, address: "300 Price St", city: "Hollywood", zip: "33020", entityName: "Price LLC", exitStrategy: "Sell", client: { name: "Pia Price" } });
+    if ("error" in done) throw new Error(done.error);
+    const fresh = done.after.deals[0];
+    expect(fresh.app.pricingVersion).toBe("2026-11-03-v1");
+    expect(evaluate(fresh.app).rateRange).toEqual([13, 14]);
+    await prisma.pricingVersion.deleteMany({});
+    await prisma.bookRecord.deleteMany({ where: { id: { in: ["deals:legacy-priced", "deals:other-priced"] } } });
+  });
+});
+
+describe("the borrower application link", () => {
+  it("prefills from a quote, saves as the borrower goes, and signing starts the loan with private details sealed", async () => {
+    const { createApplicationLink, openApplicationLink, signedApplication } = await import("@/lib/application-links");
+    const { saveApplicationDraft, signApplication } = await import("@/actions/application-links");
+    const { sealLead, sealQuote } = await import("@/lib/lead-store");
+    const { blankGuarantor, CONSENT_VERSION, draftFromQuote } = await import("@/lib/borrower-application");
+    const { readBook } = await import("@/lib/book-store");
+    const officer = await prisma.user.create({ data: { email: "lou.officer@lendhous.com", name: "Lou Officer", passwordHash: "x", accountStatus: "APPROVED", roles: { create: [{ role: "ADMIN_OWNER" }] } } });
+    const quote = { submitter: "borrower" as const, borrower: { firstName: "Kai", lastName: "Investor", email: "kai.investor@example.com", phone: "(954) 555-0100" }, citizenship: "us" as const, creditBand: "720-759" as const, experience: "3-4" as const, address: { street: "1873 West 10th Street", city: "Jacksonville", state: "FL", zip: "32209", county: "Duval" }, propertyType: "sfr" as const, loanType: "fix_flip" as const, purpose: "purchase" as const, purchasePrice: 74_400, rehab: 80_000, arv: 200_000, fundingDate: "2027-01-20", comps: [], exit: "sell" as const, notes: "Fix and flip." };
+    const sealed = sealLead({ name: "Kai Investor", email: quote.borrower.email, phone: quote.borrower.phone, strategy: "Fix & flip", experience: "3–4 projects", city: "Jacksonville", state: "FL", propertyValueCents: 7_440_000, renovationCents: 8_000_000, requestedLoanCents: 0, targetClosing: quote.fundingDate, notes: quote.notes });
+    const lead = await prisma.lead.create({ data: { ...sealed, quote: sealQuote(quote, sealed.id) } });
+    const { url } = await createApplicationLink({ leadId: lead.id, recipient: { name: "Kai Investor", email: quote.borrower.email }, officer: officer.name, sentById: officer.id, draft: draftFromQuote(quote) });
+    const token = url.split("/apply/")[1];
+    const opened = await openApplicationLink(token);
+    expect(opened).toMatchObject({ state: "open", draft: { contact: { email: "kai.investor@example.com" }, loan: { arv: "200,000" } } });
+
+    const draft = opened!.draft;
+    draft.property = { ...draft.property, floodZone: "no", propertyType: "sfr", occupancy: "vacant" };
+    draft.loan = { ...draft.loan, plan: "Fix and flip.", exit: "sell", closeDate: "2027-01-20" };
+    draft.vesting = { hasLlc: true, entityName: "Revive Jax LLC", entityState: "FL", ein: "42-3514732", address: { street: "8051 North Tamiami Trail", city: "Sarasota", state: "FL", zip: "34243", county: "Sarasota" } };
+    draft.guarantors = [{ ...blankGuarantor(), firstName: "Kai", lastName: "Investor", email: quote.borrower.email, phone: quote.borrower.phone, dob: "1964-11-19", fico: "710", ssn: "123456789", home: { street: "5024 SW 91st Ave", city: "Cooper City", state: "FL", zip: "33328", county: "Broward" }, twoYears: true, mailingSame: true, marital: "married", citizenship: "us", ownershipPct: "100", answers: { bankruptcy: false, foreclosure: false, delinquent: false, judgments: false, lawsuit: false, felony: false, borrowedDownPayment: false }, occupy: false }];
+    expect(await saveApplicationDraft(token, draft, 3)).toHaveProperty("savedAt");
+    expect((await openApplicationLink(token))?.row.step).toBe(3);
+    const rawLinks = async () => JSON.stringify(((await prisma.$runCommandRaw({ find: "ApplicationLink", filter: {} })) as { cursor: { firstBatch: unknown[] } }).cursor.firstBatch);
+    expect(await rawLinks()).not.toMatch(/123456789|1964-11-19|kai\.investor/);
+
+    const all = { application: true, credit: true, release: true, esign: true };
+    expect(await signApplication(token, draft, all, "Someone Else")).toMatchObject({ error: expect.stringMatching(/exactly as you entered/) });
+    expect(await signApplication(token, draft, { ...all, esign: false }, "Kai Investor")).toMatchObject({ error: expect.stringMatching(/four boxes/) });
+    expect(await signApplication(token, draft, all, "kai  investor")).toEqual({ done: true });
+
+    const loanId = (await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } })).loanId!;
+    const deal = (await readBook()).book.deals.find((item) => item.id === loanId)!;
+    expect(deal).toMatchObject({ borrowerName: "Kai Investor", entityName: "Revive Jax LLC", source: "website_lead", sponsor: { guarantors: [{ name: "Kai Investor", fico: 710, ownershipPct: 100 }] } });
+    expect(await prisma.user.findUnique({ where: { email: "kai.investor@example.com" } })).toMatchObject({ id: deal.borrowerId });
+    const rawBook = JSON.stringify(((await prisma.$runCommandRaw({ find: "BookRecord", filter: {} })) as { cursor: { firstBatch: unknown[] } }).cursor.firstBatch);
+    expect(rawBook + (await rawLinks())).not.toMatch(/123456789|1964-11-19/);
+    expect(JSON.stringify(deal)).not.toMatch(/123456789|1964-11-19|42-3514732/);
+    const signed = await signedApplication(loanId);
+    expect(signed?.signature).toMatchObject({ name: "kai investor", version: CONSENT_VERSION, consents: all });
+    expect(signed?.draft.guarantors[0].ssn).toBe("123456789");
+    expect(await signApplication(token, draft, all, "Kai Investor")).toMatchObject({ error: expect.stringMatching(/no longer works/) });
+    expect(await saveApplicationDraft(token, draft, 1)).toHaveProperty("error");
+  });
+});
+
+describe("the nightly sanctions check", () => {
+  it("downloads the list, screens open loans, and keeps the old list when a download fails", async () => {
+    const { demoBook } = await import("@/lib/book");
+    const { readBook, runAction } = await import("@/lib/book-store");
+    // A list in Treasury's format, big enough to pass the sanity check, with one listed person and an alias.
+    const sdn = [...Array.from({ length: 6000 }, (_, index) => `${index + 1},"TESTCO ${index + 1} TRADING",-0- ,"TEST",-0- ,-0- ,-0- ,-0- ,-0- ,-0- ,-0- ,-0- `), '90001,"DOE, Jonathan","individual","SDGT",-0- ,-0- ,-0- ,-0- ,-0- ,-0- ,-0- ,-0- '].join("\r\n");
+    const alt = '90001,1,"aka","DOE, Johnny",-0- ';
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => ({ ok: true, status: 200, text: async () => (String(url).includes("alt") ? alt : sdn) })));
+    try {
+      const staff = { id: "staff-o", name: "Olga Ofac", roleCodes: ["ADMIN_OWNER" as const] };
+      const done = await runAction(staff, { t: "submitApp", app: demoBook().deals.find((deal) => deal.id === "d2")!.app, address: "400 List St", city: "Hollywood", zip: "33020", entityName: "Listed Holdings LLC", exitStrategy: "Sell", client: { name: "Johnny Doe" } });
+      if ("error" in done) throw new Error(done.error);
+      const dealId = done.after.deals[0].id;
+      const night = await lib.jobs.runJob("sanctions", new Date("2026-11-03T06:00:00Z"));
+      expect(night).toMatchObject({ skipped: false, summary: expect.stringMatching(/list of 6002 names \(updated\); screened \d+ loans; [1-9]\d* possible match/) });
+      const deal = (await readBook()).book.deals.find((item) => item.id === dealId)!;
+      expect(deal.screenings?.at(-1)).toMatchObject({ status: "review", list: { names: 6002 } });
+      expect(deal.screenings!.at(-1)!.subjects.find((subject) => subject.role === "borrower")!.hits[0]).toMatchObject({ uid: 90001, program: "SDGT" });
+
+      vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 503, text: async () => "" })));
+      const failed = await lib.jobs.runJob("sanctions", new Date("2026-11-04T06:00:00Z"));
+      expect(failed).toMatchObject({ failed: true, summary: expect.stringMatching(/download failed/) });
+      expect((await prisma.sanctionsList.findUnique({ where: { id: "sdn" } }))?.names).toBe(6002);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+});
+
 describe("indexes and jobs", () => {
   it("enforces unique emails and one role row per user", async () => {
     const user = await prisma.user.create({ data: { email: "a@example.com", name: "A", passwordHash: "x", roles: { create: [{ role: "BORROWER" }] } } });

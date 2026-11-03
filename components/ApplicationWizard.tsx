@@ -4,15 +4,17 @@ import { useRouter } from "next/navigation";
 import { startLoan } from "@/actions/book";
 import { DECLARATIONS, needsList, qualifyingFico, withSponsor } from "@/lib/credit";
 import { evaluate, type Application, type Product } from "@/lib/engine";
-import { pricingConfig } from "@/lib/pricing-config";
+import { currentPricing } from "@/lib/pricing-versions";
 import { useStore } from "@/lib/store";
+import { motion } from "framer-motion";
+import { AddressField } from "@/components/AddressField";
 import EstimatePanel from "@/components/EstimatePanel";
+import { StepSwap } from "@/components/motion";
 import { allAnswered, DeclarationFields, emptyProfile, GuarantorFields, toSponsor, TrackRecordFields } from "@/components/SponsorForm";
 import { productLabel } from "@/components/ui";
 
 const steps = ["Loan type", "Property", "Deal numbers", "Loan request", "Borrower & guarantors", "Past deals", "Credit questions", "Review & submit"];
 const REVIEW = steps.length - 1;
-const counties = [...pricingConfig.geography.core, ...pricingConfig.geography.expansion, "Out of state"];
 
 function Num({ label, value, onChange, hint, testid }: { label: string; value: number | undefined; onChange: (n: number | undefined) => void; hint?: string; testid?: string }) {
   return (
@@ -29,7 +31,7 @@ function Choice<T extends string>({ value, options, onChange }: { value: T; opti
       <div className="text-sm font-semibold">{o.l}</div>{o.d && <div className="text-xs text-muted-foreground">{o.d}</div>}</button>))}</div>;
 }
 
-export type LoanPrefill = { leadId: string; name: string; email: string; product: Product; city: string; state: string; purchasePrice: number; rehab: number; requestedAmount?: number; notes: string };
+export type LoanPrefill = { leadId: string; name: string; email: string; product: Product; city: string; state: string; purchasePrice: number; rehab: number; requestedAmount?: number; notes: string; address?: string; zip?: string; county?: string; arv?: number };
 
 /** The loan application. A broker or staff member fills in the same one for a client, with the client's details added. */
 export default function ApplicationWizard({ mode = "borrower", prefill }: { mode?: "borrower" | "broker" | "staff"; prefill?: LoanPrefill }) {
@@ -39,13 +41,15 @@ export default function ApplicationWizard({ mode = "borrower", prefill }: { mode
   const [client, setClient] = useState({ name: prefill?.name ?? "", email: prefill?.email ?? "", invite: Boolean(prefill?.email), points: 1 });
   const [sending, setSending] = useState(false);
   const [step, setStep] = useState(0);
-  const [addr, setAddr] = useState({ address: "", city: prefill?.city ?? "", zip: "", entityName: "", exit: "Sell" });
+  const [direction, setDirection] = useState<1 | -1>(1);
+  const move = (to: number) => { setDirection(to >= step ? 1 : -1); setStep(to); };
+  const [addr, setAddr] = useState({ address: prefill?.address ?? "", city: prefill?.city ?? "", zip: prefill?.zip ?? "", entityName: "", exit: "Sell" });
   const [certs, setCerts] = useState({ bp: false, noo: false, consent: false, true: false });
   const [profile, setProfile] = useState<ReturnType<typeof emptyProfile>>(() => ({ ...emptyProfile(), guarantors: [{ name: prefill?.name ?? "", ownershipPct: 100, fico: 700, citizenship: "us" }] }));
   // Staff starting a loan from a phone call may not have this yet; the borrower is then asked for it on their loan page.
   const [collect, setCollect] = useState(!staff);
   const sponsor = useMemo(() => toSponsor(profile), [profile]);
-  const [a, setA] = useState<Application>({ product: prefill?.product ?? "fix_flip", purpose: "purchase", county: prefill && prefill.state !== "FL" ? "Out of state" : "Broward", state: prefill?.state ?? "FL", propertyType: "sfr", occupancy: "vacant", purchasePrice: prefill?.purchasePrice ?? 300_000, rehab: prefill?.rehab ?? 100_000, arv: prefill ? prefill.purchasePrice + prefill.rehab : 550_000, requestedAmount: prefill?.requestedAmount, interestReserve: "none", accrual: "full_boat", fico: 720, verifiedDeals: 3, liquidity: 150_000, valuationSource: "borrower_estimate", monthlyRent: 3_200, taxesAnnual: 6_000, insuranceAnnual: 4_800, hoaMonthly: 0, groundUpBuilds: 0 });
+  const [a, setA] = useState<Application>({ product: prefill?.product ?? "fix_flip", purpose: "purchase", county: prefill && prefill.state !== "FL" ? "Out of state" : prefill?.county || "Broward", state: prefill?.state ?? "FL", propertyType: "sfr", occupancy: "vacant", purchasePrice: prefill?.purchasePrice ?? 300_000, rehab: prefill?.rehab ?? 100_000, arv: prefill ? prefill.arv ?? prefill.purchasePrice + prefill.rehab : 550_000, requestedAmount: prefill?.requestedAmount, interestReserve: "none", accrual: "full_boat", fico: 720, verifiedDeals: 3, liquidity: 150_000, valuationSource: "borrower_estimate", monthlyRent: 3_200, taxesAnnual: 6_000, insuranceAnnual: 4_800, hoaMonthly: 0, groundUpBuilds: 0 });
   const set = (p: Partial<Application>) => setA((x) => ({ ...x, ...p }));
   // Priced on the people and deals listed, the same way the server will price it.
   const priced = useMemo(() => (collect ? withSponsor(a, sponsor, new Date()) : a), [a, sponsor, collect]);
@@ -87,10 +91,11 @@ export default function ApplicationWizard({ mode = "borrower", prefill }: { mode
       <div className="space-y-4">
         <div className="glass p-4">
           <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-muted-foreground"><span className="whitespace-nowrap">Step {step + 1} of {steps.length}</span><span>Progress isn&apos;t saved if you leave this page</span></div>
-          <div className="mt-2 flex gap-1">{steps.map((s, i) => <button key={s} onClick={() => setStep(i)} className={`h-1.5 flex-1 rounded-full ${i <= step ? "bg-primary" : "bg-accent"}`} aria-label={s} />)}</div>
+          <div className="mt-2 flex gap-1">{steps.map((s, i) => <button key={s} onClick={() => move(i)} className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-accent" aria-label={s}><motion.span className="absolute inset-0 origin-left rounded-full bg-primary" initial={false} animate={{ scaleX: i <= step ? 1 : 0 }} transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }} /></button>)}</div>
           <h1 className="mt-3 text-xl font-normal tracking-tight">{steps[step]}</h1>
         </div>
-        <div className="glass space-y-4 p-4 sm:p-5" data-testid={`step-${step}`}>
+        <StepSwap step={step} direction={direction} className="glass space-y-4 p-4 sm:p-5">
+        <div className="space-y-4" data-testid={`step-${step}`}>
           {step === 0 && (<>
             <Choice value={a.product} onChange={(v: Product) => set({ product: v, rehab: v === "bridge" || v === "dscr" ? 0 : a.rehab || 100_000, purpose: "purchase" })} options={[
               { v: "fix_flip", l: "Fix & Flip", d: "Purchase + rehab, interest-only, 6–18 months" }, { v: "bridge", l: "Bridge", d: "Light or no rehab, 6–24 months" },
@@ -98,11 +103,11 @@ export default function ApplicationWizard({ mode = "borrower", prefill }: { mode
             <div><span className="label">Purpose</span><Choice value={a.purpose} onChange={(v) => set({ purpose: v })} options={[{ v: "purchase", l: "Purchase" }, { v: "refi_rt", l: "Rate/term refinance" }, ...(a.product === "dscr" || a.product === "bridge" ? [{ v: "refi_co" as const, l: "Cash-out refinance" }] : [])]} /></div>
           </>)}
           {step === 1 && (<>
+            {/* Google's suggestions fill the city, ZIP and, in Florida, the county that decides pricing. */}
+            <AddressField testid="wizard-address" county={false} required={!local} value={{ street: addr.address, city: addr.city, state: a.state, zip: addr.zip, county: a.county }}
+              onChange={(next) => { setAddr({ ...addr, address: next.street, city: next.city, zip: next.zip }); if (next.state && next.state !== a.state) set(next.state === "FL" ? { state: "FL", county: next.county || "Other FL" } : { state: next.state, county: "Out of state" }); else if (next.county && next.county !== a.county && next.state === "FL") set({ county: next.county }); }} />
             <div className="grid gap-3 sm:grid-cols-2">
-              <label className="block sm:col-span-2"><span className="label">Property address</span><input className="desk-input" placeholder="e.g. 100 Main St" value={addr.address} onChange={(x) => setAddr({ ...addr, address: x.target.value })} /></label>
-              <label className="block"><span className="label">City</span><input className="desk-input" value={addr.city} onChange={(x) => setAddr({ ...addr, city: x.target.value })} /></label>
-              <label className="block"><span className="label">ZIP</span><input className="desk-input" value={addr.zip} onChange={(x) => setAddr({ ...addr, zip: x.target.value })} /></label>
-              <label className="block"><span className="label">County</span><select data-testid="county" className="desk-input" value={a.state === "FL" ? a.county : "Out of state"} onChange={(x) => x.target.value === "Out of state" ? set({ county: "Out of state", state: "GA" }) : set({ county: x.target.value, state: "FL" })}>{counties.map((c) => <option key={c}>{c}</option>)}</select></label>
+              <label className="block"><span className="label">County</span><select data-testid="county" className="desk-input" value={a.state === "FL" ? a.county : "Out of state"} onChange={(x) => x.target.value === "Out of state" ? set({ county: "Out of state", state: "GA" }) : set({ county: x.target.value, state: "FL" })}>{[...currentPricing().geography.core, ...currentPricing().geography.expansion, "Out of state"].map((c) => <option key={c}>{c}</option>)}</select></label>
               <label className="block"><span className="label">Property type</span><select className="desk-input" value={a.propertyType} onChange={(x) => set({ propertyType: x.target.value as Application["propertyType"] })}><option value="sfr">Single-family</option><option value="2_4">2–4 units</option><option value="condo">Condo</option><option value="townhome">Townhome</option></select></label>
             </div>
             <div><span className="label">Occupancy</span><Choice value={a.occupancy} onChange={(v) => set({ occupancy: v })} options={[{ v: "vacant", l: "Vacant" }, { v: "tenant", l: "Tenant-occupied" }, { v: "owner_occupied", l: "I or a family member will live here" }]} /></div>
@@ -178,9 +183,10 @@ export default function ApplicationWizard({ mode = "borrower", prefill }: { mode
             {needsClient && <p role="alert" className="text-sm text-bad">Add {staff ? "the borrower's" : "your client's"} name on the Borrower &amp; guarantors step.</p>}
           </div>)}
         </div>
+        </StepSwap>
         <div className="flex justify-between gap-2">
-          <button className="btn-ghost" disabled={step === 0} onClick={() => setStep(step - 1)}>Back</button>
-          {step < REVIEW ? <button data-testid="next" className="btn-primary" disabled={!canNext} onClick={() => setStep(step + 1)}>Continue</button>
+          <button className="btn-ghost" disabled={step === 0} onClick={() => move(step - 1)}>Back</button>
+          {step < REVIEW ? <button data-testid="next" className="btn-primary" disabled={!canNext} onClick={() => move(step + 1)}>Continue</button>
             : <button data-testid="submit" className="btn-primary" disabled={sending || !e.eligible || !certs.bp || !certs.noo || !certs.consent || !certs.true || needsClient || missing.length > 0} onClick={() => void submit()}>{sending ? "Sending…" : staff ? "Create loan" : "Submit application"}</button>}
         </div>
       </div>

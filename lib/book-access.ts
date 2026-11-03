@@ -3,12 +3,15 @@
 // No database code, so the rules can be tested on their own.
 import type { RoleCode } from "@prisma/client";
 import { emptyBook, type Book, type BookAction } from "./book";
+import { verifyProblem, wireProblem, wireVerified } from "./closing";
+import { latestScreening, ofacBlocker } from "./ofac";
 import { sponsorProblem, withSponsor } from "./credit";
 import { scopeError } from "./draws";
 import { cureError, defaultError, DECLINE_REASONS, executeError, extensionRequestError, isClosedApplication, payoffError, PRE_FUNDING, WITHDRAW_REASONS } from "./loan-exits";
 import { MAX_PHOTOS_PER_LINK, photoRequestState, photosClosed } from "./photo-requests";
 import { evaluate } from "./engine";
 import type { Deal, Doc, LoanPayment, LoanSale } from "./mockData";
+import { currentPricing, pricingPayload } from "./pricing-versions";
 import { ledger, servicingDate } from "./servicing";
 import { viewFor, type MemberAccess, type Permission } from "./permissions";
 
@@ -21,6 +24,8 @@ const FUNDED = ["funded", "servicing_current", "servicing_delinquent", "matured"
 const BEFORE_CLOSING = ["submitted", "initial_review", "underwriting", "term_sheet_issued", "term_sheet_accepted", "conditions"];
 // Until a term sheet goes out, the borrower's profile and the credit review can still change.
 const IN_REVIEW = ["submitted", "initial_review", "underwriting"];
+// From an accepted term sheet until the money goes out: when wire instructions can be entered.
+const WIRE_STAGES = ["term_sheet_accepted", "conditions", "clear_to_close", "closing"];
 
 /** The payment record without who on the team keyed it in or why a fee was waived. Amounts and dates stay: they are the pay history. */
 const quietPayments = (deal: Deal, keepReference: boolean): Partial<Deal> => ({
@@ -41,16 +46,22 @@ const quietExits = (deal: Deal): Partial<Deal> => ({
 
 /** Removes what identifies the borrower, for a partner or buyer who hasn't closed on the loan. */
 function blind(deal: Deal): Deal {
-  return { ...deal, borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined, closure: undefined, defaults: undefined, extensions: undefined, paidOff: undefined, ...quietPayments(deal, false) };
+  return { ...deal, borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined, closure: undefined, defaults: undefined, extensions: undefined, paidOff: undefined, closing: undefined, wires: undefined, fundingWireId: undefined, screenings: undefined, ...quietPayments(deal, false) };
 }
 
-/** What only the team sees on a loan it shares with a client. */
+/** What only the team sees on a loan it shares with a client. Wire instructions never leave the team: a client who sees them is a client who can be sent fake ones. */
 function forClient(deal: Deal): Deal {
-  return { ...deal, allocations: [], teaserSentTo: [], route: undefined, capitalStatus: "not_started", contractorIsGtAffiliate: undefined, source: "", fundingApprovers: undefined, creditReview: undefined, ...quietPayments(deal, true), ...quietExits(deal) };
+  return { ...deal, allocations: [], teaserSentTo: [], route: undefined, capitalStatus: "not_started", contractorIsGtAffiliate: undefined, source: "", fundingApprovers: undefined, creditReview: undefined, ...quietPayments(deal, true), ...quietExits(deal), wires: undefined, fundingWireId: undefined, screenings: undefined };
 }
 
 /** The part of the book this account may see. Nothing else leaves the server. */
 export function scopeBook(book: Book, viewer: Viewer): Book {
+  const scoped = scopeRecords(book, viewer);
+  // The browser prices with the same numbers: the current version for new quotes, and each loan's own.
+  return { ...scoped, pricing: pricingPayload(scoped.deals.map((deal) => deal.app.pricingVersion)) };
+}
+
+function scopeRecords(book: Book, viewer: Viewer): Book {
   const empty = emptyBook();
   const view = viewFor(viewer.roleCodes);
   if (view === "admin") return { ...book, partnerId: "", buyerId: "", brokerId: "", borrowerId: "" };
@@ -143,6 +154,7 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
   const dealOf = (id: string) => book.deals.find((deal) => deal.id === id);
   const ok = (next: BookAction = action): Result => ({ action: next });
   const staffOnly = (...permissions: Permission[]) => (staff && permissions.some((permission) => allowed(permission)) ? ok() : no(NOT_ALLOWED));
+  const staffOnlyAllowed = (...permissions: Permission[]) => staff && permissions.some((permission) => allowed(permission));
   const ownsDeal = (deal: Deal) => (view === "borrower" && deal.borrowerId === viewer.id) || (view === "broker" && deal.brokerId === firm);
 
   switch (action.t) {
@@ -171,11 +183,63 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       if (deal.status === "closing") return allowed("approve_funding") ? ok() : no(NOT_ALLOWED);
       return allowed("manage_conditions") || allowed("route_capital") ? ok() : no(NOT_ALLOWED);
     }
+    case "repriceLoan": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      if (!staff || !allowed("issue_term_sheet")) return no(NOT_ALLOWED);
+      if (!IN_REVIEW.includes(deal.status)) return no("Its terms are set once the term sheet goes out.");
+      if (deal.app.pricingVersion === currentPricing().version) return no("It's already on the current pricing.");
+      if (!evaluate({ ...deal.app, pricingVersion: currentPricing().version }).eligible) return no("It isn't eligible on the current pricing.");
+      return ok({ ...action, by: viewer.name });
+    }
     case "approveFunding":
       if (!dealOf(action.dealId)) return no(GONE);
       if (!staff || !allowed("approve_funding")) return no(NOT_ALLOWED);
       if (dealOf(action.dealId)!.fundingApprovers?.includes(viewer.name)) return no("A second, different approver is required.");
+      if (!wireVerified(dealOf(action.dealId)!)) return no("Verify the wire instructions first: an approval is for one verified wire.");
       return ok({ ...action, by: viewer.name });
+    case "recordScreening":
+      if (!trusted) return no(NOT_ALLOWED);
+      return dealOf(action.dealId) ? ok() : no(GONE);
+    case "decideScreening": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      if (!staffOnlyAllowed("clear_ofac")) return no(NOT_ALLOWED);
+      const latest = latestScreening(deal);
+      if (latest?.id !== action.screeningId || latest.status !== "review") return no("That screening has no open match to review.");
+      if (action.reason.trim().length < 10) return no("Say why, in enough detail for an examiner: what you compared and what didn't match.");
+      return ok({ ...action, reason: action.reason.trim(), by: viewer.name });
+    }
+    case "addClosingChecklist": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      if (!staffOnlyAllowed("manage_conditions", "review_documents")) return no(NOT_ALLOWED);
+      return PRE_FUNDING.includes(deal.status) ? ok() : no("This loan has already funded.");
+    }
+    case "saveClosing": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      if (!staffOnlyAllowed("manage_conditions", "approve_funding")) return no(NOT_ALLOWED);
+      if (!PRE_FUNDING.includes(deal.status)) return no("The closing details are set once the loan funds.");
+      return action.closing.company.trim() ? ok() : no("Add the title company or closing attorney.");
+    }
+    case "enterWire": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      if (!staffOnlyAllowed("manage_conditions", "approve_funding")) return no(NOT_ALLOWED);
+      if (!WIRE_STAGES.includes(deal.status)) return no("Wire instructions go in once the term sheet is accepted and before the loan funds.");
+      const cleaned = { ...action, routing: action.routing.replace(/\s/g, ""), account: action.account.replace(/\s/g, ""), by: viewer.name };
+      const refused = wireProblem(cleaned);
+      if (refused) return no(refused);
+      return deal.wires?.some((wire) => wire.id === action.wireId) ? no("Those instructions are already saved.") : ok(cleaned);
+    }
+    case "verifyWire": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      if (!staffOnlyAllowed("manage_conditions", "approve_funding")) return no(NOT_ALLOWED);
+      const refused = verifyProblem(deal.wires?.find((wire) => wire.id === action.wireId), viewer.name, action.phone, action.phoneSource, action.spokeWith);
+      return refused ? no(refused) : ok({ ...action, by: viewer.name });
+    }
     case "updateDealNumbers": {
       const deal = dealOf(action.dealId);
       if (!deal) return no(GONE);
@@ -218,6 +282,9 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       if (!staff || !allowed("issue_term_sheet")) return no(NOT_ALLOWED);
       return IN_REVIEW.includes(deal.status) ? ok() : no("A term sheet has already gone out on this loan.");
     }
+    case "applyBorrowerInfo":
+      if (!trusted) return no(NOT_ALLOWED);
+      return dealOf(action.dealId) ? ok() : no(GONE);
     case "linkBorrower":
       // Only the server's own invite step does this, after it has looked the account up.
       return trusted ? ok() : no(NOT_ALLOWED);
@@ -330,9 +397,12 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       if (!book.draws.some((draw) => draw.id === action.drawId)) return no(GONE);
       if (!staff || !allowed("approve_draw")) return no(NOT_ALLOWED);
       return ok({ ...action, by: viewer.name });
-    case "rejectDraw": case "releaseDraw":
-      if (!book.draws.some((draw) => draw.id === action.drawId)) return no(GONE);
-      return staffOnly("approve_draw");
+    case "rejectDraw": case "releaseDraw": {
+      const draw = book.draws.find((item) => item.id === action.drawId);
+      if (!draw) return no(GONE);
+      const blocked = action.t === "releaseDraw" ? ofacBlocker(dealOf(draw.dealId)!, servicingDate(new Date())) : null;
+      return blocked ? no(`${blocked}.`) : staffOnly("approve_draw");
+    }
     case "recordPayment": {
       const deal = dealOf(action.dealId);
       if (!deal) return no(GONE);

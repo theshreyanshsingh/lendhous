@@ -4,10 +4,10 @@ import type { Book, BookAction } from "@/lib/book";
 import { notify, notifyTeam } from "@/lib/email";
 import { evaluate } from "@/lib/engine";
 import type { Deal } from "@/lib/mockData";
-import { pricingConfig } from "@/lib/pricing-config";
+import { currentPricing } from "@/lib/pricing-versions";
 import { DEFAULT_KINDS, maturityAfter, WITHDRAW_REASONS } from "@/lib/loan-exits";
 import { prisma } from "@/lib/prisma";
-import { defaultInterestFrom, defaultRate, ledger, maturityOf } from "@/lib/servicing";
+import { defaultInterestFrom, defaultRateOf, ledger, maturityOf, servicingTermsOf } from "@/lib/servicing";
 
 const origin = () => (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "");
 
@@ -29,12 +29,12 @@ function servicingAlerts(before: Deal, after: Deal): Alert[] {
     const fee = row.fee ? ` A late fee of ${dollars(row.fee)} has been added.` : "";
     both(`Payment late: ${after.loanNumber}`, `The payment of ${dollars(row.amount)} due ${longDate(row.due)} hasn't arrived.${fee} To bring the loan current, pay ${dollars(now.amountDue)}. If you've already sent it, contact your LendHous servicing team.`, "payment.late", `the payment of ${dollars(row.amount)} due ${longDate(row.due)} is late. ${dollars(now.amountDue)} is past due.`);
   }
-  const { delinquentDays, defaultNoticeDays } = pricingConfig.servicing;
+  const { delinquentDays, defaultNoticeDays } = servicingTermsOf(after);
   if (was.daysPastDue < delinquentDays && now.daysPastDue >= delinquentDays) both(`${delinquentDays} days past due: ${after.loanNumber}`, `Your loan is ${now.daysPastDue} days past due. ${dollars(now.amountDue)} brings it current. Please pay it now or call us to talk about it.`, "loan.delinquent", `the loan is ${now.daysPastDue} days past due, ${dollars(now.amountDue)} owed.`);
   if (was.daysPastDue < defaultNoticeDays && now.daysPastDue >= defaultNoticeDays) alerts.push({ to: "team", subject: `${defaultNoticeDays} days past due: ${after.loanNumber}`, body: `${after.borrowerName}'s loan is ${now.daysPastDue} days past due. Decide whether to send a notice of default; talk to counsel first.`, event: "loan.default_review" });
   const notice = (after.maturityNotices ?? []).filter((days) => !(before.maturityNotices ?? []).includes(days));
   if (notice.length && !now.matured) both(`Your loan matures ${longDate(now.maturity)}: ${after.loanNumber}`, `Your loan matures in ${now.daysToMaturity} days, on ${longDate(now.maturity)}. Plan to pay it off by then: you can ask for a payoff statement on your loan page. If you need more time, talk to us before it matures.`, "loan.maturity_notice", `the loan matures in ${now.daysToMaturity} days, on ${longDate(now.maturity)}.`);
-  if (after.status === "matured" && before.status !== "matured") both(`Your loan has matured: ${after.loanNumber}`, `Your loan matured on ${longDate(now.maturity)} and the full balance is now due. From then, interest runs at the default rate of ${defaultRate(evaluate(after.app).rate).toFixed(2)}%. Sign in to ask for a payoff statement.`, "loan.matured", `the loan matured on ${longDate(now.maturity)} and hasn't been paid off.`);
+  if (after.status === "matured" && before.status !== "matured") both(`Your loan has matured: ${after.loanNumber}`, `Your loan matured on ${longDate(now.maturity)} and the full balance is now due. From then, interest runs at the default rate of ${defaultRateOf(after).toFixed(2)}%. Sign in to ask for a payoff statement.`, "loan.matured", `the loan matured on ${longDate(now.maturity)} and hasn't been paid off.`);
   return alerts;
 }
 
@@ -101,6 +101,23 @@ export function alertsFor(before: Book, after: Book, action: BookAction): Alert[
       const payoff = after.payoffs.find((item) => item.id === action.payoffId);
       return payoff ? [{ to: "borrower", dealId: payoff.dealId, subject: `Your payoff statement: ${number(payoff.dealId)}`, body: `Your payoff is ready, good through ${payoff.goodThrough}. Sign in to see it. We will never email wire instructions.`, event: "payoff.sent" }] : [];
     }
+    case "recordScreening": {
+      const deal = loan(action.dealId);
+      const added = deal?.screenings?.at(-1);
+      if (!deal || added?.id !== action.screening.id || added.status !== "review") return [];
+      return [{ to: "team", subject: `Possible OFAC match: ${deal.loanNumber}`, body: `Screening ${deal.loanNumber} against the OFAC sanctions list found a possible match. Nothing moves on the loan until someone with authority reviews it on the Credit review tab. Don't tell the borrower.`, event: "ofac.review" }];
+    }
+    case "decideScreening": {
+      const deal = loan(action.dealId);
+      if (!deal || action.decision !== "match") return [];
+      return [{ to: "team", subject: `Confirmed OFAC match: ${deal.loanNumber}`, body: `${action.by} confirmed an OFAC sanctions match on ${deal.loanNumber}. Don't move or return any money on it. Call counsel now: a blocked or rejected transaction has to be reported to OFAC within 10 business days.`, event: "ofac.match" }];
+    }
+    case "enterWire": {
+      // Changed instructions are the classic sign of wire fraud, so the whole team hears about it.
+      const deal = loan(action.dealId);
+      if (!deal || (deal.wires?.length ?? 0) < 2) return [];
+      return [{ to: "team", subject: `Wire instructions changed: ${deal.loanNumber}`, body: `${action.by} entered new wire instructions for ${deal.borrowerName}'s closing. Funding approvals were cleared. Before anyone approves again, confirm the change by calling the title company at a number you found yourself, never one from an email.`, event: "wire.changed" }];
+    }
     case "recordPayoff": {
       const deal = loan(action.dealId);
       if (!deal?.paidOff) return [];
@@ -108,7 +125,7 @@ export function alertsFor(before: Book, after: Book, action: BookAction): Alert[
       const over = amount - owed >= 0.01 ? ` You paid ${dollars(amount - owed)} more than the payoff; your LendHous team will refund it.` : "";
       return [
         { to: "borrower", dealId: deal.id, subject: `Paid in full: ${deal.loanNumber}`, body: `We received your payoff of ${dollars(amount)} on ${longDate(receivedOn)}. Your loan is paid in full. We'll send the satisfaction of your mortgage to be recorded.${over}`, event: "loan.paid_off" },
-        { to: "team", subject: `Paid off: ${deal.loanNumber}`, body: `${deal.borrowerName} paid off the loan with ${dollars(amount)} received ${longDate(receivedOn)} (${dollars(owed)} owed). Get the satisfaction of mortgage out within ${pricingConfig.lienReleaseDays} days.`, event: "loan.paid_off" },
+        { to: "team", subject: `Paid off: ${deal.loanNumber}`, body: `${deal.borrowerName} paid off the loan with ${dollars(amount)} received ${longDate(receivedOn)} (${dollars(owed)} owed). Get the satisfaction of mortgage out within ${currentPricing().lienReleaseDays} days.`, event: "loan.paid_off" },
         // The allocations are gone once it's paid off, so who held it comes from before.
         ...holdersOf(before.deals.find((item) => item.id === deal.id)).map((holder) => ({ ...holder, subject: `A loan you hold was paid off: ${deal.loanNumber}`, body: `${deal.loanNumber} was paid off on ${longDate(receivedOn)}. Your share follows under your agreement.`, event: "loan.paid_off" })),
       ];
@@ -141,7 +158,7 @@ export function alertsFor(before: Book, after: Book, action: BookAction): Alert[
       const deal = loan(action.dealId);
       if (!deal) return [];
       const kind = DEFAULT_KINDS[action.kind].toLowerCase();
-      const rate = defaultRate(evaluate(deal.app).rate).toFixed(2);
+      const rate = defaultRateOf(deal).toFixed(2);
       return [
         { to: "borrower", dealId: deal.id, subject: `Your loan is in default: ${deal.loanNumber}`, body: `LendHous has declared your loan in default, effective ${longDate(action.effectiveOn)} (${kind}). Interest now runs at the default rate of ${rate}% from ${longDate(defaultInterestFrom(deal))}. Your LendHous servicing team will contact you; call them to talk about bringing the loan current.`, event: "loan.default" },
         { to: "team", subject: `Default declared: ${deal.loanNumber}`, body: `${deal.borrowerName}: ${action.by} declared the loan in default, effective ${longDate(action.effectiveOn)} (${kind}). Send the notice of default from the attorney's template.`, event: "loan.default" },

@@ -3,7 +3,8 @@
  * Pure functions only. Same code would run on server and client in the real build.
  * Money in dollars (number) in this prototype; round2() mirrors the "round half up at posting" rule.
  */
-import { pricingConfig as defaultConfig, type PricingConfig, type Tier, type Range } from "./pricing-config";
+import type { PricingConfig, Tier, Range } from "./pricing-config";
+import { currentPricing, pricingFor } from "./pricing-versions";
 
 export const round2 = (x: number) => Math.round((x + Number.EPSILON) * 100) / 100;
 const clamp = (x: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, x));
@@ -135,13 +136,13 @@ export function capitalAvailable(s: { commitment: number; reserved: number; comm
 }
 
 /* ---------------- tiers, colors, score ---------------- */
-export function experienceTier(verifiedDeals: number, cfg: PricingConfig = defaultConfig): Tier {
+export function experienceTier(verifiedDeals: number, cfg: PricingConfig = currentPricing()): Tier {
   let t: Tier = 1;
   for (const e of cfg.experienceTiers) if (verifiedDeals >= e.min) t = e.tier;
   return t;
 }
 export type Color = "green" | "yellow" | "red";
-export function ratioColor(actual: number, limit: number, kind: "max" | "min" = "max", cfg: PricingConfig = defaultConfig): Color {
+export function ratioColor(actual: number, limit: number, kind: "max" | "min" = "max", cfg: PricingConfig = currentPricing()): Color {
   if (kind === "max") {
     if (actual > limit + 1e-9) return "red";
     return limit - actual > cfg.colorBands.yellowWithin + 1e-9 ? "green" : "yellow";
@@ -151,7 +152,7 @@ export function ratioColor(actual: number, limit: number, kind: "max" | "min" = 
 }
 
 export interface ScoreInput { product: Product; leverageActual: number; leverageLimit: number; fico: number; majorDerogs?: number; tier: Tier; profitMargin?: number; dscr?: number; exitDocumented?: boolean; reserveMonths: number; location: "core" | "expansion" | "partner_only"; valuationSource: "appraisal" | "bpo" | "avm" | "borrower_estimate" }
-export function dealScore(i: ScoreInput, cfg: PricingConfig = defaultConfig) {
+export function dealScore(i: ScoreInput, cfg: PricingConfig = currentPricing()) {
   const w = cfg.score.weights;
   // leverage: over limit 0; at limit 10/25 of weight; linear to full at headroom >= 20% of limit
   let lev = 0;
@@ -182,7 +183,7 @@ export type Grade = "A" | "B" | "C" | "D" | "E";
 
 /* ---------------- routing (Spec 6.3) ---------------- */
 export type Route = "IN_HOUSE" | "PARTNER" | "SPLIT" | "MANUAL" | "PARTNER_OR_DECLINE";
-export function recommendRoute(i: { product: Product; noteAmount: number; grade: Grade; location: "core" | "expansion" | "partner_only"; inHouseAvailable: number; concentrationBreach?: boolean; gtIsBorrower?: boolean }, cfg: PricingConfig = defaultConfig): { route: Route; reasons: string[] } {
+export function recommendRoute(i: { product: Product; noteAmount: number; grade: Grade; location: "core" | "expansion" | "partner_only"; inHouseAvailable: number; concentrationBreach?: boolean; gtIsBorrower?: boolean }, cfg: PricingConfig = currentPricing()): { route: Route; reasons: string[] } {
   const split = (r: string): { route: Route; reasons: string[] } =>
     cfg.routing.splitEnabled ? { route: "SPLIT", reasons: [r] } : { route: "PARTNER", reasons: [r, "Split not enabled yet (M8) → PARTNER"] };
   if (i.gtIsBorrower) return { route: "MANUAL", reasons: ["GT is the borrower/guarantor: separate documented approval required (Spec 7.6)"] };
@@ -216,11 +217,13 @@ export interface Application {
   fico: number; verifiedDeals: number; foreignNational?: boolean; repeatBorrower?: boolean;
   liquidity: number; earnestMoney?: number;
   valuationSource?: "appraisal" | "bpo" | "avm" | "borrower_estimate";
+  /** The pricing version this loan was quoted on (lib/pricing-versions.ts). Set when it's saved; never from a browser. */
+  pricingVersion?: string;
 }
 
 const pick = (r: Range, p: "low" | "mid" | "high") => (p === "low" ? r[0] : p === "high" ? r[1] : (r[0] + r[1]) / 2);
 
-export function locationClass(county: string, state: string, cfg: PricingConfig = defaultConfig): "core" | "expansion" | "partner_only" {
+export function locationClass(county: string, state: string, cfg: PricingConfig = currentPricing()): "core" | "expansion" | "partner_only" {
   if (state !== "FL") return "partner_only";
   if (cfg.geography.core.includes(county)) return "core";
   return "expansion";
@@ -239,7 +242,8 @@ export interface Estimate {
   sizingCandidates?: Record<string, number>;
 }
 
-export function evaluate(app: Application, cfg: PricingConfig = defaultConfig): Estimate {
+/** Prices an application on the pricing version it was quoted on, or today's pricing for a quote not saved yet. */
+export function evaluate(app: Application, cfg: PricingConfig = pricingFor(app.pricingVersion)): Estimate {
   const hardStops: string[] = []; const flags: string[] = [];
   const pp = cfg.estimatePricePoint; const A = cfg.adjusters; const as = cfg.assumptions;
   const cap = cfg.loanSize.maxOverall;

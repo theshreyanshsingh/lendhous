@@ -2,7 +2,10 @@ import Link from "next/link";
 import { markLeadContacted } from "@/actions/leads";
 import { PageIntro } from "@/components/page-intro";
 import { requirePermission } from "@/lib/auth";
-import { openLead } from "@/lib/lead-store";
+import { SendApplicationLink } from "@/components/SendApplicationLink";
+import { linkSummaries } from "@/lib/application-links";
+import { openLead, openQuote } from "@/lib/lead-store";
+import { CITIZENSHIP_LABEL, CREDIT_LABEL } from "@/lib/quote";
 import { notDeleted, prisma } from "@/lib/prisma";
 
 export const metadata = { title: "Website leads" };
@@ -13,10 +16,11 @@ const when = (date: Date) => date.toLocaleDateString("en-US", { month: "short", 
 
 export default async function Leads() {
   await requirePermission("view_pipeline");
-  const leads = (await prisma.lead.findMany({ where: notDeleted, orderBy: { createdAt: "desc" }, take: 200 })).map(openLead);
+  const leads = (await prisma.lead.findMany({ where: notDeleted, orderBy: { createdAt: "desc" }, take: 200 })).map((row) => ({ ...openLead(row), request: openQuote(row) }));
+  const links = await linkSummaries({ leadIds: leads.map((lead) => lead.id) });
   return (
     <div className="space-y-4">
-      <PageIntro eyebrow="Website" title="Website leads" lede="Project briefs sent from the public site's Let's talk form. These are conversations, not applications: no credit has been pulled." />
+      <PageIntro eyebrow="Website" title="Website leads" lede="Quote requests from the public site, from borrowers and brokers. Send the borrower the secure application link to turn one into a loan." />
       <div className="glass overflow-hidden px-4 lg:px-0">
         <div className="lg:overflow-x-auto">
           <table className="stack-table w-full lg:min-w-[900px]" data-testid="leads-table">
@@ -35,16 +39,18 @@ export default async function Leads() {
                   <td data-label="Received" className="lg:whitespace-nowrap">{when(lead.createdAt)}</td>
                   <td data-label="Project">
                     <div>
-                      <div>{lead.strategy}</div>
-                      <div className="text-xs text-muted-foreground">{lead.city}, {lead.state}{lead.experience ? ` · ${lead.experience}` : ""}</div>
+                      <div>{lead.strategy}{lead.submitter === "broker" && <span className="ml-1 text-xs text-link">· broker</span>}</div>
+                      <div className="text-xs text-muted-foreground">{lead.request ? `${lead.request.address.street}, ${lead.request.address.city}, ${lead.request.address.state} ${lead.request.address.zip}` : `${lead.city}, ${lead.state}`}{lead.experience ? ` · ${lead.experience}` : ""}</div>
+                      {lead.request && <div className="text-xs text-muted-foreground">{CREDIT_LABEL[lead.request.creditBand]} credit · {CITIZENSHIP_LABEL[lead.request.citizenship]}{lead.request.comps.length ? ` · ${lead.request.comps.length} comp${lead.request.comps.length === 1 ? "" : "s"}` : ""}</div>}
                       {lead.targetClosing && <div className="text-xs text-muted-foreground">Target closing {lead.targetClosing}</div>}
                     </div>
                   </td>
                   <td data-label="Requested" className="text-right lg:whitespace-nowrap">
                     <div>
-                      <div className="font-medium">{money(lead.requestedLoanCents)}</div>
+                      <div className="font-medium">{lead.requestedLoanCents ? money(lead.requestedLoanCents) : "The max"}</div>
                       <div className="text-xs text-muted-foreground">Value {money(lead.propertyValueCents)}</div>
                       <div className="text-xs text-muted-foreground">Rehab {money(lead.renovationCents)}</div>
+                      {lead.arvCents ? <div className="text-xs text-muted-foreground">ARV {money(lead.arvCents)}</div> : null}
                     </div>
                   </td>
                   <td className="text-[13px] whitespace-pre-wrap lg:max-w-[320px]">{lead.notes}</td>
@@ -61,7 +67,11 @@ export default async function Leads() {
                       {lead.loanId ? (
                         <Link href={`/admin/deals/${lead.loanId}`} className="text-xs text-link underline underline-offset-2" data-testid="lead-loan">Open the loan</Link>
                       ) : (
-                        <Link href={`/admin/new-loan?lead=${lead.id}`} className="text-xs text-link underline underline-offset-2" data-testid="start-loan">Start a loan</Link>
+                        <>
+                          <Link href={`/admin/new-loan?lead=${lead.id}`} className="text-xs text-link underline underline-offset-2" data-testid="start-loan">Start a loan</Link>
+                          {(() => { const link = links.find((item) => item.leadId === lead.id); return link ? <span className="text-xs text-muted-foreground" data-testid="lead-link-status">Link {link.state === "open" ? (link.savedAt ? `on step ${link.step + 1} of 5` : "sent, not opened yet") : link.state}</span> : null; })()}
+                          <SendApplicationLink compact leadId={lead.id} name={lead.request ? `${lead.request.borrower.firstName} ${lead.request.borrower.lastName}` : lead.name} email={lead.request?.borrower.email ?? lead.email} />
+                        </>
                       )}
                     </div>
                   </td>

@@ -2,6 +2,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { dispatchBook, refreshBook, uploadLoanFile } from "@/actions/book";
 import { demoBook, emptyBook, reducer, type Book, type BookAction } from "./book";
+import { adoptPricing } from "./pricing-versions";
 import { evaluate, capitalAvailable, type Application, type Estimate } from "./engine";
 import type { CapitalSource, Deal } from "./mockData";
 
@@ -32,10 +33,15 @@ type Store = {
 
 const Ctx = createContext<Store | null>(null);
 type Outer = BookAction | { t: "hydrate"; state: Book };
-function outer(s: Book, a: Outer): Book { return a.t === "hydrate" ? a.state : reducer(s, a); }
+function outer(s: Book, a: Outer): Book {
+  if (a.t !== "hydrate") return reducer(s, a);
+  // Learn the pricing a book from the server uses before anything on the page prices its loans.
+  adoptPricing(a.state.pricing);
+  return a.state;
+}
 
 export function StoreProvider({ demo, accountId, viewerName, initialBook, newLeads = 0, children }: { demo: boolean; accountId: string; viewerName: string; initialBook?: Book; newLeads?: number; children: React.ReactNode }) {
-  const [s, local] = useReducer(outer, demo, (isDemo: boolean) => (isDemo ? demoBook() : initialBook ?? emptyBook()));
+  const [s, local] = useReducer(outer, demo, (isDemo: boolean) => { adoptPricing(initialBook?.pricing); return isDemo ? demoBook() : initialBook ?? emptyBook(); });
   const [hydrated, setHydrated] = useState(false);
   const [error, setError] = useState("");
   const busy = useRef(false);

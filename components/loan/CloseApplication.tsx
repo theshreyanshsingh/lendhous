@@ -4,6 +4,7 @@ import { useState } from "react";
 import { closureReason, DECLINE_REASONS, isClosedApplication, PRE_FUNDING, reopenTo, WITHDRAW_REASONS } from "@/lib/loan-exits";
 import type { Deal } from "@/lib/mockData";
 import { useStore } from "@/lib/store";
+import { Reveal } from "@/components/motion";
 import { shortDate, statusLabel } from "@/components/ui";
 
 /**
@@ -45,8 +46,10 @@ export function CloseApplication({ deal, side }: { deal: Deal; side: "team" | "b
   const save = async () => {
     if (await dispatch({ t: "closeApplication", dealId: deal.id, outcome, reason, note: note.trim(), by: viewerName, byTeam: team })) setOpen(false);
   };
-  if (!open) return <button type="button" className={team ? "btn-ghost h-9! px-3! text-xs!" : "text-sm text-link underline underline-offset-2"} data-testid="close-application" onClick={() => setOpen(true)}>{team ? "Decline or withdraw" : "Withdraw this application"}</button>;
   return (
+    <>
+    {!open && <button type="button" className={team ? "btn-ghost h-9! px-3! text-xs!" : "text-sm text-link underline underline-offset-2"} data-testid="close-application" onClick={() => setOpen(true)}>{team ? "Decline or withdraw" : "Withdraw this application"}</button>}
+    <Reveal open={open}>
     <div className="mt-3 w-full space-y-3 rounded-[2px] border border-border p-3" data-testid="close-application-form">
       {team && (
         <div className="flex flex-wrap gap-2">
@@ -69,5 +72,7 @@ export function CloseApplication({ deal, side }: { deal: Deal; side: "team" | "b
         <button type="button" className="btn-ghost" onClick={() => setOpen(false)}>Cancel</button>
       </div>
     </div>
+    </Reveal>
+    </>
   );
 }

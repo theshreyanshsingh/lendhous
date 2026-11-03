@@ -37,7 +37,7 @@ export default async function ProgramGuide({ params }: Props) {
             <div className="eyebrow">YOUR NEXT STEP</div>
             <h3>A better conversation starts with the details.</h3>
             <p>Prepare the property, budget, experience, and exit plan for a financing discussion.</p>
-            <Link className="button" href="/start">Prepare your deal brief</Link>
+            <Link className="button" href="/start">Get a loan quote</Link>
             <p className="fine">Not an application or a commitment to lend. Availability, terms, and required documentation are subject to confirmation and underwriting.</p>
           </div>
           <Link className="panel" href="/calculators">

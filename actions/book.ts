@@ -11,9 +11,9 @@ import { requirePermission, requireUser } from "@/lib/auth";
 import { encryptField } from "@/lib/crypto";
 import type { Book, BookAction } from "@/lib/book";
 import { isDemoEmail } from "@/lib/deploy";
-import { inviteMember } from "@/lib/members";
-import { accessFor } from "@/lib/member-rules";
 import { prisma } from "@/lib/prisma";
+import { borrowerFor, screenAutomatically } from "@/lib/loan-intake";
+import { screenDeal } from "@/lib/sanctions-store";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import { extensionOf, mimeFor, putBytes, safeBasename } from "@/lib/storage";
 import { attachmentName, documentNameContext, uploadProblem } from "@/lib/uploads";
@@ -38,7 +38,21 @@ async function perform(viewer: Viewer, action: BookAction, options: { trusted?: 
   // Message text and application details stay in the record; the log says who did what to which loan.
   await audit({ actorId: viewer.id, action: `book.${result.action.t}`, entityType: "LoanBook", entityId: subjectOf(result.action) });
   await sendAlerts(result.before, result.after, result.action);
-  return { book: scopeBook(result.after, viewer) };
+  // New names on a loan are screened straight away, so a possible sanctions match surfaces before anyone works on it.
+  const named = result.action.t === "submitApp" ? result.after.deals.find((deal) => !result.before.deals.some((old) => old.id === deal.id))?.id : result.action.t === "saveSponsor" ? result.action.dealId : undefined;
+  const screened = named ? await screenAutomatically(named) : null;
+  return { book: scopeBook(screened ?? result.after, viewer) };
+}
+
+/** Screens a loan against the OFAC list now, as the person asking. */
+export async function screenLoan(dealId: string): Promise<BookReply> {
+  const viewer = await requirePermission("view_pipeline");
+  if (isDemoEmail(viewer.email)) return { error: "Demo accounts keep their records in the browser." };
+  const deal = (await readBook()).book.deals.find((item) => item.id === dealId);
+  if (!deal) return { error: "That loan no longer exists." };
+  const screening = await screenDeal(deal, viewer.name);
+  if ("error" in screening) return { error: screening.error };
+  return perform(viewer, { t: "recordScreening", dealId, screening }, { trusted: true });
 }
 
 /** Every change a real account makes to the loan book comes through here. */
@@ -89,17 +103,6 @@ export async function uploadLoanFile(form: FormData): Promise<BookReply & { docu
 type NewLoan = { action: Extract<BookAction, { t: "submitApp" }>; clientEmail: string; invite: boolean; leadId?: string };
 
 /** Links a loan to a borrower's account, inviting them if they don't have one yet. */
-async function borrowerFor(actor: Awaited<ReturnType<typeof requirePermission>>, name: string, email: string, invite: boolean) {
-  const address = email.trim().toLowerCase();
-  if (!address) return { id: undefined };
-  const found = await prisma.user.findUnique({ where: { email: address } });
-  if (found && !found.deletedAt) return { id: found.id };
-  if (!invite) return { id: undefined };
-  const result = await inviteMember(actor, { name, email: address, title: "", roles: ["BORROWER"], permissions: accessFor(["BORROWER"]) });
-  if ("error" in result) return { error: result.error };
-  return { id: (await prisma.user.findUniqueOrThrow({ where: { email: address } })).id };
-}
-
 /** Staff start a loan for a client, from scratch or from a website brief. */
 export async function startLoan(input: NewLoan): Promise<BookReply & { dealId?: string }> {
   const actor = await requirePermission("view_pipeline");
@@ -112,12 +115,13 @@ export async function startLoan(input: NewLoan): Promise<BookReply & { dealId?: 
   const result = await runAction(actor, { ...action, client: { name, borrowerId: link.id }, source: input.leadId ? "website_lead" : "staff" });
   if ("error" in result) return { error: result.error };
   const deal = result.after.deals.find((item) => !result.before.deals.some((old) => old.id === item.id))!;
+  const screened = await screenAutomatically(deal.id);
   await audit({ actorId: actor.id, action: "book.startLoan", entityType: "LoanBook", entityId: deal.id, after: { loanNumber: deal.loanNumber, leadId: input.leadId } });
   if (input.leadId) {
     const updated = await prisma.lead.updateMany({ where: { id: String(input.leadId) }, data: { loanId: deal.id, contactedAt: new Date() } });
     if (updated.count) revalidatePath("/admin/leads");
   }
-  return { book: scopeBook(result.after, actor), dealId: deal.id };
+  return { book: scopeBook(screened ?? result.after, actor), dealId: deal.id };
 }
 
 /** Gives a loan that has no portal account one, so the borrower can sign in and see it. */

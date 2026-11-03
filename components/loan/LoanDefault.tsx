@@ -1,9 +1,8 @@
 "use client";
 import { useState } from "react";
-import { evaluate } from "@/lib/engine";
 import { cureError, DEFAULT_KINDS, defaultError } from "@/lib/loan-exits";
 import type { Deal, DefaultKind } from "@/lib/mockData";
-import { defaultInterestFrom, defaultRate, ledgerOf, openDefault } from "@/lib/servicing";
+import { defaultInterestFrom, defaultRateOf, ledgerOf, openDefault } from "@/lib/servicing";
 import { useStore } from "@/lib/store";
 import { Badge, Section, shortDate } from "@/components/ui";
 import { useServiceDay } from "./use-service-day";
@@ -28,7 +27,7 @@ export function LoanDefault({ deal }: { deal: Deal }) {
   const day = effectiveOn || today;
   const refused = kind ? defaultError(deal, kind, day, today) : null;
   const cure = open ? cureError(deal, today) : null;
-  const rate = defaultRate(evaluate(deal.app).rate).toFixed(2);
+  const rate = defaultRateOf(deal).toFixed(2);
   const past = (deal.defaults ?? []).filter((item) => item.cured);
   return (
     <Section title="Default" right={open ? <Badge tone="rose">In default</Badge> : undefined}>

@@ -43,7 +43,7 @@ export function SiteFooter() {
         </div>
         <div>
           <h3>GET STARTED</h3>
-          <Link href="/start">Let’s talk</Link>
+          <Link href="/start">Get a quote</Link>
           <Link href="/login">Portal login</Link>
         </div>
       </nav>

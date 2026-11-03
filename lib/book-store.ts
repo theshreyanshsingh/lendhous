@@ -7,6 +7,8 @@ import { emptyBook, reducer, type Book, type BookAction } from "@/lib/book";
 import { openJson, sealJson } from "@/lib/crypto";
 import { can, type Permission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
+import { loadPricing } from "@/lib/pricing-store";
+import { BASE_VERSION } from "@/lib/pricing-versions";
 
 const LISTS = ["deals", "bids", "partners", "buyers", "brokers", "sales", "offers", "draws", "payoffs", "messages", "sources", "photoRequests"] as const;
 const AUDIT_ID = "activity:feed";
@@ -28,6 +30,9 @@ export async function readBook() {
     else if ((LISTS as readonly string[]).includes(row.kind)) (book[row.kind as (typeof LISTS)[number]] as unknown[]).push(data);
   }
   for (const list of LISTS) if (NEWEST_FIRST.has(list)) book[list].reverse();
+  // Loans saved before pricing had versions were priced on the code's numbers, and stay on them.
+  book.deals = book.deals.map((deal) => (deal.app.pricingVersion ? deal : { ...deal, app: { ...deal.app, pricingVersion: BASE_VERSION } }));
+  await loadPricing(book.deals.map((deal) => deal.app.pricingVersion));
   return { book, version: versionRow?.version ?? 0 };
 }
 

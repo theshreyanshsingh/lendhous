@@ -1,6 +1,8 @@
 // What's waiting on the team right now, across every queue. It drives the pipeline's list and the menu's counts.
 import type { Book } from "./book";
-import { lienReleaseOpen, openExtension } from "./loan-exits";
+import { activeWire, wireVerified } from "./closing";
+import { lienReleaseOpen, openExtension, PRE_FUNDING } from "./loan-exits";
+import { latestScreening } from "./ofac";
 
 export type AttentionItem = { key: string; label: string; count: number; href: string };
 
@@ -24,8 +26,12 @@ export function attentionItems(s: Book, newLeads: number): AttentionItem[] {
   const newApps = s.deals.filter((deal) => deal.status === "submitted");
   const bids = s.bids.filter((bid) => bid.status === "submitted");
   const funding = s.deals.filter((deal) => deal.status === "closing" && (deal.fundingApprovers?.length ?? 0) < 2);
+  const sanctions = s.deals.filter((deal) => { const status = latestScreening(deal)?.status; return status === "review" || status === "match"; });
+  const wires = s.deals.filter((deal) => activeWire(deal) && !wireVerified(deal) && PRE_FUNDING.includes(deal.status));
   const items: AttentionItem[] = [
-    { key: "leads", label: "Website briefs to answer", count: counts.leads, href: "/admin/leads" },
+    { key: "leads", label: "Quote requests to answer", count: counts.leads, href: "/admin/leads" },
+    { key: "sanctions", label: "Possible sanctions matches to review", count: sanctions.length, href: firstDeal(sanctions.map((deal) => deal.id)) },
+    { key: "wires", label: "Wire instructions to verify by phone", count: wires.length, href: firstDeal(wires.map((deal) => deal.id)) },
     { key: "applications", label: "New applications", count: newApps.length, href: firstDeal(newApps.map((deal) => deal.id)) },
     { key: "documents", label: "Documents to review", count: docs, href: firstDeal(toReview.map((deal) => deal.id)) },
     { key: "funding", label: "Loans waiting on funding approval", count: funding.length, href: firstDeal(funding.map((deal) => deal.id)) },

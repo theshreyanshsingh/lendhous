@@ -36,7 +36,12 @@ describe("moving a loan through its stages", () => {
     expect(stageOf({ ...ready, allocations: [{ sourceId: "gt-main", amount: 1_000 }] })?.blockers).toContain("Capital doesn't cover the whole loan yet");
   });
   it("won't fund without committed capital, and stops once in servicing", () => {
-    const approved = { fundingApprovers: ["Olivia", "Uma"] };
+    const wire = { id: "w1", bankName: "Bank", routing: "123456780", account: "1234567", beneficiary: "Title Trust", reference: "", source: "Title company's secure portal", enteredBy: "Pat", enteredAt: "2026-10-27T00:00:00Z", verification: { by: "Olivia", at: "2026-10-28T00:00:00Z", phone: "9545550100", phoneSource: "Title company's website", spokeWith: "Dana" } };
+    const screened = { id: "s1", at: "2026-10-30T06:00:00Z", by: "Nightly", checkedAt: "2026-10-30T06:00:00Z", list: { fetchedAt: "2026-10-30T05:00:00Z", names: 18000 }, status: "clear" as const, subjects: [{ name: "Testcase Holdings LLC (FAKE)", role: "entity" as const, hits: [] }, { name: "Emery Testcase (FAKE)", role: "borrower" as const, hits: [] }] };
+    const approved = { fundingApprovers: ["Olivia", "Uma"], wires: [wire], screenings: [screened] };
+    expect(stageOf(deal("d15", { ...approved, screenings: undefined }))?.blockers).toContain("Not screened against the OFAC sanctions list yet");
+    expect(stageOf(deal("d15", { fundingApprovers: ["Olivia", "Uma"] }))?.blockers).toContain("No wire instructions yet (Closing tab)");
+    expect(stageOf(deal("d15", { ...approved, wires: [{ ...wire, verification: undefined }] }))?.blockers).toContain("The wire instructions haven't been verified by a call-back (Closing tab)");
     expect(canAdvance(stageOf(deal("d15", approved)))).toBe(true);
     expect(stageOf(deal("d15"))?.blockers).toContain("Needs two people to approve funding (0 of 2)");
     expect(canAdvance(stageOf(deal("d15", { fundingApprovers: ["Olivia"] })))).toBe(false);

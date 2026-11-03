@@ -1,15 +1,12 @@
 "use client";
 import { useState } from "react";
-import { executeError, extensionChecks, extensionFee, extensionRequestError, extensionsUsed, extensionWindowOpens, maturityAfter, openExtension } from "@/lib/loan-exits";
+import { executeError, extensionChecks, extensionFee, extensionRequestError, extensionsUsed, extensionTermsOf, maturityAfter, openExtension } from "@/lib/loan-exits";
 import type { Deal, LoanExtension, PaymentMethod } from "@/lib/mockData";
-import { pricingConfig } from "@/lib/pricing-config";
 import { ledgerOf, maturityOf, METHODS } from "@/lib/servicing";
 import { useStore } from "@/lib/store";
 import { Badge, Section, shortDate, usd } from "@/components/ui";
 import { useServiceDay } from "./use-service-day";
 
-const { maxCount, monthsEach } = pricingConfig.extensions;
-const MONTHS = Array.from({ length: monthsEach }, (_, index) => index + 1);
 const statusTone = { requested: "amber", approved: "blue", declined: "slate", executed: "green" } as const;
 const statusText = { requested: "Waiting for approval", approved: "Approved, not signed", declined: "Declined", executed: "Signed" } as const;
 
@@ -18,6 +15,8 @@ export function Extensions({ deal, side }: { deal: Deal; side: "team" | "borrowe
   const { dispatch, viewerName } = useStore();
   const today = useServiceDay();
   const team = side === "team";
+  const { maxCount, monthsEach } = extensionTermsOf(deal);
+  const MONTHS = Array.from({ length: monthsEach }, (_, index) => index + 1);
   const [months, setMonths] = useState(monthsEach);
   const [reason, setReason] = useState("");
   const [asking, setAsking] = useState(false);

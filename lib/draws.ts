@@ -2,7 +2,7 @@
 // and decides who has to sign. Competitors' borrowers request draws against an approved, itemized budget, so do these.
 import { approveDraw, evaluate, fundedBalances, inBalanceTest, type Product } from "./engine";
 import type { Deal, DrawRequest, DrawRequestLine, ScopeLine } from "./mockData";
-import { pricingConfig } from "./pricing-config";
+import { currentPricing, pricingFor } from "./pricing-versions";
 
 const REHAB: [string, string, number][] = [
   ["demolition", "Demolition", 0.06],
@@ -71,7 +71,7 @@ export function drawRequestError(deal: Deal, lines: DrawRequestLine[]) {
 export function reviewDraw(deal: Deal, draw: DrawRequest) {
   const lines = draw.lines.map((line) => {
     const item = lineFor(deal, line);
-    return { budget: item?.budget ?? 0, observedPct: line.observedPct ?? 0, retainagePct: pricingConfig.draws.retainagePct, releasedToDate: item?.released ?? 0, requested: line.requested };
+    return { budget: item?.budget ?? 0, observedPct: line.observedPct ?? 0, retainagePct: pricingFor(deal.app.pricingVersion).draws.retainagePct, releasedToDate: item?.released ?? 0, requested: line.requested };
   });
   const costToComplete = (deal.scope ?? []).reduce((sum, item) => sum + item.budget - item.released, 0);
   const { inBalance } = inBalanceTest({ remainingHoldback: holdbackLeft(deal), balancingDeposits: 0, costToComplete });
@@ -80,7 +80,7 @@ export function reviewDraw(deal: Deal, draw: DrawRequest) {
 }
 
 /** A large draw needs two people, and so does any draw where the contractor is affiliated with the lender. */
-export const approversNeeded = (deal: Deal, amount: number) => (amount > pricingConfig.draws.secondApproverAbove || deal.contractorIsGtAffiliate ? 2 : 1);
+export const approversNeeded = (deal: Deal, amount: number) => (amount > currentPricing().draws.secondApproverAbove || deal.contractorIsGtAffiliate ? 2 : 1);
 
 export function approvalError(deal: Deal, draw: DrawRequest, approver: string) {
   if (draw.status !== "inspected") return "This draw isn't waiting for approval.";

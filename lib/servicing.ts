@@ -4,9 +4,11 @@
 // the fees waived), so recording, reversing or waiving anything gives the same answer as if it had happened in order.
 import { evaluate, fundedBalances, maturityDate, payoffQuote, round2 } from "./engine";
 import type { Deal, LoanPayment, PaymentMethod } from "./mockData";
-import { pricingConfig } from "./pricing-config";
+import { currentPricing, pricingFor } from "./pricing-versions";
 
-const rules = pricingConfig.servicing;
+/** A loan's servicing terms (grace days, late fee, default rate). They're in its note, so they come from the pricing it was priced on. */
+export const servicingTermsOf = (deal: Pick<Deal, "app">) => pricingFor(deal.app.pricingVersion).servicing;
+type ServicingTerms = ReturnType<typeof servicingTermsOf>;
 
 /** The statuses a loan is serviced in: it has money out and payments coming due. */
 export const SERVICED = ["funded", "servicing_current", "servicing_delinquent", "matured", "default"];
@@ -37,10 +39,12 @@ export const maturityOf = (deal: Deal) => maturityDate(deal.closingDate, evaluat
 /** The default declared on the loan and not yet cured, if there is one. */
 export const openDefault = (deal: Pick<Deal, "defaults">) => (deal.defaults ?? []).find((item) => !item.cured);
 
-/** The rate after maturity: the note rate plus the default margin, capped. */
-export const defaultRate = (ratePct: number) => Math.max(ratePct, Math.min(rules.defaultRateMax, ratePct + rules.defaultRateAdd));
+/** The rate after maturity or a default: the note rate plus the default margin, capped. */
+export const defaultRate = (ratePct: number, terms: ServicingTerms = currentPricing().servicing) => Math.max(ratePct, Math.min(terms.defaultRateMax, ratePct + terms.defaultRateAdd));
+/** This loan's default rate. */
+export const defaultRateOf = (deal: Deal) => defaultRate(evaluate(deal.app).rate, servicingTermsOf(deal));
 
-export const lateFeeOn = (amount: number) => round2(amount * rules.lateFeePct);
+export const lateFeeOn = (amount: number, terms: ServicingTerms = currentPricing().servicing) => round2(amount * terms.lateFeePct);
 
 /** The balance after some payments on an amortizing loan. */
 export function amortizedBalance(amount: number, ratePct: number, monthlyPayment: number, payments: number) {
@@ -79,6 +83,7 @@ export type Ledger = {
  */
 export function ledgerOf(deal: Deal, asOf: string): Ledger {
   const e = evaluate(deal.app);
+  const rules = servicingTermsOf(deal);
   const maturity = maturityOf(deal);
   const current = fundedBalances(e, deal.app, deal.disbursedDraws).nextPayment;
   const boarded = boardedFrom(deal);
@@ -100,7 +105,7 @@ export function ledgerOf(deal: Deal, asOf: string): Ledger {
     for (const row of rows) {
       if (row.boarded || row.late || row.lateOn > day || (row.paidOn && row.paidOn < row.lateOn)) continue;
       row.late = true;
-      row.fee = row.waived ? 0 : lateFeeOn(row.amount);
+      row.fee = row.waived ? 0 : lateFeeOn(row.amount, rules);
     }
   };
   // Pays whole payments, oldest first, while the money covers them. Returns false when it stopped on one it couldn't cover.
@@ -174,6 +179,7 @@ export function settle(deal: Deal, asOf: string): Deal {
   if (!SERVICED.includes(deal.status)) return deal;
   const day = deal.servicedThrough && deal.servicedThrough > asOf ? deal.servicedThrough : asOf;
   const l = ledgerOf(deal, day);
+  const rules = servicingTermsOf(deal);
   const bills = l.rows.filter((row) => row.status !== "boarded" && (row.due <= day || row.paidOn)).map((row) => ({ due: row.due, amount: row.amount }));
   const status: Deal["status"] = deal.status === "default" ? "default" : l.matured ? "matured" : l.daysPastDue >= rules.delinquentDays ? "servicing_delinquent" : deal.status === "funded" ? "funded" : "servicing_current";
   const notices = [...new Set([...(deal.maturityNotices ?? []), ...rules.maturityNoticeDays.filter((days) => l.daysToMaturity <= days)])].sort((a, b) => b - a);
@@ -207,7 +213,7 @@ export function payoffFor(deal: Deal, goodThrough: string, l: Ledger = ledger(de
   const from = defaultInterestFrom(deal, l.maturity);
   const regularEnd = goodThrough < from ? goodThrough : from;
   const regular = payoffQuote({ disbursedPrincipal: principal, ratePct: e.rate, daysAccrued: Math.max(0, daysBetween(l.paidThrough, regularEnd)), accrualBasisAmount: basis, unpaidCharges: l.feesOwed, borrowerEscrowCredit: l.credit });
-  const atDefault = payoffQuote({ disbursedPrincipal: 0, ratePct: defaultRate(e.rate), daysAccrued: Math.max(0, daysBetween(l.paidThrough > from ? l.paidThrough : from, goodThrough)), accrualBasisAmount: basis ?? principal });
+  const atDefault = payoffQuote({ disbursedPrincipal: 0, ratePct: defaultRate(e.rate, servicingTermsOf(deal)), daysAccrued: Math.max(0, daysBetween(l.paidThrough > from ? l.paidThrough : from, goodThrough)), accrualBasisAmount: basis ?? principal });
   return {
     principal,
     accrued: regular.accrued,

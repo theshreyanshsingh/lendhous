@@ -23,13 +23,18 @@ const wipe = async () => {
   await prisma.bookVersion.deleteMany();
   await prisma.document.deleteMany({ where: { ownerType: "LOAN" } });
   await prisma.lead.deleteMany();
+  await prisma.pricingVersion.deleteMany();
+  await prisma.sanctionsList.deleteMany();
   await prisma.photoLink.deleteMany();
+  await prisma.applicationLink.deleteMany();
   await prisma.rateWindow.deleteMany({ where: { key: { startsWith: "lead:" } } });
   await prisma.user.deleteMany({ where: { email: { endsWith: DOMAIN } } });
   await prisma.rateWindow.deleteMany({ where: { key: { contains: DOMAIN } } });
   await prisma.platformSettings.update({ where: { id: "default" }, data: { offerSampleData: true } });
 };
 await wipe();
+// A small stand-in for Treasury's sanctions list, so applications are screened as they arrive (the nightly job downloads the real one).
+await prisma.sanctionsList.create({ data: { id: "sdn", fetchedAt: new Date(), names: 2, hash: "smoke", entries: [[90001, "DOE, Jonathan", "individual", "SDGT"], [90002, "LISTED TRADING CO", "entity", "SDNTK"]] } });
 
 const passwordHash = await bcrypt.hash(PASSWORD, 10);
 const account = (local, name, role) => prisma.user.create({ data: { email: `${local}@${DOMAIN}`, name, passwordHash, accountStatus: "APPROVED", roles: { create: [{ role }] } } });
@@ -79,50 +84,57 @@ try {
   const partner = await person("partner");
   const buyer = await person("buyer");
 
-  // A brief from the public site, as a visitor sends it
+  // A quote request from the public site, as a visitor sends it from a phone
   const visitorContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const visitor = await visitorContext.newPage();
   visitor.on("pageerror", (error) => errors.push(`visitor: ${error.message}`));
-  await visitor.goto(`${BASE}/start`);
-  await visitor.getByLabel("Your name").fill("Vera Visitor");
-  await visitor.getByLabel("Email").fill(`vera@${DOMAIN}`);
-  await visitor.getByLabel("Phone (optional)").fill("(555) 010-0300");
-  await visitor.getByLabel("Property city").fill("Tampa");
-  await visitor.getByLabel("Property state").fill("FL");
-  await visitor.getByLabel("Purchase price or current value ($)").fill("300000");
-  await visitor.getByLabel("Estimated renovation budget ($)").fill("60000");
-  await visitor.getByLabel("Requested loan amount ($)").fill("270000");
-  await visitor.getByLabel("Exit strategy & project notes").fill("Refinance into a rental next spring.");
-  await visitor.getByRole("button", { name: "Send to LendHous" }).click();
-  ok("a visitor can send a brief from a phone", await seen(visitor.getByTestId("deal-brief")));
+  const fillQuote = async (first, email, notes) => {
+    await visitor.goto(`${BASE}/start`);
+    await visitor.getByTestId("quote-first").fill(first);
+    await visitor.getByTestId("quote-last").fill("Visitor");
+    await visitor.getByTestId("quote-email").fill(email);
+    await visitor.getByTestId("quote-phone").fill("(555) 010-0300");
+    await visitor.getByTestId("quote-citizen").selectOption("us");
+    await visitor.getByTestId("quote-credit").selectOption("720-759");
+    await visitor.getByTestId("quote-experience").selectOption("1-2");
+    await visitor.getByTestId("quote-address-street").fill("44 Visitor Lane");
+    await visitor.getByTestId("quote-address-city").fill("Tampa");
+    await visitor.getByTestId("quote-address-state").fill("FL");
+    await visitor.getByTestId("quote-address-zip").fill("33602");
+    await visitor.getByTestId("quote-address-county").fill("Hillsborough");
+    await visitor.getByTestId("quote-purchasePrice").fill("300000");
+    await visitor.getByTestId("quote-rehab").fill("60000");
+    await visitor.getByTestId("quote-arv").fill("480000");
+    await visitor.getByTestId("quote-requestedAmount").fill("270000");
+    await visitor.getByTestId("quote-date").fill("2027-01-15");
+    await visitor.locator("textarea").first().fill(notes);
+  };
+  await fillQuote("Vera", `vera@${DOMAIN}`, "Refinance into a rental next spring.");
+  await visitor.getByTestId("quote-submit").click();
+  ok("a visitor can send a quote request from a phone", await seen(visitor.getByTestId("quote-sent")));
+  ok("and sees indicative terms", (await visitor.getByTestId("quote-amount").innerText()).startsWith("up to $"));
   const leadRows = await rawRows("Lead");
-  ok("the brief's contact details are encrypted in the database", !leadRows.includes("Vera Visitor") && !leadRows.includes(`vera@${DOMAIN}`) && !leadRows.includes("(555) 010-0300") && !leadRows.includes("Refinance into a rental") && leadRows.includes("enc1:"));
+  ok("the request's contact details are encrypted in the database", !leadRows.includes("Vera Visitor") && !leadRows.includes(`vera@${DOMAIN}`) && !leadRows.includes("(555) 010-0300") && !leadRows.includes("Refinance into a rental") && !leadRows.includes("44 Visitor Lane") && leadRows.includes("enc1:"));
   ok("so is the alert saved for the team", !(await rawRows("Notification")).includes("Vera Visitor"));
   await go(owner, "/admin/account/notifications");
-  ok("the owner gets the alert with the brief in it", await seen(owner.getByTestId("notice").filter({ hasText: "New project brief: Tampa, FL" }).filter({ hasText: "Vera Visitor" })));
+  ok("the owner gets the alert with the request in it", await seen(owner.getByTestId("notice").filter({ hasText: "New quote request: Fix & flip, Tampa, FL" }).filter({ hasText: "ARV $480,000" })));
   await go(owner, "/admin");
-  ok("the pipeline says a brief is waiting", (await owner.getByTestId("attention-leads").innerText()).includes("Website briefs"));
+  ok("the pipeline says a request is waiting", (await owner.getByTestId("attention-leads").innerText()).includes("Quote requests"));
   await go(owner, "/admin/leads");
   const veraRow = owner.getByTestId("leads-table").locator("tr", { hasText: "Vera Visitor" });
-  ok("the brief reaches the leads inbox, readable", (await seen(veraRow)) && (await veraRow.innerText()).includes("Refinance into a rental") && (await veraRow.innerText()).includes("$270,000"));
+  ok("the request reaches the leads inbox, readable", (await seen(veraRow)) && (await veraRow.innerText()).includes("Refinance into a rental") && (await veraRow.innerText()).includes("$270,000") && (await veraRow.innerText()).includes("ARV $480,000"));
   ok("staff can email the visitor from it", (await veraRow.getByRole("link", { name: `vera@${DOMAIN}` }).getAttribute("href")) === `mailto:vera@${DOMAIN}`);
   await veraRow.getByRole("button", { name: "Mark contacted" }).click();
   ok("staff can mark it contacted", await seen(veraRow.getByText("Contacted")));
   await go(borrower, "/admin/leads");
   ok("a borrower can't see the leads", !(await received(borrower)).includes("Vera Visitor"));
-  await visitor.goto(`${BASE}/start`);
-  await visitor.getByLabel("Your name").fill("Rob Robot");
-  await visitor.getByLabel("Email").fill(`rob@${DOMAIN}`);
-  await visitor.getByLabel("Property city").fill("Tampa");
-  await visitor.getByLabel("Property state").fill("FL");
-  await visitor.getByLabel("Purchase price or current value ($)").fill("300000");
-  await visitor.getByLabel("Requested loan amount ($)").fill("270000");
-  await visitor.getByLabel("Exit strategy & project notes").fill("Spam.");
-  await visitor.locator("input[name=leave_blank]").evaluate((input) => { input.value = "http://spam.example"; });
+  await fillQuote("Rob", `rob@${DOMAIN}`, "Spam.");
+  await visitor.locator(".hp input").fill("http://spam.example", { force: true });
   const before = await prisma.lead.count();
-  await visitor.getByRole("button", { name: "Send to LendHous" }).click();
-  await seen(visitor.getByTestId("deal-brief"));
+  await visitor.getByTestId("quote-submit").click();
+  await seen(visitor.getByTestId("quote-sent"));
   ok("a bot filling the hidden field gets a normal reply and nothing is kept", (await prisma.lead.count()) === before);
+
   await visitorContext.close();
 
   // An empty real account, then its first capital source
@@ -243,6 +255,7 @@ try {
   }
   ok("a term sheet waits for the credit review", (await under.getByTestId("stage-blockers").innerText()).includes("Credit review isn't signed off") && (await under.getByTestId("advance-loan").isDisabled()));
   await under.getByTestId("tab-Credit review").click();
+  ok("the application was screened against the OFAC list when it arrived", (await under.getByTestId("ofac-panel").innerText()).includes("No match") && !(await under.getByTestId("ofac-panel").innerText()).includes("Not checked yet"));
   const creditFlags = await under.getByTestId("credit-flags").innerText();
   ok("the credit review shows the yes and the unverified deal", creditFlags.includes("Party to a lawsuit") && creditFlags.includes("1 of 1 past deals not verified"));
   ok("with the explanation and the guarantor", (await under.getByTestId("declaration-answers").innerText()).includes("settled in August") && (await under.getByTestId("credit-review").innerText()).includes("Bonnie Borrower"));
@@ -284,6 +297,37 @@ try {
   await gone(under.getByTestId("commit"));
   await under.getByTestId("advance-loan").filter({ hasText: "Mark clear to close" }).click();
   await under.getByTestId("advance-loan").filter({ hasText: "Send to closing" }).click();
+  await seen(under.getByTestId("stage-blockers").getByText("No wire instructions yet"));
+  ok("a loan can't fund without wire instructions", (await under.getByTestId("approve-funding").count()) === 0);
+  // The wire: one person enters it from the title company's portal, another confirms it by phone.
+  await under.getByTestId("tab-Closing").click();
+  await under.getByTestId("agent-company").fill("Real Title LLC");
+  await under.getByTestId("agent-phone").fill("(305) 555-0199");
+  await under.getByTestId("save-agent").click();
+  await seen(under.getByTestId("closing-agent"));
+  await under.getByTestId("wire-bankName").fill("Smoke Test Bank");
+  await under.getByTestId("wire-beneficiary").fill("Real Title LLC Escrow");
+  await under.getByTestId("wire-routing").fill("123456789");
+  ok("a mistyped routing number is caught", await seen(under.getByTestId("wire-blocked").getByText("routing number isn't valid")));
+  await under.getByTestId("wire-routing").fill("123456780");
+  await under.getByTestId("wire-account").fill("5544332211");
+  await under.getByTestId("wire-confirmAccount").fill("5544332211");
+  await under.getByTestId("wire-source").selectOption("Title company's secure portal");
+  await under.getByTestId("save-wire").click();
+  await seen(under.getByTestId("active-wire"));
+  ok("whoever entered the wire can't verify it", (await under.getByTestId("verify-blocked").innerText()).includes("Someone other than"));
+  ok("the account number is stored encrypted", !(await rawRows("BookRecord")).includes("5544332211"));
+  await go(borrower, `/admin/borrower/${dealId}`);
+  ok("the borrower never receives the wire instructions", !(await received(borrower)).includes("5544332211") && (await borrower.getByTestId("borrower-closing").innerText()).includes("Real Title LLC"));
+  await go(owner, dealHref);
+  await owner.getByTestId("tab-Closing").click();
+  await owner.getByTestId("verify-phone").fill("(305) 555-0100");
+  await owner.getByTestId("verify-phone-source").selectOption("Title company's website");
+  await owner.getByTestId("verify-spoke-with").fill("Rita Escrow");
+  await owner.getByTestId("verify-read-back").check();
+  await owner.getByTestId("confirm-verify-wire").click();
+  ok("a second person verifies the wire by call-back", await seen(owner.getByTestId("wire-verified")));
+  await go(under, dealHref);
   await seen(under.getByTestId("approve-funding"));
   ok("funding waits for approval", await under.getByTestId("advance-loan").isDisabled());
   await under.getByTestId("approve-funding").click();
@@ -480,6 +524,20 @@ try {
   await seen(owner.getByTestId("payoff-row").filter({ hasText: "LH-1001" }).getByText("Sent"));
   ok("the borrower is told when they can ask for more time", (await borrower.getByTestId("extension-not-yet").innerText()).includes("before maturity"));
 
+  // New pricing: the owner publishes a version, the funded loan keeps its own, and the next application gets the new one
+  await go(owner, "/admin/pricing");
+  await seen(owner.getByTestId("pricing-editor"));
+  await owner.getByTestId("flip-2-ltc").fill("82.5");
+  ok("the pricing editor lists what changed", (await owner.getByTestId("pricing-changes").innerText()).includes("fixFlip.tiers.2.maxLTC: 0.85 → 0.825"));
+  ok("pricing can't be published without saying why", await owner.getByTestId("publish-pricing").isDisabled());
+  await owner.getByTestId("pricing-note").fill("Tier 2 flips to 82.5% LTC (smoke test)");
+  await owner.getByTestId("publish-pricing").click();
+  ok("the owner publishes new pricing", await seen(owner.getByTestId("pricing-history").getByText("Tier 2 flips to 82.5% LTC")));
+  const published = await prisma.pricingVersion.findFirst();
+  ok("it's saved as a new version and audited", Boolean(published) && (await prisma.auditEvent.count({ where: { action: "pricing.published", entityId: published?.version } })) === 1);
+  await go(owner, `/admin/deals/${dealId}`);
+  ok("the funded loan keeps the pricing it was priced on", (await owner.locator("main").innerText()).includes("pricing PLACEHOLDER-"));
+
   // A website brief becomes a loan
   await go(owner, "/admin/leads");
   await owner.locator("tr", { hasText: "Lena Lead" }).getByTestId("start-loan").click();
@@ -505,6 +563,8 @@ try {
   await go(owner, leadDeal);
   await owner.getByTestId("tab-Credit review").click();
   ok("a loan started from a call waits for the borrower's profile", (await owner.getByTestId("credit-flags").innerText()).includes("No borrower profile"));
+  await owner.getByTestId("tab-Numbers & Ratios").click();
+  ok("a new application is priced on the new version", (await owner.locator("main").innerText()).includes(`pricing ${published?.version}`));
   await go(owner, "/admin/leads");
   ok("the leads page opens the loan", (await owner.locator("tr", { hasText: "Lena Lead" }).getByTestId("lead-loan").getAttribute("href")) === leadDeal);
   // Declining it: the client is told, the team's notes stay encrypted and out of the email, and it can be reopened.
@@ -630,10 +690,67 @@ try {
   await owner.waitForURL("**notice=settings_saved");
   await go(other, "/admin/borrower");
   ok("turning sample data off removes the offer", (await other.getByTestId("load-sample").count()) === 0);
+  // The secure application link: the owner sends it, the visitor fills in five steps on the phone and signs, and the loan starts
+  await go(owner, "/admin/leads");
+  await veraRow.getByTestId("open-application-link").click();
+  await veraRow.getByTestId("send-application-link").click();
+  const appLink = await veraRow.getByTestId("application-link-url").inputValue();
+  ok("the owner sends the visitor the application link", appLink.includes("/apply/") && (await prisma.notification.count({ where: { toEmail: `vera@${DOMAIN}`, eventCode: "application.link" } })) === 1);
+  const applicantContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const applicant = await applicantContext.newPage();
+  applicant.on("pageerror", (error) => errors.push(`applicant: ${error.message}`));
+  await applicant.goto(BASE + new URL(appLink).pathname);
+  ok("the link opens prefilled from the quote request", (await applicant.getByTestId("app-email").inputValue()) === `vera@${DOMAIN}`);
+  await applicant.getByTestId("app-next").click();
+  await applicant.getByTestId("app-flood-no").click();
+  await applicant.getByTestId("app-occupancy").selectOption("vacant");
+  await applicant.getByTestId("app-next").click();
+  await seen(applicant.getByTestId("app-step").getByText(/step 3 of 5/i));
+  ok("the numbers come from the quote request too", (await applicant.getByTestId("app-arv").inputValue()) === "480,000");
+  await applicant.getByTestId("app-exit-refinance").click();
+  await applicant.getByTestId("app-next").click();
+  await applicant.getByTestId("app-llc-true").click();
+  await applicant.getByTestId("app-llc-name").fill("Vera Rentals LLC");
+  await applicant.getByTestId("app-llc-address-street").fill("10 Company Court");
+  await applicant.getByTestId("app-llc-address-city").fill("Tampa");
+  await applicant.getByTestId("app-llc-address-state").fill("FL");
+  await applicant.getByTestId("app-llc-address-zip").fill("33602");
+  await applicant.getByTestId("g0-dob").fill("1980-04-12");
+  await applicant.getByTestId("g0-fico").fill("731");
+  await applicant.getByTestId("g0-ssn").fill("123456789");
+  await applicant.getByTestId("g0-home-street").fill("8 Home Street");
+  await applicant.getByTestId("g0-home-city").fill("Tampa");
+  await applicant.getByTestId("g0-home-state").fill("FL");
+  await applicant.getByTestId("g0-home-zip").fill("33606");
+  for (const id of ["g0-two-true", "g0-mail-true", "g0-marital-unmarried"]) await applicant.getByTestId(id).click();
+  await applicant.getByTestId("g0-own").fill("100");
+  for (const key of ["bankruptcy", "foreclosure", "delinquent", "judgments", "lawsuit", "felony", "borrowedDownPayment", "occupy"]) await applicant.getByTestId(`g0-decl-${key}-false`).click();
+  await applicant.getByTestId("app-next").click();
+  await seen(applicant.getByTestId("app-review"));
+  ok("the form saves as the borrower goes", (await applicant.getByTestId("app-saved").innerText()).includes("Saved") || (await applicant.getByTestId("app-saved").innerText()).includes("Saving"));
+  ok("what's saved is encrypted", !(await rawRows("ApplicationLink")).includes("123456789") && !(await rawRows("ApplicationLink")).includes("1980-04-12"));
+  for (const key of ["application", "credit", "release", "esign"]) await applicant.getByTestId(`agree-${key}`).check();
+  await applicant.getByTestId("app-signature").fill("Vera Visitor");
+  await applicant.getByTestId("app-sign").click();
+  ok("the applicant signs the application on the phone", await seen(applicant.getByTestId("application-signed")));
+  await applicantContext.close();
+  const signedLead = await prisma.lead.findFirstOrThrow({ where: { id: { not: lead.id }, loanId: { not: null } } });
+  ok("signing starts the loan from the lead", Boolean(signedLead.loanId));
+  ok("and invites the borrower to the portal", Boolean(await prisma.user.findUnique({ where: { email: `vera@${DOMAIN}` } })));
+  ok("the Social Security number never reaches the loan book", !(await rawRows("BookRecord")).includes("123456789"));
+  await go(owner, `/admin/deals/${signedLead.loanId}`);
+  await owner.getByTestId("tab-Credit review").click();
+  await seen(owner.getByTestId("application-on-file"));
+  ok("staff see the signed application with the number masked", (await owner.getByTestId("application-on-file").innerText()).includes("Signed by Vera Visitor") && (await owner.getByTestId("application-ssn").innerText()) === "•••-••-6789");
+  await owner.getByRole("button", { name: "Show (logged)" }).click();
+  ok("the owner can reveal it, and the reveal is logged", (await seen(owner.getByTestId("application-ssn").getByText("123-45-6789"))) && (await prisma.auditEvent.count({ where: { action: "pii.revealed" } })) === 1);
+
   ok(`no browser errors${errors.length ? `: ${errors[0]}` : ""}`, errors.length === 0);
 } finally {
   await browser.close();
   await wipe();
+// A small stand-in for Treasury's sanctions list, so applications are screened as they arrive (the nightly job downloads the real one).
+await prisma.sanctionsList.create({ data: { id: "sdn", fetchedAt: new Date(), names: 2, hash: "smoke", entries: [[90001, "DOE, Jonathan", "individual", "SDGT"], [90002, "LISTED TRADING CO", "entity", "SDNTK"]] } });
   await prisma.$disconnect();
 }
 console.log(checks.join("\n"));

@@ -1,22 +1,21 @@
 "use client";
 import { useState } from "react";
 import type { Deal } from "@/lib/mockData";
-import { pricingConfig } from "@/lib/pricing-config";
-import { BILL_LABEL, billTone, ledger, METHODS, shownRows } from "@/lib/servicing";
+import { BILL_LABEL, billTone, ledger, METHODS, servicingTermsOf, shownRows } from "@/lib/servicing";
 import { useStore } from "@/lib/store";
 import { Badge, Section, Stat, shortDate, statGrid, usd } from "@/components/ui";
+import { Reveal } from "@/components/motion";
 import { Extensions } from "./Extensions";
 import { LoanDefault } from "./LoanDefault";
 import { PaidOff } from "./PaidOff";
 import { RecordPayment } from "./RecordPayment";
 import { RecordPayoff } from "./RecordPayoff";
 
-const { graceDays, lateFeePct } = pricingConfig.servicing;
-
 /** The servicing team's view of one loan: what's owed, every payment due and how it was paid, and the money received. */
 export function LoanLedger({ deal }: { deal: Deal }) {
   const { dispatch, viewerName } = useStore();
   const l = ledger(deal);
+  const { graceDays, lateFeePct } = servicingTermsOf(deal);
   const [waiving, setWaiving] = useState<string | null>(null);
   const [reversing, setReversing] = useState<string | null>(null);
   const [reason, setReason] = useState("");
@@ -54,12 +53,13 @@ export function LoanLedger({ deal }: { deal: Deal }) {
           <Extensions deal={deal} side="team" />
           <LoanDefault deal={deal} />
           <Section title="Payoff">
-            {payingOff ? <RecordPayoff deal={deal} onDone={() => setPayingOff(false)} /> : (
+            {!payingOff && (
               <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
                 <p className="min-w-0 flex-1 basis-60 text-muted-foreground">When the payoff arrives, record it here to close the loan.</p>
                 <button type="button" className="btn-ghost h-9! px-3! text-xs!" data-testid="start-payoff" onClick={() => setPayingOff(true)}>Record the payoff</button>
               </div>
             )}
+            <Reveal open={payingOff}><RecordPayoff deal={deal} onDone={() => setPayingOff(false)} /></Reveal>
           </Section>
         </>
       )}

@@ -5,10 +5,12 @@ import { Prisma } from "@prisma/client";
 import { audit } from "@/lib/audit";
 import type { Viewer } from "@/lib/book-access";
 import { sendAlerts } from "@/lib/book-alerts";
-import { runAction } from "@/lib/book-store";
+import { readBook, runAction } from "@/lib/book-store";
+import { PRE_FUNDING } from "@/lib/loan-exits";
+import { refreshSanctionsList, screenDeal } from "@/lib/sanctions-store";
 import { encryptStoredData } from "@/lib/encrypt-data";
 import { prisma } from "@/lib/prisma";
-import { servicingDate } from "@/lib/servicing";
+import { SERVICED, servicingDate } from "@/lib/servicing";
 import { getSettings } from "@/lib/settings";
 
 type Job = (now: Date) => Promise<string>;
@@ -54,7 +56,28 @@ async function checkServicing(now: Date) {
   return `checked ${changed.length} loans as of ${asOf}; ${late} with payments past due`;
 }
 
-export const JOBS: Record<string, Job> = { servicing: checkServicing, sessions: purgeSessions, retention: cleanRetention, encryption: sealStoredData };
+const SCREENER: Viewer = { id: "system", name: "Nightly sanctions check", roleCodes: [] };
+
+// Downloads Treasury's sanctions list, then screens everyone on every open application and active loan against it. A
+// result like the last one just updates when it was confirmed; anything new is recorded, and a possible match alerts
+// the team. If the download fails the old list stays and the job fails, so the health check and the team see it.
+async function checkSanctions(now: Date) {
+  const refreshed = await refreshSanctionsList(fetch, now);
+  const book = (await readBook()).book;
+  const active = book.deals.filter((deal) => PRE_FUNDING.includes(deal.status) || SERVICED.includes(deal.status));
+  let flagged = 0;
+  for (const deal of active) {
+    const screening = await screenDeal(deal, SCREENER.name, now);
+    if ("error" in screening) throw new Error(screening.error);
+    const result = await runAction(SCREENER, { t: "recordScreening", dealId: deal.id, screening }, { trusted: true });
+    if ("error" in result) continue;
+    await sendAlerts(result.before, result.after, result.action);
+    if (screening.status === "review") flagged++;
+  }
+  return `list of ${refreshed.names} names${refreshed.changed ? " (updated)" : ""}; screened ${active.length} loans; ${flagged} possible matches`;
+}
+
+export const JOBS: Record<string, Job> = { sanctions: checkSanctions, servicing: checkServicing, sessions: purgeSessions, retention: cleanRetention, encryption: sealStoredData };
 
 export const runKeyFor = (job: string, now: Date) => `${job}:${now.toISOString().slice(0, 10)}`;
 

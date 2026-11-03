@@ -4,13 +4,17 @@ import { useParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { useStore, est, inHouseAvailable, capitalSummary } from "@/lib/store";
 import { evaluate, recommendRoute, matchPartner, fullBoatReserve, dutchReserve, evenDraws, type Application } from "@/lib/engine";
-import { pricingConfig } from "@/lib/pricing-config";
+import { currentPricing, pricingFor } from "@/lib/pricing-versions";
+import { activeWire, maskAccount, wireVerified } from "@/lib/closing";
 import { PRE_FUNDING } from "@/lib/loan-exits";
 import { canAdvance, nextStage } from "@/lib/loan-stages";
 import { SERVICED } from "@/lib/servicing";
 import { teaserOf } from "@/lib/teaser";
 import { inviteBorrower } from "@/actions/book";
+import { ApplicationOnFile } from "@/components/loan/ApplicationOnFile";
 import { CloseApplication } from "@/components/loan/CloseApplication";
+import { ClosingPanel } from "@/components/loan/ClosingPanel";
+import { OfacPanel } from "@/components/loan/OfacPanel";
 import { CreditReview } from "@/components/loan/CreditReview";
 import { DocUpload } from "@/components/loan/DocUpload";
 import { LoanLedger } from "@/components/loan/LoanLedger";
@@ -18,9 +22,12 @@ import { LoanMessages } from "@/components/loan/LoanMessages";
 import { PhotoRequests } from "@/components/loan/PhotoRequests";
 import { ScopeOfWork } from "@/components/loan/ScopeOfWork";
 import { TermSheetCard } from "@/components/loan/TermSheetCard";
+import { useServiceDay } from "@/components/loan/use-service-day";
 import { Badge, GradeBadge, RatioPill, Section, Stat, usd, pct, k, productLabel, statusLabel, capTone, points, ratioGrid, statGrid } from "@/components/ui";
 
-const allTabs = ["Numbers & Ratios", "Credit review", "Score & Flags", "Capital Routing", "Documents", "Messages", "Servicing"] as const;
+// Closing starts once the term sheet is accepted, and stays as the record of how the money went out.
+const CLOSING_TAB = ["term_sheet_accepted", "conditions", "clear_to_close", "closing", "funded", "servicing_current", "servicing_delinquent", "matured", "default", "paid_off"];
+const allTabs = ["Numbers & Ratios", "Credit review", "Score & Flags", "Capital Routing", "Documents", "Closing", "Messages", "Servicing"] as const;
 type Tab = (typeof allTabs)[number];
 
 export default function DealWorkspace() {
@@ -29,6 +36,7 @@ export default function DealWorkspace() {
   const [invite, setInvite] = useState("");
   const [request, setRequest] = useState({ name: "", category: "Property" });
   const [tab, setTab] = useState<Tab>("Numbers & Ratios");
+  const today = useServiceDay();
   const [ov, setOv] = useState<Partial<Application>>({});
   const [routeSel, setRouteSel] = useState<"in_house" | "partner" | "split" | null>(null);
   const [splitAmt, setSplitAmt] = useState<number | null>(null);
@@ -36,8 +44,10 @@ export default function DealWorkspace() {
   const uwApp = useMemo(() => (d ? { ...d.app, ...ov } : null), [d, ov]);
   if (!d || !uwApp) return <div className="glass p-6">Deal not found. <Link href="/admin" className="underline">Back</Link></div>;
   const e = evaluate(uwApp); const orig = est(d.app);
+  // The loan's own pricing: its limits and assumptions, not whatever was published since.
+  const pricingConfig = pricingFor(d.app.pricingVersion);
   // The servicing tab only means something once there's money out.
-  const tabs = allTabs.filter((t) => t !== "Servicing" || SERVICED.includes(d.status) || d.status === "paid_off");
+  const tabs = allTabs.filter((t) => (t !== "Servicing" || SERVICED.includes(d.status) || d.status === "paid_off") && (t !== "Closing" || CLOSING_TAB.includes(d.status)));
   const avail = inHouseAvailable(s.deals, s.sources, d.id);
   const rec = recommendRoute({ product: d.app.product, noteAmount: e.noteAmount, grade: e.score.grade, location: e.location, inHouseAvailable: avail });
   const cap = capitalSummary(s.deals, s.sources);
@@ -53,11 +63,14 @@ export default function DealWorkspace() {
       {ov[key] !== undefined && ov[key] !== d.app[key] && <span className="text-[11px] text-warn">borrower said {Number(d.app[key] ?? 0).toLocaleString()}</span>}
     </label>);
   const holdMonths = pricingConfig.assumptions.holdMonths;
-  const stage = nextStage(d, orig);
+  const stage = nextStage(d, orig, today || undefined);
   const funding = stage?.to === "funded";
   const unlinked = !local && d.borrowerId.startsWith("client-");
   const locked = !["submitted", "initial_review", "underwriting", "term_sheet_issued", "term_sheet_accepted", "conditions"].includes(d.status);
   const broker = s.brokers.find((item) => item.id === d.brokerId);
+  // An application still in review that was priced before the latest pricing came out can move onto it; nothing later can.
+  const repricable = ["submitted", "initial_review", "underwriting"].includes(d.status) && Boolean(d.app.pricingVersion) && d.app.pricingVersion !== currentPricing().version;
+  const repriced = repricable ? evaluate({ ...d.app, pricingVersion: currentPricing().version }) : null;
 
   return (
     <div className="space-y-4">
@@ -82,16 +95,23 @@ export default function DealWorkspace() {
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="min-w-0 text-sm"><span className="text-muted-foreground">Next step:</span> <b>{stage.borrowerStep ? stage.action : statusLabel(stage.to)}</b></div>
               <div className="flex w-full flex-wrap gap-2 sm:w-auto">
-                {funding && !d.fundingApprovers?.includes(viewerName) && (d.fundingApprovers?.length ?? 0) < 2 && <button className="btn-ghost flex-1 sm:flex-none" data-testid="approve-funding" onClick={() => dispatch({ t: "approveFunding", dealId: d.id, by: viewerName })}>Approve funding</button>}
+                {funding && wireVerified(d) && !d.fundingApprovers?.includes(viewerName) && (d.fundingApprovers?.length ?? 0) < 2 && <button className="btn-ghost flex-1 sm:flex-none" data-testid="approve-funding" onClick={() => dispatch({ t: "approveFunding", dealId: d.id, by: viewerName })}>Approve funding</button>}
                 {!stage.borrowerStep && <button className="btn-primary flex-1 sm:flex-none" data-testid="advance-loan" disabled={!canAdvance(stage)} onClick={() => dispatch({ t: "advanceLoan", dealId: d.id })}>{stage.action}</button>}
               </div>
             </div>
+            {funding && wireVerified(d) && <p className="mt-1 text-xs text-muted-foreground" data-testid="funding-wire">Funds go to {activeWire(d)!.beneficiary}, {activeWire(d)!.bankName}, account {maskAccount(activeWire(d)!.account)}, verified by call-back.</p>}
             {funding && d.fundingApprovers?.length ? <p className="mt-1 text-xs text-muted-foreground" data-testid="funding-approvers">Approved by {d.fundingApprovers.join(" and ")}.</p> : null}
             {stage.blockers.length > 0 && <ul className="mt-2 space-y-0.5 text-xs text-warn" data-testid="stage-blockers">{stage.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>}
             {PRE_FUNDING.includes(d.status) && <div className="mt-3 border-t border-border pt-3"><CloseApplication deal={d} side="team" /></div>}
           </div>
         )}
         {d.closure && <CloseApplication deal={d} side="team" />}
+        {repriced && (
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-[2px] border border-border p-3 text-sm" data-testid="pricing-outdated">
+            <span className="min-w-0 flex-1 basis-60">Priced on {d.app.pricingVersion}. On the current pricing ({currentPricing().version}) it would be {repriced.rate.toFixed(3)}% and {repriced.pointsPct} points on {usd(repriced.noteAmount)}{repriced.eligible ? "" : `, and not eligible: ${repriced.hardStops[0]}`}.</span>
+            <button type="button" className="btn-ghost h-9! px-3! text-xs!" data-testid="reprice-loan" disabled={!repriced.eligible} onClick={() => dispatch({ t: "repriceLoan", dealId: d.id, by: viewerName })}>Reprice on current pricing</button>
+          </div>
+        )}
         <div className="mt-4 grid grid-cols-2 border-b border-border sm:grid-cols-3 xl:flex xl:gap-1">
           {tabs.map((t) => <button key={t} data-testid={`tab-${t}`} onClick={() => setTab(t)} className={`border-b-2 px-3 py-2 text-left text-sm font-semibold sm:whitespace-nowrap ${tab === t ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>{t}</button>)}
         </div>
@@ -127,7 +147,7 @@ export default function DealWorkspace() {
             <div className="grid gap-4 md:grid-cols-2">
               <Section title="Pricing & cash">
                 <div className="grid grid-cols-2 gap-3">
-                  <Stat label="Rate" value={`${e.rate.toFixed(3)}%`} sub={`matrix ${e.rateRange.join("–")}%`} />
+                  <Stat label="Rate" value={`${e.rate.toFixed(3)}%`} sub={`matrix ${e.rateRange.join("–")}% · pricing ${d.app.pricingVersion ?? currentPricing().version}`} />
                   <Stat label="Points" value={usd(e.points)} sub={`${e.pointsPct}%`} />
                   <Stat label="Cash to close" value={usd(e.cashToClose)} />
                   <Stat label="All-in annualized" value={pct(e.allIn, 2)} sub={`flag at ${pct(pricingConfig.allInCostFlagCeiling, 0)}`} />
@@ -207,7 +227,8 @@ export default function DealWorkspace() {
         </div>
       )}
 
-      {tab === "Credit review" && <CreditReview deal={d} />}
+      {tab === "Credit review" && <div className="space-y-4"><ApplicationOnFile deal={d} /><OfacPanel deal={d} /><CreditReview deal={d} /></div>}
+      {tab === "Closing" && <div className="space-y-4"><ClosingPanel deal={d} /><OfacPanel deal={d} /></div>}
       {tab === "Servicing" && (SERVICED.includes(d.status) || d.status === "paid_off") && <LoanLedger deal={d} />}
 
       {tab === "Messages" && (

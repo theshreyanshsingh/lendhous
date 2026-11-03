@@ -1,6 +1,8 @@
 // How a loan moves from application to servicing (Spec 4). Staff move it forward; only the borrower can accept a term
 // sheet; and a loan can't clear to close with documents open or its capital not committed.
+import { activeWire, wireVerified } from "./closing";
 import type { Estimate } from "./engine";
+import { ofacBlocker } from "./ofac";
 import type { Deal, LoanStatus } from "./mockData";
 
 const NEXT: Partial<Record<LoanStatus, { to: LoanStatus; action: string }>> = {
@@ -17,11 +19,17 @@ const NEXT: Partial<Record<LoanStatus, { to: LoanStatus; action: string }>> = {
 
 export type NextStage = { to: LoanStatus; action: string; blockers: string[]; borrowerStep: boolean };
 
-/** The loan's next step and what stands in its way. Null once it is in servicing. */
-export function nextStage(deal: Deal, e: Estimate): NextStage | null {
+/**
+ * The loan's next step and what stands in its way. Null once it is in servicing. With today, it also checks that the
+ * sanctions screening is recent enough for money to go out.
+ */
+export function nextStage(deal: Deal, e: Estimate, today?: string): NextStage | null {
   const step = NEXT[deal.status];
   if (!step) return null;
   const blockers: string[] = [];
+  // Nobody is underwritten until they've been screened, and no money goes out on an old screening.
+  if (step.to === "underwriting") { const blocked = ofacBlocker(deal); if (blocked) blockers.push(blocked); }
+  if (step.to === "funded") { const blocked = ofacBlocker(deal, today); if (blocked) blockers.push(blocked); }
   if (step.to === "term_sheet_issued") {
     blockers.push(...e.hardStops);
     if (!deal.creditReview) blockers.push("Credit review isn't signed off (Credit review tab)");
@@ -33,6 +41,7 @@ export function nextStage(deal: Deal, e: Estimate): NextStage | null {
     if (allocated !== e.noteAmount) blockers.push("Capital doesn't cover the whole loan yet");
   }
   if ((step.to === "clear_to_close" || step.to === "funded") && deal.capitalStatus !== "committed") blockers.push("Capital isn't committed");
+  if (step.to === "funded" && !wireVerified(deal)) blockers.push(activeWire(deal) ? "The wire instructions haven't been verified by a call-back (Closing tab)" : "No wire instructions yet (Closing tab)");
   if (step.to === "funded" && (deal.fundingApprovers?.length ?? 0) < 2) blockers.push(`Needs two people to approve funding (${deal.fundingApprovers?.length ?? 0} of 2)`);
   return { ...step, blockers, borrowerStep: deal.status === "term_sheet_issued" };
 }

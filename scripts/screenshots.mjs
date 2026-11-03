@@ -33,7 +33,7 @@ const checks = [];
 const ok = (name, cond) => { checks.push(`${cond ? "PASS" : "FAIL"} ${name}`); };
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 }, deviceScaleFactor: 1 });
 const page = await ctx.newPage();
-page.on("pageerror", (e) => errors.push("pageerror: " + e.message));
+page.on("pageerror", (e) => errors.push(`pageerror at ${new URL(page.url()).pathname}: ` + e.message));
 page.on("console", (m) => { if (m.type() === "error") errors.push("console: " + m.text()); });
 // Every credit question has to be answered on its own.
 const QUESTIONS = ["bankruptcy", "foreclosure", "delinquent", "judgments", "lawsuit", "felony", "borrowedDownPayment"];
@@ -96,17 +96,47 @@ ok("the leverage calculator takes the lower cap", (await page.getByTestId("calc-
 await page.getByTestId("calc-value").fill("");
 ok("an empty calculator input shows an error instead of a number", (await page.getByRole("alert").filter({ hasText: "non-negative" }).count()) === 1);
 
+// The loan quote request: the ARV and comps go with it, and the visitor sees indicative terms straight away.
 await page.goto(BASE + "/start");
-await page.getByLabel("Your name").fill(LEAD_NAME);
-await page.getByLabel("Email").fill(LEAD_EMAIL);
-await page.getByLabel("Property city").fill("Dallas");
-await page.getByLabel("Property state").fill("TX");
-await page.getByLabel("Purchase price or current value ($)").fill("300000");
-await page.getByLabel("Requested loan amount ($)").fill("240000");
-await page.getByLabel("Exit strategy & project notes").fill("Renovate and sell.");
-await page.getByRole("button", { name: "Send to LendHous" }).click();
-const brief = await page.getByTestId("deal-brief").innerText();
-ok("the deal brief goes to the team, with a copy to keep", brief.includes("The team has your project") && brief.includes("Program: Fix & flip") && brief.includes("Property: Dallas, TX") && (await page.getByRole("button", { name: "Download a copy" }).count()) === 1);
+await page.getByTestId("quote-first").fill("Smoke Test");
+await page.getByTestId("quote-last").fill("Lead");
+await page.getByTestId("quote-email").fill(LEAD_EMAIL);
+await page.getByTestId("quote-phone").fill("(954) 555-0177");
+await page.getByTestId("quote-citizen").selectOption("us");
+await page.getByTestId("quote-credit").selectOption("720-759");
+await page.getByTestId("quote-experience").selectOption("3-4");
+await page.getByTestId("quote-address-street").fill("100 Smoke Test Way");
+await page.getByTestId("quote-address-city").fill("Hollywood");
+await page.getByTestId("quote-address-state").fill("FL");
+await page.getByTestId("quote-address-zip").fill("33020");
+await page.getByTestId("quote-address-county").fill("Broward");
+await page.getByTestId("quote-purchasePrice").fill("300000");
+await page.getByTestId("quote-rehab").fill("80000");
+await page.getByTestId("quote-requestedAmount").fill("240000");
+await page.getByTestId("quote-date").fill("2026-12-15");
+await page.getByTestId("quote-submit").click();
+ok("a fix and flip quote can't go without its ARV", (await page.getByTestId("quote-error").innerText()).includes("after-repair value"));
+await page.getByTestId("quote-arv").fill("520000");
+await page.getByTestId("add-comp").click();
+await page.getByTestId("comp-address-0").fill("120 Smoke Test Way");
+await page.getByTestId("comp-price-0").fill("515000");
+await page.getByTestId("comp-sold-0").fill("2026-08");
+await page.getByTestId("quote-broker").click();
+ok("a broker gets their own section", await page.getByTestId("broker-name").waitFor({ timeout: 5000 }).then(() => true, () => false));
+await page.getByTestId("quote-borrower").click();
+await shot(page, "00c-site-quote-request.png");
+await page.getByTestId("quote-submit").click();
+ok("the quote request shows indicative terms from today's pricing", (await page.getByTestId("quote-sent").waitFor({ timeout: 5000 }).then(() => true, () => false)) && (await page.getByTestId("quote-amount").innerText()).startsWith("up to $"));
+await shot(page, "00d-site-quote-terms.png");
+await page.goto(BASE + "/programs");
+ok("the programs page compares all four programs from the pricing", (await page.getByTestId("compare-card").count()) === 4 && (await page.getByTestId("program-compare").innerText()).toLowerCase().includes("rate from"));
+// The borrower application link, as a preview: it checks each step before moving on.
+await page.goto(BASE + "/apply/demo");
+await page.getByTestId("app-next").click();
+ok("the application link moves on from a complete step", (await page.getByTestId("app-step").innerText()).toLowerCase() === "step 2 of 5");
+await page.getByTestId("app-next").click();
+ok("and won't move on from an incomplete one", (await page.getByTestId("app-problems").waitFor({ timeout: 5000 }).then(() => true, () => false)) && (await page.getByTestId("app-step").innerText()).toLowerCase() === "step 2 of 5");
+await shot(page, "00e-application-link.png");
 
 await page.evaluate(() => localStorage.setItem("lendhous-theme", "dark"));
 await page.goto(BASE + "/");
@@ -189,7 +219,7 @@ await page.goto(BASE + "/login");
 ok("Portal login takes someone already signed in straight to the panel", new URL(page.url()).pathname === "/admin");
 await page.goto(BASE + "/admin/leads");
 const inbox = page.getByTestId("leads-table").locator("tr", { hasText: LEAD_NAME });
-ok("the website brief reaches the staff inbox", (await inbox.count()) === 1 && (await inbox.innerText()).includes("$240,000"));
+ok("the quote request reaches the staff inbox with its ARV", (await inbox.count()) === 1 && (await inbox.innerText()).includes("$240,000") && (await inbox.innerText()).includes("ARV $520,000"));
 await inbox.getByRole("button", { name: "Mark contacted" }).click();
 ok("staff can mark a lead contacted", await inbox.getByText("Contacted").waitFor({ timeout: 5000 }).then(() => true, () => false));
 await shot(page, "04b-admin-website-leads.png");
@@ -566,6 +596,40 @@ await page.getByTestId("lien-reference").fill("OR Book 1234 Page 56 (FAKE)");
 await page.getByTestId("save-lien").click();
 ok("the release of the mortgage is recorded", await seen(page.getByTestId("lien-recorded")));
 
+// Pricing: the owner can try a change and see what it does to applications in review, but a demo seat can't publish it.
+await page.goto(BASE + "/admin/pricing");
+await seen(page.getByTestId("pricing-editor"));
+await page.getByTestId("flip-2-ltc").fill("80");
+ok("the pricing editor shows what a change does to open applications", (await page.getByTestId("pricing-changes").innerText()).includes("maxLTC") && (await page.getByTestId("what-if-row").count()) > 0);
+ok("a demo seat can't publish pricing", await page.getByTestId("publish-pricing").isDisabled());
+await shot(page, "20-admin-pricing.png");
+
+// Sanctions: a possible match holds the application until someone with authority reviews it.
+await page.goto(BASE + "/admin/deals/d6");
+await seen(page.getByTestId("stage-blockers"));
+ok("a possible OFAC match holds the application", (await page.getByTestId("stage-blockers").innerText()).includes("possible OFAC") && (await page.getByTestId("advance-loan").isDisabled()));
+await page.getByTestId("tab-Credit review").click();
+ok("the possible match shows its listing", (await page.getByTestId("ofac-hit").first().innerText()).includes("SDGT"));
+await page.getByTestId("ofac-false-positive").click();
+await page.getByTestId("ofac-reason").fill("Listed person born 1961 abroad; our borrower born 1985 in Florida, license checked (FAKE).");
+await shot(page, "21-admin-ofac-review.png");
+await page.getByTestId("ofac-decide").click();
+ok("a reviewed false positive clears the application", (await seen(page.getByTestId("ofac-decided"))) && !(await page.getByTestId("stage-panel").innerText()).includes("OFAC"));
+
+// Wires: instructions on a loan ready to close are confirmed by a call-back from someone other than who entered them.
+await page.goto(BASE + "/admin/deals/d7");
+await page.getByTestId("tab-Closing").click();
+await seen(page.getByTestId("verify-wire-form"));
+ok("unverified wire instructions are flagged", (await page.getByTestId("closing-panel").innerText()).includes("Not verified"));
+await page.getByTestId("verify-phone").fill("(954) 555-0100");
+await page.getByTestId("verify-phone-source").selectOption("Title company's website");
+await page.getByTestId("verify-spoke-with").fill("Dana Escrow (FAKE)");
+ok("a wire can't be verified without the read-back", await page.getByTestId("confirm-verify-wire").isDisabled());
+await page.getByTestId("verify-read-back").check();
+await page.getByTestId("confirm-verify-wire").click();
+ok("a second person verifies the wire by call-back", await seen(page.getByTestId("wire-verified")));
+await shot(page, "22-admin-closing.png");
+
 // Declining an application: it leaves the active pipeline with its reason, and can be reopened.
 await page.goto(BASE + "/admin/deals/d16");
 await page.getByTestId("close-application").click();
@@ -711,7 +775,7 @@ ok("the owner can read the audit log", (await page.getByTestId("audit-row").coun
 await page.goto(BASE + "/admin/audit?q=member");
 ok("the audit log filters by action", (await page.getByTestId("audit-row").count()) > 0 && (await page.getByTestId("audit-row").allInnerTexts()).every((row) => row.includes("member.")));
 await page.goto(BASE + "/admin/account/notifications");
-ok("the website brief shows in the owner's notifications", await seen(page.getByTestId("notice").filter({ hasText: "New project brief" }).first()));
+ok("the quote request shows in the owner's notifications", await seen(page.getByTestId("notice").filter({ hasText: "New quote request" }).first()));
 const unreadBadge = page.getByRole("link", { name: /Notifications/ }).getByTestId("nav-count");
 ok("the menu counts unread notifications", (await unreadBadge.count()) === 1);
 await shot(page, "21-notifications.png");

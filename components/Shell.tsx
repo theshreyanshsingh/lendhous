@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Bell, Briefcase, Building2, ClipboardList, FilePlus, Hammer, Inbox, Landmark, LayoutDashboard, BookOpen, Lock, LogOut, Menu, ReceiptText, RotateCcw, ScrollText, Settings, Store, Tag, Users, type LucideIcon } from "lucide-react";
+import { Bell, Briefcase, Percent, Building2, ClipboardList, FilePlus, Hammer, Inbox, Landmark, LayoutDashboard, BookOpen, Lock, LogOut, Menu, ReceiptText, RotateCcw, ScrollText, Settings, Store, Tag, Users, type LucideIcon } from "lucide-react";
 import { logout } from "@/actions/auth";
 import { attentionCounts } from "@/lib/attention";
 import { useStore } from "@/lib/store";
@@ -31,7 +31,7 @@ function active(path: string, href: string) {
   return path === href || path.startsWith(`${href}/`);
 }
 
-export type ShellAccount = { name: string; email: string; roles: string[]; demo: boolean; canManageMembers: boolean; canViewAudit: boolean; canManageSettings: boolean; canManageFirms: boolean; unread: number; offerSample: boolean };
+export type ShellAccount = { name: string; email: string; roles: string[]; demo: boolean; canManageMembers: boolean; canViewAudit: boolean; canManageSettings: boolean; canManageFirms: boolean; canManagePricing: boolean; unread: number; offerSample: boolean };
 
 export default function Shell({ children, account, view }: { children: React.ReactNode; account: ShellAccount; view: View | null }) {
   const path = usePathname();
@@ -43,6 +43,7 @@ export default function Shell({ children, account, view }: { children: React.Rea
   const items: NavItem[] = [
     ...(view ? nav[view] : []).map((item) => ({ ...item, count: counted[item.href] })),
     ...(account.canManageFirms ? [{ href: "/admin/partners", label: "Partners & buyers", icon: Building2, section: "Money" }] : []),
+    ...(account.canManagePricing && view === "admin" ? [{ href: "/admin/pricing", label: "Pricing", icon: Percent, section: "Money" }] : []),
     { href: "/admin/account/notifications", label: "Notifications", icon: Bell, section: "Account", count: account.unread },
     ...(account.canManageMembers ? [{ href: "/admin/members", label: "Members", icon: Users, section: "Account" }] : []),
     ...(account.canViewAudit ? [{ href: "/admin/audit", label: "Audit log", icon: ScrollText, section: "Account" }] : []),

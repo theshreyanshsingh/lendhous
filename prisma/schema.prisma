@@ -324,6 +324,11 @@ model Lead {
   // YYYY-MM-DD as entered; blank when the visitor has no date yet
   targetClosing      String    @default("")
   notes              String
+  // From the quote request: who sent it ("borrower" or "broker"), the after-repair value, and the whole request as sealed
+  // JSON (lib/quote.ts: address, broker, comps, credit band). Briefs sent before the quote form have none of these.
+  submitter          String    @default("borrower")
+  arvCents           Int?
+  quote              String?
   contactedAt        DateTime?
   // The loan started from this brief, once staff start one.
   loanId             String?
@@ -343,4 +348,50 @@ model JobRun {
   finishedAt DateTime?
   ok         Boolean   @default(false)
   summary    String    @default("")
+}
+
+// A published set of rates, limits and loan terms, in lib/pricing-config.ts's shape. Never changed once published: each
+// loan keeps the version it was quoted on (lib/pricing-versions.ts), so a new one only changes new quotes.
+model PricingVersion {
+  id          String   @id @default(uuid()) @map("_id")
+  version     String   @unique
+  config      Json
+  note        String   @default("")
+  publishedBy String
+  publishedAt DateTime @default(now())
+}
+
+// Treasury's OFAC sanctions list (the SDN list and its aliases), downloaded nightly by the sanctions job. One row, replaced
+// whole: entries is [entry number, name, type, programs][], about 40,000 names. Loans are screened against it (lib/ofac.ts).
+model SanctionsList {
+  id        String   @id @map("_id")
+  fetchedAt DateTime
+  names     Int
+  hash      String
+  entries   Json
+}
+
+// The borrower application sent as a secure link (lib/borrower-application.ts). Like a photo link, only the token's hash is
+// kept. The recipient, the form as filled so far and the signed copy are sealed: they hold birth dates and Social Security
+// numbers, which never go into the loan book.
+model ApplicationLink {
+  id        String    @id @default(uuid()) @map("_id")
+  tokenHash String    @unique
+  // What it fills in: a loan already started, or a website lead to start one from.
+  dealId    String?
+  leadId    String?
+  recipient String
+  officer   String
+  sentById  String
+  draft     String    @default("")
+  step      Int       @default(0)
+  savedAt   DateTime?
+  status    String    @default("open")
+  signedAt  DateTime?
+  signature String?
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+
+  @@index([dealId])
+  @@index([leadId])
 }

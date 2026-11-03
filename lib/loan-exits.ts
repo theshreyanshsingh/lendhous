@@ -4,7 +4,7 @@
 // button a screen offers and the rule the server applies can't disagree.
 import { evaluate } from "./engine";
 import type { Closure, Deal, DefaultKind, LoanExtension, LoanStatus } from "./mockData";
-import { pricingConfig } from "./pricing-config";
+import { currentPricing, pricingFor } from "./pricing-versions";
 import { addDays, daysBetween, ledgerOf, maturityOf, openDefault, payoffFor, SERVICED, type Ledger } from "./servicing";
 
 const money = (amount: number) => `$${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -72,19 +72,21 @@ export function cureError(deal: Deal, today: string) {
   return null;
 }
 
-const { maxCount, monthsEach, feePoints, requestWindowDays } = pricingConfig.extensions;
+/** A loan's extension terms (how many, how long, the fee). They're in its note, so they come from the pricing it was priced on. */
+export const extensionTermsOf = (deal: Pick<Deal, "app">) => pricingFor(deal.app.pricingVersion).extensions;
 
 /** The fee for an extension: feePoints of the note amount for every monthsEach months, prorated. */
-export const extensionFee = (deal: Deal, months: number) => Math.round(evaluate(deal.app).noteAmount * (feePoints / 100) * (months / monthsEach) * 100) / 100;
+export const extensionFee = (deal: Deal, months: number) => { const { feePoints, monthsEach } = extensionTermsOf(deal); return Math.round(evaluate(deal.app).noteAmount * (feePoints / 100) * (months / monthsEach) * 100) / 100; };
 
 /** The extension asked for or approved and not yet signed, if there is one. */
 export const openExtension = (deal: Pick<Deal, "extensions">) => (deal.extensions ?? []).find((item) => item.status === "requested" || item.status === "approved");
 export const extensionsUsed = (deal: Pick<Deal, "extensions">) => (deal.extensions ?? []).filter((item) => item.status === "executed").length;
 /** The first day a borrower can ask for more time. */
-export const extensionWindowOpens = (deal: Deal) => addDays(maturityOf(deal), -requestWindowDays);
+export const extensionWindowOpens = (deal: Deal) => addDays(maturityOf(deal), -extensionTermsOf(deal).requestWindowDays);
 
 /** Why this extension can't be asked for, or null. The team can file one at any time; a borrower from the window on. */
 export function extensionRequestError(deal: Deal, months: number, today: string, byTeam: boolean) {
+  const { maxCount, monthsEach, requestWindowDays } = extensionTermsOf(deal);
   if (!SERVICED.includes(deal.status)) return "Only a funded loan can be extended.";
   if (openExtension(deal)) return "An extension is already being looked at.";
   if (extensionsUsed(deal) >= maxCount) return `This loan has had the most extensions allowed (${maxCount}).`;
@@ -140,7 +142,7 @@ export function payoffError(deal: Deal, amount: number, receivedOn: string, toda
 }
 
 /** The day the satisfaction of mortgage is due out, once a loan is paid off. */
-export const lienReleaseDue = (deal: Deal) => (deal.paidOff ? addDays(deal.paidOff.receivedOn, pricingConfig.lienReleaseDays) : undefined);
+export const lienReleaseDue = (deal: Deal) => (deal.paidOff ? addDays(deal.paidOff.receivedOn, currentPricing().lienReleaseDays) : undefined);
 /** A paid-off loan whose mortgage release isn't recorded yet. */
 export const lienReleaseOpen = (deal: Deal) => deal.status === "paid_off" && Boolean(deal.paidOff) && !deal.paidOff?.release?.recordedOn;
 export const lienReleaseDaysLeft = (deal: Deal, today: string) => { const due = lienReleaseDue(deal); return due ? daysBetween(today, due) : 0; };
