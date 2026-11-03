@@ -603,6 +603,61 @@ describe("published pricing", () => {
   });
 });
 
+describe("the title company's link", () => {
+  it("lets title upload the checklist and enter its own wire, keeps the numbers sealed, and stops when turned off", async () => {
+    const store = await import("@/lib/book-store");
+    const { demoBook } = await import("@/lib/book");
+    const { sealJson } = await import("@/lib/crypto");
+    const links = await import("@/lib/title-links");
+    const actions = await import("@/actions/title-links");
+    const route = await import("@/app/api/closing-links/[token]/route");
+    const { servicingDate } = await import("@/lib/servicing");
+    const staff = { id: "staff-t", name: "Tess Closer", roleCodes: ["ADMIN_OWNER" as const] };
+    const done = await store.runAction(staff, { t: "submitApp", app: demoBook().deals.find((deal) => deal.id === "d2")!.app, address: "500 Title Way", city: "Hollywood", zip: "33020", entityName: "Title Test LLC", exitStrategy: "Sell", client: { name: "Tia Titletest" } });
+    if ("error" in done) throw new Error(done.error);
+    const dealId = done.after.deals[0].id;
+    // Straight to closing, with the closing agent saved.
+    const rowId = `deals:${dealId}`;
+    await prisma.bookRecord.update({ where: { id: rowId }, data: { data: sealJson({ ...done.after.deals[0], status: "closing", closing: { company: "Sample Title", contact: "Terry Title", phone: "9545550142", email: "terry@title.test", fileNumber: "ST-9" } }, store.rowContext(rowId)) as never } });
+    const expiresAt = new Date(Date.now() + 30 * 86_400_000).toISOString();
+    const opened = await store.runAction(staff, { t: "openTitleLink", dealId, sentTo: "Terry Title", email: "terry@title.test", sentBy: "Tess at LendHous", expiresAt }, { trusted: true });
+    if ("error" in opened) throw new Error(opened.error);
+    const token = new URL(await links.createTitleLink(dealId, expiresAt), "http://x").pathname.split("/").pop()!;
+    expect((await prisma.closingLink.findUniqueOrThrow({ where: { dealId } })).tokenHash).not.toContain(token);
+    const link = await links.openTitleLink(token);
+    expect(link).toMatchObject({ state: "open", view: { entity: "Title Test LLC", items: expect.arrayContaining([expect.objectContaining({ id: "closing-cpl", status: "requested" })]) } });
+    expect(JSON.stringify(link!.view)).not.toMatch(/sponsor|creditReview|payments/);
+
+    expect(await actions.titleEnterWire(token, { bankName: "Escrow Bank", beneficiary: "Sample Title Escrow", routing: "123456789", account: "5544332211", reference: "ST-9" })).toMatchObject({ error: expect.stringMatching(/routing number isn't valid/) });
+    const wired = await actions.titleEnterWire(token, { bankName: "Escrow Bank", beneficiary: "Sample Title Escrow", routing: "123456780", account: "5544332211", reference: "ST-9" });
+    expect(wired.view?.wire).toMatchObject({ account: "•••• 2211", verified: false });
+    const stored = (await store.readBook()).book.deals.find((deal) => deal.id === dealId)!;
+    expect(stored.wires?.[0]).toMatchObject({ enteredBy: "Terry Title (title company)", source: "Title company's secure portal" });
+    expect(JSON.stringify(((await prisma.$runCommandRaw({ find: "BookRecord", filter: {} })) as { cursor: { firstBatch: unknown[] } }).cursor.firstBatch)).not.toContain("5544332211");
+
+    const upload = (docId: string) => {
+      const form = new FormData();
+      form.set("docId", docId);
+      form.set("file", new File([Buffer.from("%PDF-1.4 closing")], "cpl.pdf", { type: "application/pdf" }));
+      return route.POST(new Request(`http://x/api/closing-links/${token}`, { method: "POST", body: form }), { params: Promise.resolve({ token }) });
+    };
+    const sent = await upload("closing-cpl");
+    expect(sent.status).toBe(200);
+    expect(((await sent.json()) as { view: { items: { id: string; status: string }[] } }).view.items.find((item) => item.id === "closing-cpl")?.status).toBe("uploaded");
+    expect((await upload("bank")).status).toBe(400);
+
+    const today = servicingDate(new Date());
+    expect((await actions.titleConfirmFunds(token, { amount: 250_000, on: today })).view?.fundsReceived).toMatchObject({ amount: 250_000, on: today });
+    expect(await actions.titleRecordMortgage(token, { on: today, reference: "OR 1/2" })).toMatchObject({ error: expect.stringMatching(/after the loan funds/) });
+
+    await store.runAction(staff, { t: "turnOffTitleLink", dealId });
+    await links.deleteTitleLink(dealId);
+    expect(await links.openTitleLink(token)).toBeNull();
+    expect(await actions.titleEnterWire(token, { bankName: "B", beneficiary: "B", routing: "123456780", account: "1234567", reference: "" })).toMatchObject({ error: expect.stringMatching(/expired or isn't valid/) });
+    expect((await upload("closing-title")).status).toBe(404);
+  });
+});
+
 describe("the borrower application link", () => {
   it("prefills from a quote, saves as the borrower goes, and signing starts the loan with private details sealed", async () => {
     const { createApplicationLink, openApplicationLink, signedApplication } = await import("@/lib/application-links");

@@ -629,6 +629,24 @@ await page.getByTestId("verify-read-back").check();
 await page.getByTestId("confirm-verify-wire").click();
 ok("a second person verifies the wire by call-back", await seen(page.getByTestId("wire-verified")));
 await shot(page, "22-admin-closing.png");
+ok("a demo closing offers the title company's page as a preview", await seen(page.getByTestId("title-preview")));
+// The title company's secure closing file, as a preview: it uploads the checklist and enters its own wire.
+await page.goto(BASE + "/closing/demo");
+await seen(page.getByTestId("title-portal"));
+const titleChooser = page.waitForEvent("filechooser");
+await page.getByTestId("title-upload-closing-cpl").click();
+await (await titleChooser).setFiles({ name: "CPL ST-1015.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 cpl") });
+ok("the title company uploads a checklist item", await seen(page.getByTestId("title-item-closing-cpl").getByText(/being checked/i)));
+await page.getByTestId("title-wire-bankName").fill("First Demo Bank (FAKE)");
+await page.getByTestId("title-wire-beneficiary").fill("Sample Title Escrow (FAKE)");
+await page.getByTestId("title-wire-routing").fill("123456789");
+ok("the title page catches a mistyped routing number", await seen(page.getByTestId("title-wire-blocked")));
+await page.getByTestId("title-wire-routing").fill("123456780");
+await page.getByTestId("title-wire-account").fill("000123456789");
+await page.getByTestId("title-wire-confirm").fill("000123456789");
+await page.getByTestId("title-save-wire").click();
+ok("title enters its own wire, which waits for LendHous's call-back", await seen(page.getByTestId("title-wire").getByText(/waiting for LendHous/i)));
+await shot(page, "23-title-closing-file.png");
 
 // Declining an application: it leaves the active pipeline with its reason, and can be reopened.
 await page.goto(BASE + "/admin/deals/d16");

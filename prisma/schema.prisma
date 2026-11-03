@@ -395,3 +395,13 @@ model ApplicationLink {
   @@index([dealId])
   @@index([leadId])
 }
+
+// The title company's secure link to one loan's closing (Spec T1–T3). Like a photo link, only the token's hash is kept,
+// and one row per loan, so sending a new link turns the old one off. Who it went to and until when is on the loan.
+model ClosingLink {
+  id        String   @id @default(uuid()) @map("_id")
+  dealId    String   @unique
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}

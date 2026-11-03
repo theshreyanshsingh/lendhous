@@ -285,37 +285,71 @@ try {
     if (await waive.count()) await waive.click();
     await under.waitForTimeout(150);
   }
-  const waives = under.locator("[data-testid^='waive-']");
+  // The borrower's items are done; the closing checklist is the title company's to send through its link.
+  const waives = under.locator("[data-testid^='waive-']:not([data-testid^='waive-closing-'])");
   for (let left = await waives.count(); left > 0; left = await waives.count()) { await waives.first().click(); await under.waitForTimeout(150); }
-  const reviews = under.getByRole("button", { name: "Accept" });
-  for (let left = await reviews.count(); left > 0; left = await reviews.count()) { await reviews.first().click(); await under.waitForTimeout(150); }
+  const acceptAll = async () => { const reviews = under.getByRole("button", { name: "Accept" }); for (let left = await reviews.count(); left > 0; left = await reviews.count()) { await reviews.first().click(); await under.waitForTimeout(150); } };
+  await acceptAll();
   await under.getByTestId("tab-Capital Routing").click();
   await under.getByTestId("route-in_house").click();
   await under.getByTestId("apply-route").click();
   await seen(under.getByTestId("commit"));
   await under.getByTestId("commit").click();
   await gone(under.getByTestId("commit"));
-  await under.getByTestId("advance-loan").filter({ hasText: "Mark clear to close" }).click();
-  await under.getByTestId("advance-loan").filter({ hasText: "Send to closing" }).click();
-  await seen(under.getByTestId("stage-blockers").getByText("No wire instructions yet"));
-  ok("a loan can't fund without wire instructions", (await under.getByTestId("approve-funding").count()) === 0);
-  // The wire: one person enters it from the title company's portal, another confirms it by phone.
+  ok("the loan waits on the title company's documents", await seen(under.getByTestId("stage-blockers").getByText("3 documents still open")));
+
+  // The title company's secure link: it sends the closing documents and its own wire instructions; nobody here types them.
   await under.getByTestId("tab-Closing").click();
   await under.getByTestId("agent-company").fill("Real Title LLC");
+  await under.getByTestId("agent-contact").fill("Terry Title");
+  await under.getByTestId("agent-email").fill(`title@${DOMAIN}`);
   await under.getByTestId("agent-phone").fill("(305) 555-0199");
   await under.getByTestId("save-agent").click();
   await seen(under.getByTestId("closing-agent"));
-  await under.getByTestId("wire-bankName").fill("Smoke Test Bank");
-  await under.getByTestId("wire-beneficiary").fill("Real Title LLC Escrow");
-  await under.getByTestId("wire-routing").fill("123456789");
-  ok("a mistyped routing number is caught", await seen(under.getByTestId("wire-blocked").getByText("routing number isn't valid")));
-  await under.getByTestId("wire-routing").fill("123456780");
-  await under.getByTestId("wire-account").fill("5544332211");
-  await under.getByTestId("wire-confirmAccount").fill("5544332211");
-  await under.getByTestId("wire-source").selectOption("Title company's secure portal");
-  await under.getByTestId("save-wire").click();
+  await under.getByTestId("open-title-link").click();
+  await under.getByTestId("send-title-link").click();
+  await seen(under.getByTestId("title-link-url"));
+  const titleLink = await under.getByTestId("title-link-url").inputValue();
+  ok("staff send the title company its secure link", titleLink.includes("/closing/") && (await prisma.notification.count({ where: { toEmail: `title@${DOMAIN}`, eventCode: "closing.link" } })) === 1);
+  ok("and wait for title to enter the wire, instead of typing it", await seen(under.getByTestId("wire-waiting-title")));
+  const titleContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const title = await titleContext.newPage();
+  title.on("pageerror", (error) => errors.push(`title: ${error.message}`));
+  await title.goto(BASE + new URL(titleLink).pathname);
+  const titleHtml = await title.content();
+  ok("the title company sees the closing file and nothing else", (await title.getByTestId("title-summary").innerText()).includes("LH-1001") && !titleHtml.includes("reviewed 5521") && !titleHtml.includes("settled in August") && !titleHtml.includes("Team only remark"));
+  const titleUpload = async (docId, name) => {
+    await title.getByTestId(`title-upload-${docId}`).waitFor();
+    const chooser = title.waitForEvent("filechooser");
+    await title.getByTestId(`title-upload-${docId}`).click();
+    await (await chooser).setFiles({ name, mimeType: "application/pdf", buffer: Buffer.from(`%PDF-1.4 ${name}`) });
+    return seen(title.getByTestId(`title-item-${docId}`).getByText(/being checked/i));
+  };
+  ok("title uploads the commitment, the CPL and the settlement statement", (await titleUpload("closing-title", "Commitment RT-1.pdf")) && (await titleUpload("closing-cpl", "CPL RT-1.pdf")) && (await titleUpload("closing-settlement", "Settlement RT-1.pdf")));
+  await title.getByTestId("title-wire-bankName").fill("Smoke Test Bank");
+  await title.getByTestId("title-wire-beneficiary").fill("Real Title LLC Escrow");
+  await title.getByTestId("title-wire-routing").fill("123456789");
+  ok("a mistyped routing number is caught", await seen(title.getByTestId("title-wire-blocked").getByText("routing number isn't valid")));
+  await title.getByTestId("title-wire-routing").fill("123456780");
+  await title.getByTestId("title-wire-account").fill("5544332211");
+  await title.getByTestId("title-wire-confirm").fill("5544332211");
+  await title.getByTestId("title-save-wire").click();
+  ok("title enters its own escrow wire instructions", await seen(title.getByTestId("title-wire").getByText(/waiting for LendHous to call/i)));
+  await go(under, dealHref);
+  await under.getByTestId("tab-Documents").click();
+  await acceptAll();
+  await under.getByTestId("advance-loan").filter({ hasText: "Mark clear to close" }).click();
+  await under.getByTestId("advance-loan").filter({ hasText: "Send to closing" }).click();
+  await seen(under.getByTestId("stage-blockers").getByText("Signed loan documents not accepted yet"));
+  ok("at closing, funding waits on the signed loan documents and the call-back", (await under.getByTestId("stage-blockers").innerText()).includes("haven't been verified by a call-back") && (await under.getByTestId("approve-funding").count()) === 0);
+  ok("title sends the signed loan documents", await titleUpload("closing-loan-docs", "Signed loan documents RT-1.pdf"));
+  await go(under, dealHref);
+  await under.getByTestId("tab-Documents").click();
+  await acceptAll();
+  await under.getByTestId("tab-Closing").click();
   await seen(under.getByTestId("active-wire"));
-  ok("whoever entered the wire can't verify it", (await under.getByTestId("verify-blocked").innerText()).includes("Someone other than"));
+  ok("the wire title entered still needs LendHous's call-back", (await under.getByTestId("active-wire").innerText()).includes("Terry Title (title company)") && (await under.getByTestId("closing-panel").innerText()).includes("Not verified"));
+  ok("and the team is told to verify it", (await prisma.notification.count({ where: { eventCode: "wire.entered" } })) >= 1);
   ok("the account number is stored encrypted", !(await rawRows("BookRecord")).includes("5544332211"));
   await go(borrower, `/admin/borrower/${dealId}`);
   ok("the borrower never receives the wire instructions", !(await received(borrower)).includes("5544332211") && (await borrower.getByTestId("borrower-closing").innerText()).includes("Real Title LLC"));
@@ -339,6 +373,20 @@ try {
   await owner.getByTestId("advance-loan").filter({ hasText: "Start servicing" }).click();
   await gone(owner.getByTestId("stage-panel"));
   ok("a second person funds it and it moves to servicing", (await owner.getByTestId("stage-panel").count()) === 0);
+  // After funding, title confirms the money reached escrow and where the mortgage was recorded.
+  await title.goto(BASE + new URL(titleLink).pathname);
+  await title.getByTestId("title-funds-amount").fill("250000");
+  await title.getByTestId("title-funds-on").fill(new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" }));
+  await title.getByTestId("title-confirm-funds").click();
+  ok("title confirms the funds reached escrow", await seen(title.getByTestId("title-funds-done")));
+  await title.getByTestId("title-recorded-on").fill(new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" }));
+  await title.getByTestId("title-recorded-reference").fill("OR Book 999 Page 1");
+  await title.getByTestId("title-save-recording").click();
+  ok("and records where the mortgage was recorded", await seen(title.getByTestId("title-recorded")));
+  await titleContext.close();
+  await go(owner, dealHref);
+  await owner.getByTestId("tab-Closing").click();
+  ok("staff see what title confirmed", (await owner.getByTestId("title-confirmations").innerText()).includes("OR Book 999 Page 1"));
   await go(owner, "/admin/capital");
   ok("funding uses the real capital", (await owner.getByTestId("capital-available").innerText()) !== "$5.00M");
 

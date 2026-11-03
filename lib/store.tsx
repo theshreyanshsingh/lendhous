@@ -2,7 +2,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { dispatchBook, refreshBook, uploadLoanFile } from "@/actions/book";
 import { demoBook, emptyBook, reducer, type Book, type BookAction } from "./book";
-import { adoptPricing } from "./pricing-versions";
+import { adoptPricing, type PricingPayload } from "./pricing-versions";
 import { evaluate, capitalAvailable, type Application, type Estimate } from "./engine";
 import type { CapitalSource, Deal } from "./mockData";
 
@@ -40,8 +40,8 @@ function outer(s: Book, a: Outer): Book {
   return a.state;
 }
 
-export function StoreProvider({ demo, accountId, viewerName, initialBook, newLeads = 0, children }: { demo: boolean; accountId: string; viewerName: string; initialBook?: Book; newLeads?: number; children: React.ReactNode }) {
-  const [s, local] = useReducer(outer, demo, (isDemo: boolean) => { adoptPricing(initialBook?.pricing); return isDemo ? demoBook() : initialBook ?? emptyBook(); });
+export function StoreProvider({ demo, accountId, viewerName, initialBook, pricing, newLeads = 0, children }: { demo: boolean; accountId: string; viewerName: string; initialBook?: Book; pricing?: PricingPayload; newLeads?: number; children: React.ReactNode }) {
+  const [s, local] = useReducer(outer, demo, (isDemo: boolean) => { adoptPricing(pricing); adoptPricing(initialBook?.pricing); return isDemo ? demoBook() : initialBook ?? emptyBook(); });
   const [hydrated, setHydrated] = useState(false);
   const [error, setError] = useState("");
   const busy = useRef(false);

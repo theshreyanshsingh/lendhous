@@ -76,6 +76,7 @@ const schema = z.discriminatedUnion("t", [
   z.object({ t: z.literal("repriceLoan"), dealId: id, by: z.string().max(120) }),
   z.object({ t: z.literal("approveFunding"), dealId: id, by: text(120) }),
   z.object({ t: z.literal("addClosingChecklist"), dealId: id }),
+  z.object({ t: z.literal("turnOffTitleLink"), dealId: id }),
   z.object({ t: z.literal("decideScreening"), dealId: id, screeningId: id, decision: z.enum(["cleared", "match"]), reason: text(1000).min(1), by: z.string().max(120) }),
   z.object({ t: z.literal("saveClosing"), dealId: id, closing: z.object({ company: text(160), contact: text(120), phone: text(40), email: text(160), fileNumber: text(80) }) }),
   z.object({ t: z.literal("enterWire"), dealId: id, wireId: id, bankName: text(120), routing: text(20), account: text(30), beneficiary: text(160), reference: text(160), source: text(80), by: z.string().max(120) }),

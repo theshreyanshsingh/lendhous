@@ -115,8 +115,19 @@ export function alertsFor(before: Book, after: Book, action: BookAction): Alert[
     case "enterWire": {
       // Changed instructions are the classic sign of wire fraud, so the whole team hears about it.
       const deal = loan(action.dealId);
-      if (!deal || (deal.wires?.length ?? 0) < 2) return [];
+      if (!deal) return [];
+      if ((deal.wires?.length ?? 0) < 2) return [{ to: "team", subject: `Wire instructions to verify: ${deal.loanNumber}`, body: `${action.by} entered wire instructions for ${deal.borrowerName}'s closing. Before anyone approves funding, call the title company at a number you found yourself and have them read the numbers back.`, event: "wire.entered" }];
       return [{ to: "team", subject: `Wire instructions changed: ${deal.loanNumber}`, body: `${action.by} entered new wire instructions for ${deal.borrowerName}'s closing. Funding approvals were cleared. Before anyone approves again, confirm the change by calling the title company at a number you found yourself, never one from an email.`, event: "wire.changed" }];
+    }
+    case "titleFundsReceived": {
+      const deal = loan(action.dealId);
+      return deal ? [{ to: "team", subject: `Title has the funds: ${deal.loanNumber}`, body: `${action.by} confirmed ${dollars(action.amount)} reached escrow on ${longDate(action.on)} for ${deal.borrowerName}'s closing.`, event: "closing.funds_received" }] : [];
+    }
+    case "titleRecording": {
+      const deal = loan(action.dealId);
+      if (!deal) return [];
+      const body = `The mortgage on ${deal.address}, ${deal.city} was recorded on ${longDate(action.on)} (${action.reference}).`;
+      return [{ to: "team", subject: `Mortgage recorded: ${deal.loanNumber}`, body: `${body} Accept the recorded copy on the Documents tab.`, event: "closing.recorded" }, { to: "borrower", dealId: deal.id, subject: `Your mortgage is recorded: ${deal.loanNumber}`, body, event: "closing.recorded" }];
     }
     case "recordPayoff": {
       const deal = loan(action.dealId);

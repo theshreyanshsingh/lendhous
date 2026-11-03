@@ -1,9 +1,10 @@
 "use client";
 import { useState } from "react";
-import { activeWire, maskAccount, missingClosingItems, PHONE_SOURCES, verifyProblem, WIRE_SOURCES, wireProblem } from "@/lib/closing";
+import { activeWire, maskAccount, missingClosingItems, PHONE_SOURCES, titleLinkState, verifyProblem, WIRE_SOURCES, wireProblem } from "@/lib/closing";
 import { PRE_FUNDING } from "@/lib/loan-exits";
 import type { ClosingAgent, Deal, WireInstruction } from "@/lib/mockData";
 import { useStore } from "@/lib/store";
+import { TitleLinkPanel } from "./TitleLinkPanel";
 import { Badge, Section, shortDate, statusLabel } from "@/components/ui";
 
 const blankAgent: ClosingAgent = { company: "", contact: "", phone: "", email: "", fileNumber: "" };
@@ -20,7 +21,7 @@ export function ClosingPanel({ deal }: { deal: Deal }) {
   const closingDocs = deal.docs.filter((doc) => doc.category === "Closing");
   const missing = missingClosingItems(deal);
   const saveAgent = async () => { if (await dispatch({ t: "saveClosing", dealId: deal.id, closing: agent })) setEditingAgent(false); };
-  const field = (key: keyof ClosingAgent, label: string, type = "text") => (
+  const field = (key: "company" | "contact" | "phone" | "email" | "fileNumber", label: string, type = "text") => (
     <label className="block min-w-0"><span className="label">{label}</span><input className="desk-input" type={type} data-testid={`agent-${key}`} maxLength={160} value={agent[key]} onChange={(event) => setAgent({ ...agent, [key]: event.target.value })} /></label>
   );
   return (
@@ -42,10 +43,12 @@ export function ClosingPanel({ deal }: { deal: Deal }) {
         ) : <p className="text-sm text-muted-foreground">No closing agent was recorded.</p>}
       </Section>
 
+      <TitleLinkPanel deal={deal} />
+
       <Section title="Closing checklist">
         {closingDocs.length ? (
           <ul className="divide-y divide-border text-sm" data-testid="closing-checklist">
-            {closingDocs.map((doc) => <li key={doc.id} className="flex flex-wrap items-center justify-between gap-2 py-2"><span>{doc.name}</span><Badge tone={doc.status === "accepted" || doc.status === "waived" ? "green" : doc.status === "rejected" ? "rose" : "amber"}>{statusLabel(doc.status)}</Badge></li>)}
+            {closingDocs.map((doc) => <li key={doc.id} className="flex flex-wrap items-center justify-between gap-2 py-2"><span>{doc.name}{doc.stage && <span className="text-xs text-muted-foreground"> · {doc.stage === "funding" ? "before funding" : "after closing"}</span>}</span><Badge tone={doc.status === "accepted" || doc.status === "waived" ? "green" : doc.status === "rejected" ? "rose" : "amber"}>{statusLabel(doc.status)}</Badge></li>)}
           </ul>
         ) : <p className="text-sm text-muted-foreground">Nothing on the checklist yet.</p>}
         {open && missing.length > 0 && <button type="button" className="btn-ghost mt-2 h-9! px-3! text-xs!" data-testid="add-closing-checklist" onClick={() => dispatch({ t: "addClosingChecklist", dealId: deal.id })}>Add the title company&apos;s checklist ({missing.length})</button>}
@@ -61,7 +64,11 @@ export function ClosingPanel({ deal }: { deal: Deal }) {
 
 function Wires({ deal, wire, open, viewerName }: { deal: Deal; wire?: WireInstruction; open: boolean; viewerName: string }) {
   const { dispatch } = useStore();
-  const [entering, setEntering] = useState(!wire);
+  // With the title company's link open, it enters its own instructions; typing them here is the fallback.
+  const titleEnters = titleLinkState(deal) === "open";
+  // Open by itself only while there are no instructions and nobody else is expected to send them; otherwise on request.
+  const [manual, setEntering] = useState(false);
+  const entering = manual || (!wire && !titleEnters);
   const [draft, setDraft] = useState(blankWire);
   const [shown, setShown] = useState(false);
   const [phone, setPhone] = useState("");
@@ -115,10 +122,13 @@ function Wires({ deal, wire, open, viewerName }: { deal: Deal; wire?: WireInstru
           {refused && <p className="text-xs text-warn" data-testid="wire-blocked">{refused}</p>}
           <div className="flex flex-wrap gap-2">
             <button type="button" className="btn-primary" data-testid="save-wire" disabled={Boolean(refused) || !input.routing || !input.account || !input.source} onClick={save}>Save instructions</button>
-            {wire && <button type="button" className="btn-ghost" onClick={() => setEntering(false)}>Cancel</button>}
+            {(wire || titleEnters) && <button type="button" className="btn-ghost" onClick={() => setEntering(false)}>Cancel</button>}
           </div>
         </div>
-      ) : <button type="button" className="btn-ghost h-9! px-3! text-xs!" data-testid="change-wire" onClick={() => setEntering(true)}>Enter new instructions</button>)}
+      ) : <>
+        {!wire && titleEnters && <p className="text-muted-foreground" data-testid="wire-waiting-title">Waiting for the title company to enter its escrow instructions through its secure link.</p>}
+        <button type="button" className="btn-ghost h-9! px-3! text-xs!" data-testid="change-wire" onClick={() => setEntering(true)}>{!wire && titleEnters ? "Enter them here instead" : "Enter new instructions"}</button>
+      </>)}
       {!wire && !open && <p className="text-muted-foreground">No wire instructions were recorded.</p>}
       {old.length > 0 && <ul className="space-y-0.5 border-t border-border pt-2 text-xs text-muted-foreground" data-testid="old-wires">{old.map((item) => <li key={item.id}>Replaced {shortDate(item.replaced!.at)} by {item.replaced!.by}: {item.bankName}, account {maskAccount(item.account)}{item.verification ? " (had been verified)" : ""}</li>)}</ul>}
     </div>

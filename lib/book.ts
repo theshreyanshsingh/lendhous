@@ -3,7 +3,7 @@
 import { evaluate, type Application, type BuyBox } from "./engine";
 import { countedDeals, missingDocs, needsList, withSponsor } from "./credit";
 import { approversNeeded, approvalError, defaultScope, drawRequestError, releaseToScope, reviewDraw } from "./draws";
-import { activeWire, missingClosingItems, verifyProblem, wireProblem } from "./closing";
+import { activeWire, fundsProblem, missingClosingItems, recordingProblem, verifyProblem, wireProblem } from "./closing";
 import { latestScreening, ofacBlocker, sameResult, screeningSubjects } from "./ofac";
 import { cureError, defaultError, executeError, extensionFee, extensionRequestError, payoffError, payoffOn, PRE_FUNDING, reopenTo, closureReason, DEFAULT_KINDS } from "./loan-exits";
 import { canAdvance, nextStage } from "./loan-stages";
@@ -28,6 +28,12 @@ export type BookAction =
   | { t: "saveClosing"; dealId: string; closing: ClosingAgent }
   | { t: "enterWire"; dealId: string; wireId: string; bankName: string; routing: string; account: string; beneficiary: string; reference: string; source: string; by: string }
   | { t: "addClosingChecklist"; dealId: string }
+  /** The title company's link was made (by the server, which keeps only the token's hash) or turned off. */
+  | { t: "openTitleLink"; dealId: string; sentTo: string; email: string; sentBy: string; expiresAt: string }
+  | { t: "turnOffTitleLink"; dealId: string }
+  /** From the title company's link: the money arrived in escrow, and where the mortgage was recorded. */
+  | { t: "titleFundsReceived"; dealId: string; amount: number; on: string; by: string }
+  | { t: "titleRecording"; dealId: string; on: string; reference: string; by: string }
   /** A screening against the sanctions list. Only the server makes one: it holds the list. */
   | { t: "recordScreening"; dealId: string; screening: Screening }
   | { t: "decideScreening"; dealId: string; screeningId: string; decision: "cleared" | "match"; reason: string; by: string }
@@ -166,6 +172,28 @@ export function reducer(s: Book, a: BookAction): Book {
       const decided = { by: a.by, at: now(), reason: a.reason };
       return { ...s, deals: upd(a.dealId, (d) => ({ ...d, screenings: d.screenings!.map((x) => (x.id === a.screeningId ? { ...x, status: a.decision, decided } : x)) })), audit: log(`${deal.loanNumber}: possible OFAC match ${a.decision === "cleared" ? "cleared as a false positive" : "CONFIRMED"} by ${a.by}`) };
     }
+    case "openTitleLink": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const titleLink = { sentTo: a.sentTo, email: a.email, sentBy: a.sentBy, sentAt: now(), expiresAt: a.expiresAt, status: "open" as const };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, titleLink, docs: [...d.docs, ...missingClosingItems(d)] })), audit: log(`${deal.loanNumber}: secure link sent to ${a.sentTo}`) };
+    }
+    case "turnOffTitleLink": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (!deal.titleLink || deal.titleLink.status === "off") return s;
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, titleLink: { ...d.titleLink!, status: "off" } })), audit: log(`${deal.loanNumber}: title company's link turned off`) };
+    }
+    case "titleFundsReceived": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (!deal.closing || fundsProblem(deal, a.amount, a.on, serviceDay(s))) return s;
+      const fundsReceived = { amount: Math.round(a.amount * 100) / 100, on: a.on, by: a.by, at: now() };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, closing: { ...d.closing!, fundsReceived } })), audit: log(`${deal.loanNumber}: ${a.by} confirmed ${money(fundsReceived.amount)} received ${a.on}`) };
+    }
+    case "titleRecording": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (!deal.closing || recordingProblem(deal, a.on, a.reference, serviceDay(s))) return s;
+      const recording = { on: a.on, reference: a.reference.trim(), by: a.by, at: now() };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, closing: { ...d.closing!, recording } })), audit: log(`${deal.loanNumber}: mortgage recorded ${a.on} (${recording.reference})`) };
+    }
     case "addClosingChecklist": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
       const missing = missingClosingItems(deal);
@@ -174,7 +202,8 @@ export function reducer(s: Book, a: BookAction): Book {
     }
     case "saveClosing": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
-      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, closing: a.closing })), audit: log(`${deal.loanNumber}: closing agent set to ${a.closing.company}`) };
+      // What title has confirmed stays, whatever the form sends.
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, closing: { ...a.closing, fundsReceived: d.closing?.fundsReceived, recording: d.closing?.recording } })), audit: log(`${deal.loanNumber}: closing agent set to ${a.closing.company}`) };
     }
     case "enterWire": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;

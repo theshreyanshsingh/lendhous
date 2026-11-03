@@ -52,7 +52,7 @@ Optional: `ADMIN_NAME`, `LENDER_NAME`, `TEAM_EMAIL`, `SMTP_PORT`, `SMTP_USER`, `
 
 ## If mail stops working
 
-Sign-in keeps working, but invites, forgot-password links, photo links and alerts don't arrive. An admin can still copy a password link from Members and a photo link from the draw, and website briefs still reach the leads inbox.
+Sign-in keeps working, but invites, forgot-password links, photo links and alerts don't arrive. An admin can still copy a password link from Members, a photo link from the draw and a title company's link from the Closing tab when it's sent, and website briefs still reach the leads inbox.
 
 ## A plain server under pm2
 

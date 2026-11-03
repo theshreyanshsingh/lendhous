@@ -46,12 +46,12 @@ const quietExits = (deal: Deal): Partial<Deal> => ({
 
 /** Removes what identifies the borrower, for a partner or buyer who hasn't closed on the loan. */
 function blind(deal: Deal): Deal {
-  return { ...deal, borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined, closure: undefined, defaults: undefined, extensions: undefined, paidOff: undefined, closing: undefined, wires: undefined, fundingWireId: undefined, screenings: undefined, ...quietPayments(deal, false) };
+  return { ...deal, borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined, closure: undefined, defaults: undefined, extensions: undefined, paidOff: undefined, closing: undefined, wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, ...quietPayments(deal, false) };
 }
 
 /** What only the team sees on a loan it shares with a client. Wire instructions never leave the team: a client who sees them is a client who can be sent fake ones. */
 function forClient(deal: Deal): Deal {
-  return { ...deal, allocations: [], teaserSentTo: [], route: undefined, capitalStatus: "not_started", contractorIsGtAffiliate: undefined, source: "", fundingApprovers: undefined, creditReview: undefined, ...quietPayments(deal, true), ...quietExits(deal), wires: undefined, fundingWireId: undefined, screenings: undefined };
+  return { ...deal, allocations: [], teaserSentTo: [], route: undefined, capitalStatus: "not_started", contractorIsGtAffiliate: undefined, source: "", fundingApprovers: undefined, creditReview: undefined, ...quietPayments(deal, true), ...quietExits(deal), wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined };
 }
 
 /** The part of the book this account may see. Nothing else leaves the server. */
@@ -210,6 +210,13 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       if (action.reason.trim().length < 10) return no("Say why, in enough detail for an examiner: what you compared and what didn't match.");
       return ok({ ...action, reason: action.reason.trim(), by: viewer.name });
     }
+    case "openTitleLink": case "titleFundsReceived": case "titleRecording":
+      // Only the server does these: it made the link, or it checked the link these came through.
+      if (!trusted) return no(NOT_ALLOWED);
+      return dealOf(action.dealId) ? ok() : no(GONE);
+    case "turnOffTitleLink":
+      if (!dealOf(action.dealId)) return no(GONE);
+      return staffOnly("manage_conditions", "approve_funding");
     case "addClosingChecklist": {
       const deal = dealOf(action.dealId);
       if (!deal) return no(GONE);
@@ -226,9 +233,10 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
     case "enterWire": {
       const deal = dealOf(action.dealId);
       if (!deal) return no(GONE);
-      if (!staffOnlyAllowed("manage_conditions", "approve_funding")) return no(NOT_ALLOWED);
+      // The title company enters its own instructions through its link (trusted); otherwise only staff who handle closings.
+      if (!trusted && !staffOnlyAllowed("manage_conditions", "approve_funding")) return no(NOT_ALLOWED);
       if (!WIRE_STAGES.includes(deal.status)) return no("Wire instructions go in once the term sheet is accepted and before the loan funds.");
-      const cleaned = { ...action, routing: action.routing.replace(/\s/g, ""), account: action.account.replace(/\s/g, ""), by: viewer.name };
+      const cleaned = { ...action, routing: action.routing.replace(/\s/g, ""), account: action.account.replace(/\s/g, ""), by: trusted ? action.by : viewer.name };
       const refused = wireProblem(cleaned);
       if (refused) return no(refused);
       return deal.wires?.some((wire) => wire.id === action.wireId) ? no("Those instructions are already saved.") : ok(cleaned);

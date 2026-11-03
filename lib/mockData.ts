@@ -12,7 +12,8 @@ export type LoanStatus =
 export type CapitalStatus = "not_started" | "recommended" | "teaser_out" | "bids_in" | "reserved" | "committed" | "funded";
 export type DocStatus = "requested" | "uploaded" | "in_review" | "accepted" | "rejected" | "waived";
 
-export interface Doc { id: string; name: string; category: string; status: DocStatus; fileName?: string; note?: string; documentId?: string }
+/** stage: when a document has to be in. Unset means before clear to close; "funding" before the money goes out; "post_close" after. */
+export interface Doc { id: string; name: string; category: string; status: DocStatus; fileName?: string; note?: string; documentId?: string; stage?: "funding" | "post_close" }
 /** Someone who personally guarantees the loan. Everyone owning 20% or more of the borrowing entity should be one. */
 export interface Guarantor { name: string; ownershipPct: number; fico: number; citizenship: "us" | "resident" | "foreign" }
 /** A deal the borrower says they've done. Staff check it against its settlement statement before it counts for pricing. */
@@ -53,6 +54,7 @@ export interface Deal {
   paidOff?: Payoff;
   /** Who's closing the loan: the title company or closing attorney. */
   closing?: ClosingAgent;
+  titleLink?: TitleLink;
   /** Wire instructions for funding, oldest first. Only the newest is live; a change replaces it and has to be verified again. */
   wires?: WireInstruction[];
   /** The verified wire the funding approvals were given on. A new wire clears them. */
@@ -60,7 +62,15 @@ export interface Deal {
   /** Sanctions (OFAC) screenings of the people and company on the loan, oldest first. */
   screenings?: Screening[];
 }
-export interface ClosingAgent { company: string; contact: string; phone: string; email: string; fileNumber: string }
+export interface ClosingAgent {
+  company: string; contact: string; phone: string; email: string; fileNumber: string;
+  /** The title company's word that the loan money reached its escrow account (Spec T3). */
+  fundsReceived?: { amount: number; on: string; by: string; at: string };
+  /** Where the mortgage was recorded, once it was. */
+  recording?: { on: string; reference: string; by: string; at: string };
+}
+/** The title company's secure link (Spec T1–T3): who it went to and until when. The token itself is never kept. */
+export interface TitleLink { sentTo: string; email: string; sentBy: string; sentAt: string; expiresAt: string; status: "open" | "off" }
 export interface WireInstruction {
   id: string; bankName: string; routing: string; account: string; beneficiary: string; reference: string;
   /** How the instructions arrived. Never by email. */

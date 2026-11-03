@@ -10,6 +10,7 @@ const nextConfig = {
     // The address of these pages is the key to them, so it must not reach another site or a search engine.
     { source: "/photos/:path*", headers: [{ key: "Referrer-Policy", value: "no-referrer" }, { key: "X-Robots-Tag", value: "noindex, nofollow" }, { key: "Cache-Control", value: "no-store" }] },
     { source: "/apply/:path*", headers: [{ key: "Referrer-Policy", value: "no-referrer" }, { key: "X-Robots-Tag", value: "noindex, nofollow" }, { key: "Cache-Control", value: "no-store" }] },
+    { source: "/closing/:path*", headers: [{ key: "Referrer-Policy", value: "no-referrer" }, { key: "X-Robots-Tag", value: "noindex, nofollow" }, { key: "Cache-Control", value: "no-store" }] },
     { source: "/login/set-password", headers: [{ key: "Referrer-Policy", value: "no-referrer" }] },
   ],
   // The marketing site's old portal address now leads to the real sign-in page.

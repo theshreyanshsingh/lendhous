@@ -35,12 +35,17 @@ export function nextStage(deal: Deal, e: Estimate, today?: string): NextStage | 
     if (!deal.creditReview) blockers.push("Credit review isn't signed off (Credit review tab)");
   }
   if (step.to === "clear_to_close") {
-    const open = deal.docs.filter((doc) => doc.status !== "accepted" && doc.status !== "waived").length;
+    // Signed loan documents come at closing and the recorded mortgage after, so neither holds up clear to close.
+    const open = deal.docs.filter((doc) => !doc.stage && doc.status !== "accepted" && doc.status !== "waived").length;
     if (open) blockers.push(`${open} document${open > 1 ? "s" : ""} still open`);
     const allocated = deal.allocations.reduce((sum, item) => sum + item.amount, 0);
     if (allocated !== e.noteAmount) blockers.push("Capital doesn't cover the whole loan yet");
   }
   if ((step.to === "clear_to_close" || step.to === "funded") && deal.capitalStatus !== "committed") blockers.push("Capital isn't committed");
+  if (step.to === "funded") {
+    const unsigned = deal.docs.filter((doc) => doc.stage === "funding" && doc.status !== "accepted" && doc.status !== "waived");
+    if (unsigned.length) blockers.push(`${unsigned.map((doc) => doc.name).join(", ")} not accepted yet`);
+  }
   if (step.to === "funded" && !wireVerified(deal)) blockers.push(activeWire(deal) ? "The wire instructions haven't been verified by a call-back (Closing tab)" : "No wire instructions yet (Closing tab)");
   if (step.to === "funded" && (deal.fundingApprovers?.length ?? 0) < 2) blockers.push(`Needs two people to approve funding (${deal.fundingApprovers?.length ?? 0} of 2)`);
   return { ...step, blockers, borrowerStep: deal.status === "term_sheet_issued" };

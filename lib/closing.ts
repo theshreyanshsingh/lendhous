@@ -43,11 +43,65 @@ export function verifyProblem(wire: WireInstruction | undefined, by: string, pho
   return null;
 }
 
-/** What the title company has to send before the loan can clear to close. */
-export const CLOSING_ITEMS: { id: string; name: string }[] = [
+/**
+ * What the title company sends (Spec T2): the commitment, the closing protection letter and the approved settlement
+ * statement before clear to close; the signed loan documents before funding; the recorded mortgage after.
+ */
+export const CLOSING_ITEMS: { id: string; name: string; stage?: Doc["stage"] }[] = [
   { id: "closing-title", name: "Title commitment" },
   { id: "closing-cpl", name: "Closing protection letter (CPL)" },
   { id: "closing-settlement", name: "Settlement statement, approved by both sides" },
+  { id: "closing-loan-docs", name: "Signed loan documents", stage: "funding" },
+  { id: "closing-recorded", name: "Recorded mortgage", stage: "post_close" },
 ];
 /** The checklist items a loan doesn't have yet. */
 export const missingClosingItems = (deal: Pick<Deal, "docs">): Doc[] => CLOSING_ITEMS.filter((item) => !deal.docs.some((doc) => doc.id === item.id)).map((item) => ({ ...item, category: "Closing", status: "requested" }));
+/** The documents the title company may upload through its link: the closing checklist, nothing else on the loan. */
+export const isTitleDoc = (docId: string) => CLOSING_ITEMS.some((item) => item.id === docId);
+
+/** How long a title link works. A new one can be sent at any time, which turns the old one off. */
+export const TITLE_LINK_DAYS = 30;
+// The link is about getting a loan closed and recorded, so it stops once the loan has ended.
+const ENDED = ["declined", "withdrawn", "paid_off"];
+
+/** Whether a title link can be used today. */
+export function titleLinkState(deal: Pick<Deal, "titleLink" | "status"> | undefined, now = new Date()): "open" | "expired" | "off" | "closed" {
+  if (!deal?.titleLink) return "off";
+  if (ENDED.includes(deal.status)) return "closed";
+  if (deal.titleLink.status === "off") return "off";
+  return Date.parse(deal.titleLink.expiresAt) < now.getTime() ? "expired" : "open";
+}
+
+/**
+ * What the title company sees: only what closing one loan needs. Names for vesting, the property, the amount and date,
+ * the checklist, whether wire instructions are on file (never the numbers back), and funding and recording. Nothing
+ * about credit, the borrower's profile, payments or other documents.
+ */
+export function titleView(deal: Deal, noteAmount: number) {
+  const wire = activeWire(deal);
+  return {
+    loanNumber: deal.loanNumber, borrower: deal.borrowerName, entity: deal.entityName, address: `${deal.address}, ${deal.city} ${deal.zip}`,
+    noteAmount, closingDate: deal.closingDate, status: deal.status, sentBy: deal.titleLink?.sentBy ?? "LendHous", company: deal.closing?.company ?? "", fileNumber: deal.closing?.fileNumber ?? "",
+    items: deal.docs.filter((doc) => isTitleDoc(doc.id)).map((doc) => ({ id: doc.id, name: doc.name, status: doc.status, stage: doc.stage ?? null, fileName: doc.fileName ?? null })),
+    wire: wire ? { bankName: wire.bankName, beneficiary: wire.beneficiary, account: maskAccount(wire.account), verified: Boolean(wire.verification), enteredAt: wire.enteredAt } : null,
+    fundsReceived: deal.closing?.fundsReceived ?? null, recording: deal.closing?.recording ?? null,
+    funded: !["submitted", "initial_review", "underwriting", "term_sheet_issued", "term_sheet_accepted", "conditions", "clear_to_close", "closing"].includes(deal.status),
+  };
+}
+export type TitleView = ReturnType<typeof titleView>;
+
+/** Why title can't confirm funds received, or null. Only once the loan is at closing or later. */
+export function fundsProblem(deal: Pick<Deal, "status">, amount: number, on: string, today: string) {
+  if (!["closing", "funded", "servicing_current", "servicing_delinquent", "matured", "default"].includes(deal.status)) return "The loan isn't at closing yet.";
+  if (!(amount > 0)) return "Enter the amount received.";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(on) || on > today) return "Enter the date it arrived, today or earlier.";
+  return null;
+}
+
+/** Why title can't record the mortgage's recording, or null. Only after funding. */
+export function recordingProblem(deal: Pick<Deal, "status">, on: string, reference: string, today: string) {
+  if (["submitted", "initial_review", "underwriting", "term_sheet_issued", "term_sheet_accepted", "conditions", "clear_to_close", "closing"].includes(deal.status)) return "The mortgage is recorded after the loan funds.";
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(on) || on > today) return "Enter the recording date, today or earlier.";
+  if (!reference.trim()) return "Enter the book and page, or the instrument number.";
+  return null;
+}

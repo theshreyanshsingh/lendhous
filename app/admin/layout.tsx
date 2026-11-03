@@ -2,6 +2,8 @@ import { redirect } from "next/navigation";
 import Shell from "@/components/Shell";
 import { getCurrentUser, hasPermission } from "@/lib/auth";
 import { scopedBook } from "@/lib/book-store";
+import { loadPricing } from "@/lib/pricing-store";
+import { pricingPayload } from "@/lib/pricing-versions";
 import { isDemoEmail } from "@/lib/deploy";
 import { unreadCount } from "@/lib/notifications";
 import { ROLE_LABEL, viewFor } from "@/lib/permissions";
@@ -31,7 +33,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   ]);
   const account = { name: user.name, email: user.email, roles: user.roleCodes.map((role) => ROLE_LABEL[role]), demo, canManageMembers, canViewAudit, canManageSettings, canManageFirms: canRouteCapital || canManageCapital, canManagePricing, unread, offerSample: settings.offerSampleData !== false };
   return (
-    <StoreProvider demo={demo} accountId={user.id} viewerName={user.name} initialBook={demo ? undefined : await scopedBook(user)} newLeads={newLeads}>
+    // Every page, demo seats too, prices new quotes on the version the server does, so the two render the same.
+    <StoreProvider demo={demo} accountId={user.id} viewerName={user.name} initialBook={demo ? undefined : await scopedBook(user)} pricing={(await loadPricing(), pricingPayload([]))} newLeads={newLeads}>
       <Shell account={account} view={view}>{children}</Shell>
     </StoreProvider>
   );
