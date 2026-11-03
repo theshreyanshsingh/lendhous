@@ -29,7 +29,13 @@ export const servicingDate = (now: Date) => new Intl.DateTimeFormat("en-CA", { t
 /** The demo book is a snapshot, so its loans stay as they were on this day instead of falling further behind each month. */
 export const DEMO_SERVICING_DAY = "2026-10-31";
 
-export const maturityOf = (deal: Deal) => maturityDate(deal.closingDate, evaluate(deal.app).termMonths);
+/** The months extensions have added, counting only the ones signed and paid for. */
+export const extendedMonths = (deal: Pick<Deal, "extensions">) => (deal.extensions ?? []).reduce((sum, item) => sum + (item.status === "executed" ? item.months : 0), 0);
+
+export const maturityOf = (deal: Deal) => maturityDate(deal.closingDate, evaluate(deal.app).termMonths + extendedMonths(deal));
+
+/** The default declared on the loan and not yet cured, if there is one. */
+export const openDefault = (deal: Pick<Deal, "defaults">) => (deal.defaults ?? []).find((item) => !item.cured);
 
 /** The rate after maturity: the note rate plus the default margin, capped. */
 export const defaultRate = (ratePct: number) => Math.max(ratePct, Math.min(rules.defaultRateMax, ratePct + rules.defaultRateAdd));
@@ -73,15 +79,19 @@ export type Ledger = {
  */
 export function ledgerOf(deal: Deal, asOf: string): Ledger {
   const e = evaluate(deal.app);
-  const maturity = maturityDate(deal.closingDate, e.termMonths);
+  const maturity = maturityOf(deal);
   const current = fundedBalances(e, deal.app, deal.disbursedDraws).nextPayment;
   const boarded = boardedFrom(deal);
   const billed = new Map((deal.bills ?? []).map((bill) => [bill.due, bill.amount]));
   const waived = new Set((deal.waivedFees ?? []).map((item) => item.due));
+  // A payment an extension added for a month already gone wasn't owed until the extension was signed, so its grace days
+  // run from then.
+  const signed = (deal.extensions ?? []).flatMap((item) => (item.executed ? [{ from: item.fromMaturity, on: item.executed.on }] : []));
+  const billedOn = (due: string) => signed.find((item) => item.from < due && item.on > due)?.on ?? due;
   type Working = Omit<BillRow, "status"> & { boarded: boolean };
   const rows: Working[] = [];
   for (let due = firstDueDate(deal.closingDate); due <= maturity; due = addMonths(due, 1)) {
-    rows.push({ due, amount: billed.get(due) ?? current, lateOn: addDays(due, rules.graceDays + 1), late: false, fee: 0, feePaid: 0, waived: waived.has(due), boarded: due < boarded });
+    rows.push({ due, amount: billed.get(due) ?? current, lateOn: addDays(billedOn(due), rules.graceDays + 1), late: false, fee: 0, feePaid: 0, waived: waived.has(due), boarded: due < boarded });
   }
   const payments = (deal.payments ?? []).filter((payment) => !payment.reversed && payment.receivedOn <= asOf).sort((a, b) => a.receivedOn.localeCompare(b.receivedOn) || a.at.localeCompare(b.at));
 
@@ -179,27 +189,33 @@ export function balanceOf(deal: Deal) {
   return Math.round(amount * 100) / 100;
 }
 
+/** The day interest starts running at the default rate: maturity, or an earlier default's effective date. */
+export function defaultInterestFrom(deal: Deal, maturity = maturityOf(deal)) {
+  const open = openDefault(deal);
+  return open && open.effectiveOn < maturity ? open.effectiveOn : maturity;
+}
+
 /**
  * What it takes to pay the loan off on a date: principal, interest since the last payment (at the default rate for days
- * after maturity), and unpaid late fees, less any credit held.
+ * after maturity or a declared default), and unpaid late fees, less any credit held.
  */
-export function payoffFor(deal: Deal, goodThrough: string) {
+export function payoffFor(deal: Deal, goodThrough: string, l: Ledger = ledger(deal)) {
   const e = evaluate(deal.app);
-  const l = ledger(deal);
   const principal = balanceOf(deal);
   // The last payment covers interest up to its own due date. A loan with none yet accrues from closing.
   const basis = deal.app.product !== "dscr" && deal.app.accrual === "full_boat" ? e.noteAmount : undefined;
-  const regularEnd = goodThrough < l.maturity ? goodThrough : l.maturity;
+  const from = defaultInterestFrom(deal, l.maturity);
+  const regularEnd = goodThrough < from ? goodThrough : from;
   const regular = payoffQuote({ disbursedPrincipal: principal, ratePct: e.rate, daysAccrued: Math.max(0, daysBetween(l.paidThrough, regularEnd)), accrualBasisAmount: basis, unpaidCharges: l.feesOwed, borrowerEscrowCredit: l.credit });
-  const pastMaturity = payoffQuote({ disbursedPrincipal: 0, ratePct: defaultRate(e.rate), daysAccrued: Math.max(0, daysBetween(l.paidThrough > l.maturity ? l.paidThrough : l.maturity, goodThrough)), accrualBasisAmount: basis ?? principal });
+  const atDefault = payoffQuote({ disbursedPrincipal: 0, ratePct: defaultRate(e.rate), daysAccrued: Math.max(0, daysBetween(l.paidThrough > from ? l.paidThrough : from, goodThrough)), accrualBasisAmount: basis ?? principal });
   return {
     principal,
     accrued: regular.accrued,
-    defaultAccrued: pastMaturity.accrued,
+    defaultAccrued: atDefault.accrued,
     fees: l.feesOwed,
     credit: l.credit,
-    perDiem: goodThrough > l.maturity ? pastMaturity.perDiem : regular.perDiem,
-    total: round2(regular.total + pastMaturity.accrued),
+    perDiem: goodThrough > from ? atDefault.perDiem : regular.perDiem,
+    total: round2(regular.total + atDefault.accrued),
   };
 }
 

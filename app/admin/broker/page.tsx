@@ -7,6 +7,8 @@ import type { Deal } from "@/lib/mockData";
 import { est, useStore } from "@/lib/store";
 
 const CLOSED = ["funded", "servicing_current", "servicing_delinquent", "matured", "default", "paid_off"];
+// Declined or withdrawn: no longer in process, and never earned a fee.
+const ENDED = ["declined", "withdrawn"];
 const brokerFee = (deal: Deal) => (est(deal.app).noteAmount * (deal.brokerPoints ?? 0)) / 100;
 
 export default function BrokerHome() {
@@ -18,7 +20,7 @@ export default function BrokerHome() {
       <p className="mt-2 text-sm text-muted-foreground">Once LendHous connects your brokerage, you can submit deals and track them here.</p>
     </div>);
   const mine = s.deals.filter((deal) => deal.brokerId === firm.id);
-  const open = mine.filter((deal) => !CLOSED.includes(deal.status));
+  const open = mine.filter((deal) => !CLOSED.includes(deal.status) && !ENDED.includes(deal.status));
   const funded = mine.filter((deal) => CLOSED.includes(deal.status));
   return (
     <div className="space-y-4">
@@ -40,7 +42,7 @@ export default function BrokerHome() {
             <Link key={deal.id} href={`/admin/broker/deals/${deal.id}`} className="glass block min-w-0 p-5 transition-colors hover:border-faint" data-testid="broker-deal">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0"><div className="text-xs text-muted-foreground">{deal.loanNumber} · {productLabel[deal.app.product]}</div><div className="text-lg font-semibold">{deal.borrowerName}</div><div className="text-sm text-muted-foreground">{deal.address}, {deal.city}</div></div>
-                <Badge tone={CLOSED.includes(deal.status) ? "green" : "blue"}>{statusLabel(deal.status)}</Badge>
+                <Badge tone={CLOSED.includes(deal.status) ? "green" : ENDED.includes(deal.status) ? "slate" : "blue"}>{statusLabel(deal.status)}</Badge>
               </div>
               <div className="my-4"><Tracker status={deal.status} /></div>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">

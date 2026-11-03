@@ -6,7 +6,9 @@ import type { Application, BuyBox } from "./engine";
 
 export type LoanStatus =
   | "submitted" | "initial_review" | "underwriting" | "term_sheet_issued" | "term_sheet_accepted" | "conditions"
-  | "clear_to_close" | "closing" | "funded" | "servicing_current" | "servicing_delinquent" | "matured" | "default" | "paid_off";
+  | "clear_to_close" | "closing" | "funded" | "servicing_current" | "servicing_delinquent" | "matured" | "default" | "paid_off"
+  // An application that ended before funding: turned down by the team, or called off by the borrower.
+  | "declined" | "withdrawn";
 export type CapitalStatus = "not_started" | "recommended" | "teaser_out" | "bids_in" | "reserved" | "committed" | "funded";
 export type DocStatus = "requested" | "uploaded" | "in_review" | "accepted" | "rejected" | "waived";
 
@@ -42,6 +44,31 @@ export interface Deal {
   servicedThrough?: string;
   /** Which maturity notices (days before) have gone out. */
   maturityNotices?: number[];
+  /** Why an application was declined or withdrawn, and the stage it was in. Cleared if it's reopened. */
+  closure?: Closure;
+  /** Every default declared on the loan, oldest first. The last one is open until it's cured. */
+  defaults?: DefaultCase[];
+  extensions?: LoanExtension[];
+  /** The money that paid the loan off, and the release of the mortgage after it. */
+  paidOff?: Payoff;
+}
+export interface Closure { outcome: "declined" | "withdrawn"; reason: string; note: string; by: string; at: string; from: LoanStatus }
+export type DefaultKind = "monetary" | "maturity" | "covenant" | "insurance_lapse" | "tax_delinquency";
+export interface DefaultCase { kind: DefaultKind; effectiveOn: string; note: string; by: string; at: string; cured?: { by: string; at: string; note: string } }
+/** More time on a loan (Spec 8.4): asked for, approved by two people, then signed and paid for before the maturity moves. */
+export interface LoanExtension {
+  id: string; months: number; reason: string; requestedBy: string; requestedAt: string; fee: number;
+  /** The maturity it extends from, fixed when it's asked for. */
+  fromMaturity: string;
+  status: "requested" | "approved" | "declined" | "executed"; approvers: string[];
+  declined?: { by: string; at: string; reason: string };
+  executed?: { by: string; at: string; on: string; method: PaymentMethod; reference: string };
+}
+export interface Payoff {
+  amount: number; receivedOn: string; method: PaymentMethod; reference: string; by: string; at: string;
+  /** What the payoff came to on the day it arrived. Anything over it is owed back to the borrower. */
+  owed: number;
+  release?: { sentOn?: string; recordedOn?: string; reference: string; by: string };
 }
 export type PaymentMethod = "wire" | "ach" | "check" | "other";
 export interface LoanPayment { id: string; amount: number; receivedOn: string; method: PaymentMethod; reference: string; by: string; at: string; reversed?: { by: string; at: string; reason: string } }
@@ -207,6 +234,7 @@ export const pipelineStages: { code: LoanStatus; label: string }[] = [
   { code: "term_sheet_issued", label: "Term sheet issued" }, { code: "term_sheet_accepted", label: "Term sheet accepted" }, { code: "conditions", label: "Conditions" },
   { code: "clear_to_close", label: "Clear to close" }, { code: "closing", label: "Closing" }, { code: "funded", label: "Funded" },
   { code: "servicing_current", label: "Servicing: current" }, { code: "servicing_delinquent", label: "Servicing: delinquent" }, { code: "matured", label: "Matured" }, { code: "default", label: "Default" }, { code: "paid_off", label: "Paid off" },
+  { code: "declined", label: "Declined" }, { code: "withdrawn", label: "Withdrawn" },
 ];
 export const borrowerTimeline = ["Submitted", "Underwriting", "Term Sheet", "Conditions", "Clear to Close", "Funded"];
 export function timelineIndex(s: LoanStatus) {

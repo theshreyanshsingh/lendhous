@@ -3,9 +3,10 @@
 import { evaluate, type Application, type BuyBox } from "./engine";
 import { countedDeals, missingDocs, needsList, withSponsor } from "./credit";
 import { approversNeeded, approvalError, defaultScope, drawRequestError, releaseToScope, reviewDraw } from "./draws";
+import { cureError, defaultError, executeError, extensionFee, extensionRequestError, payoffError, payoffOn, PRE_FUNDING, reopenTo, closureReason, DEFAULT_KINDS } from "./loan-exits";
 import { canAdvance, nextStage } from "./loan-stages";
-import { seedDeals, seedBids, seedDraws, seedLoanSales, seedLoanOffers, seedMessages, seedPhotoRequests, DEMO_SPONSORS, capitalSources, partners as seedPartners, brokers as seedBrokers, loanBuyers, BORROWER_ID, DEMO_PARTNER_ID, DEMO_BUYER_ID, DEMO_BROKER_ID, type Broker, type Deal, type Bid, type DrawRequest, type DrawRequestLine, type LoanMessage, type Partner, type PayoffRequest, type DocStatus, type CapitalSource, type LoanBuyer, type LoanOffer, type LoanSale, type LoanPayment, type PaymentMethod, type PhotoRequest, type RequestPhoto, type ScopeLine, type Sponsor } from "./mockData";
-import { DEMO_SERVICING_DAY, firstDueDate, ledger, payoffFor, servicingDate, settle } from "./servicing";
+import { seedDeals, seedBids, seedDraws, seedLoanSales, seedLoanOffers, seedMessages, seedPhotoRequests, DEMO_SPONSORS, capitalSources, partners as seedPartners, brokers as seedBrokers, loanBuyers, BORROWER_ID, DEMO_PARTNER_ID, DEMO_BUYER_ID, DEMO_BROKER_ID, type Broker, type Closure, type Deal, type DefaultKind, type Bid, type DrawRequest, type DrawRequestLine, type LoanExtension, type LoanMessage, type Partner, type PayoffRequest, type DocStatus, type CapitalSource, type LoanBuyer, type LoanOffer, type LoanSale, type LoanPayment, type PaymentMethod, type PhotoRequest, type RequestPhoto, type ScopeLine, type Sponsor } from "./mockData";
+import { DEMO_SERVICING_DAY, firstDueDate, ledger, maturityOf, payoffFor, servicingDate, settle } from "./servicing";
 
 export interface Book { partnerId: string; buyerId: string; brokerId: string; borrowerId: string; loanPrefix: string; deals: Deal[]; bids: Bid[]; partners: Partner[]; buyers: LoanBuyer[]; brokers: Broker[]; sales: LoanSale[]; offers: LoanOffer[]; draws: DrawRequest[]; photoRequests: PhotoRequest[]; payoffs: PayoffRequest[]; messages: LoanMessage[]; sources: CapitalSource[]; audit: { at: string; text: string }[]; sample?: boolean }
 
@@ -44,7 +45,17 @@ export type BookAction =
   | { t: "settleLoans"; asOf: string }
   | { t: "requestPayoff"; dealId: string; goodThrough: string; by: string }
   | { t: "sendPayoff"; payoffId: string }
-  | { t: "markPaidOff"; payoffId: string }
+  | { t: "recordPayoff"; dealId: string; amount: number; receivedOn: string; method: PaymentMethod; reference: string; by: string }
+  | { t: "recordLienRelease"; dealId: string; step: "sent" | "recorded"; on: string; reference: string; by: string }
+  /** byTeam comes from the session, never the request: it decides who hears about it. */
+  | { t: "closeApplication"; dealId: string; outcome: "declined" | "withdrawn"; reason: string; note: string; by: string; byTeam: boolean }
+  | { t: "reopenApplication"; dealId: string; by: string }
+  | { t: "declareDefault"; dealId: string; kind: DefaultKind; effectiveOn: string; note: string; by: string }
+  | { t: "cureDefault"; dealId: string; note: string; by: string }
+  | { t: "requestExtension"; dealId: string; months: number; reason: string; by: string; byTeam: boolean }
+  | { t: "approveExtension"; dealId: string; extensionId: string; by: string }
+  | { t: "declineExtension"; dealId: string; extensionId: string; reason: string; by: string }
+  | { t: "executeExtension"; dealId: string; extensionId: string; on: string; method: PaymentMethod; reference: string; by: string }
   | { t: "sendMessage"; dealId: string; from: string; side: LoanMessage["side"]; text: string }
   | { t: "uploadDoc"; dealId: string; docId: string; fileName: string; documentId?: string }
   | { t: "docStatus"; dealId: string; docId: string; status: DocStatus }
@@ -78,7 +89,11 @@ const money = (amount: number) => `$${amount.toLocaleString("en-US", { minimumFr
 export function demoBook(): Book {
   const deals = seedDeals.map((d) => {
     const e = evaluate(d.app);
-    return { ...d, sponsor: DEMO_SPONSORS[d.id], scope: defaultScope(d.app.product, e.holdback, d.disbursedDraws ?? 0), allocations: d.allocations.map((a) => ({ ...a, amount: a.amount || e.noteAmount })) };
+    const deal: Deal = { ...d, sponsor: DEMO_SPONSORS[d.id], scope: defaultScope(d.app.product, e.holdback, d.disbursedDraws ?? 0), allocations: d.allocations.map((a) => ({ ...a, amount: a.amount || e.noteAmount })) };
+    // One loan close to maturity whose borrower called to ask for more time, so the extension queue has something in it.
+    if (d.id !== "d14") return deal;
+    const extension: LoanExtension = { id: "ext-demo-1", months: 3, reason: "Kitchen cabinets are back-ordered; listing in February (FAKE)", requestedBy: "Pat Processor (FAKE)", requestedAt: "2026-10-28T10:00:00-07:00", fee: extensionFee(deal, 3), fromMaturity: maturityOf(deal), status: "requested", approvers: [] };
+    return { ...deal, extensions: [extension] };
   });
   const quoted = payoffFor(deals.find((d) => d.id === "d11")!, "2026-11-15");
   const payoffs: PayoffRequest[] = [{ id: "payoff-1", dealId: "d11", goodThrough: "2026-11-15", requestedAt: "2026-10-22T10:00:00-07:00", by: "Avery Mock (FAKE)", status: "requested", ...quoted }];
@@ -253,10 +268,90 @@ export function reducer(s: Book, a: BookAction): Book {
       return { ...s, payoffs: [payoff, ...s.payoffs], audit: log(`${deal.loanNumber}: payoff statement requested, good through ${a.goodThrough}`) };
     }
     case "sendPayoff": return { ...s, payoffs: s.payoffs.map((p) => (p.id === a.payoffId ? { ...p, status: "sent" } : p)), audit: log("Payoff statement sent") };
-    case "markPaidOff": {
-      const payoff = s.payoffs.find((p) => p.id === a.payoffId)!; const deal = s.deals.find((d) => d.id === payoff.dealId)!;
-      // The money is back, so the loan stops counting against capital.
-      return { ...s, payoffs: s.payoffs.map((p) => (p.id === a.payoffId ? { ...p, status: "paid" } : p)), deals: upd(deal.id, (d) => ({ ...d, status: "paid_off", allocations: [], nextPaymentDue: undefined, paymentsLate: 0 })), sales: s.sales.map((x) => (x.dealId === deal.id && x.status === "listed" ? { ...x, status: "withdrawn" } : x)), audit: log(`${deal.loanNumber}: paid off`) };
+    case "recordPayoff": {
+      const today = serviceDay(s);
+      const deal = settle(s.deals.find((d) => d.id === a.dealId)!, a.receivedOn > today ? a.receivedOn : today);
+      if (payoffError(deal, a.amount, a.receivedOn, today)) return s;
+      const paidOff = { amount: Math.round(a.amount * 100) / 100, receivedOn: a.receivedOn, method: a.method, reference: a.reference, by: a.by, at: now(), owed: payoffOn(deal, a.receivedOn).quote.total };
+      const closing = new Set(s.sales.filter((x) => x.dealId === deal.id && x.status === "listed").map((x) => x.id));
+      // The money is back, so the loan stops counting against capital, and nothing else can be drawn, sold or extended on it.
+      return { ...s,
+        deals: upd(deal.id, () => ({ ...deal, status: "paid_off", daysInStage: 0, paidOff, allocations: [], nextPaymentDue: undefined, paymentsLate: 0, extensions: deal.extensions?.map((x) => (x.status === "requested" || x.status === "approved" ? { ...x, status: "declined" as const, declined: { by: a.by, at: now(), reason: "The loan was paid off" } } : x)) })),
+        payoffs: s.payoffs.map((p) => (p.dealId === deal.id && p.status !== "paid" ? { ...p, status: "paid" } : p)),
+        draws: s.draws.map((d) => (d.dealId === deal.id && d.status !== "funded" && d.status !== "rejected" ? { ...d, status: "rejected", reason: "The loan was paid off" } : d)),
+        sales: s.sales.map((x) => (closing.has(x.id) ? { ...x, status: "withdrawn" } : x)),
+        offers: s.offers.map((o) => (closing.has(o.saleId) && o.status === "submitted" ? { ...o, status: "declined" } : o)),
+        audit: log(`${deal.loanNumber}: paid off with ${money(paidOff.amount)} received ${a.receivedOn}`) };
+    }
+    case "recordLienRelease": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (!deal.paidOff) return s;
+      const before = deal.paidOff.release;
+      const release = a.step === "sent" ? { ...before, sentOn: a.on, reference: a.reference || before?.reference || "", by: a.by } : { ...before, sentOn: before?.sentOn ?? a.on, recordedOn: a.on, reference: a.reference, by: a.by };
+      return { ...s, deals: upd(deal.id, (d) => ({ ...d, paidOff: { ...d.paidOff!, release } })), audit: log(`${deal.loanNumber}: satisfaction of mortgage ${a.step === "sent" ? "sent for recording" : "recorded"} ${a.on}`) };
+    }
+    case "closeApplication": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (!PRE_FUNDING.includes(deal.status)) return s;
+      const closure: Closure = { outcome: a.outcome, reason: a.reason, note: a.note, by: a.by, at: now(), from: deal.status };
+      // Whatever capital was held for it goes back, open bids are turned down and its photo links stop working.
+      return { ...s,
+        deals: upd(deal.id, (d) => ({ ...d, status: a.outcome, daysInStage: 0, closure, allocations: [], capitalStatus: "not_started", fundingApprovers: undefined })),
+        bids: s.bids.map((b) => (b.dealId === deal.id && b.status === "submitted" ? { ...b, status: "declined" } : b)),
+        photoRequests: s.photoRequests.map((r) => (r.dealId === deal.id && r.status === "open" ? { ...r, status: "off" } : r)),
+        audit: log(`${deal.loanNumber}: ${a.outcome} (${closureReason(closure)})`) };
+    }
+    case "reopenApplication": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (!deal.closure) return s;
+      const to = reopenTo(deal.closure);
+      return { ...s, deals: upd(deal.id, (d) => ({ ...d, status: to, daysInStage: 0, closure: undefined })), audit: log(`${deal.loanNumber}: reopened by ${a.by} at ${to.replace(/_/g, " ")}`) };
+    }
+    case "declareDefault": {
+      const today = serviceDay(s);
+      const deal = settle(s.deals.find((d) => d.id === a.dealId)!, today);
+      if (defaultError(deal, a.kind, a.effectiveOn, today)) return s;
+      const opened = { kind: a.kind, effectiveOn: a.effectiveOn, note: a.note, by: a.by, at: now() };
+      return { ...s, deals: upd(deal.id, () => ({ ...deal, status: "default", daysInStage: 0, defaults: [...(deal.defaults ?? []), opened] })), audit: log(`${deal.loanNumber}: default declared by ${a.by}, effective ${a.effectiveOn} (${DEFAULT_KINDS[a.kind]})`) };
+    }
+    case "cureDefault": {
+      const today = serviceDay(s);
+      const deal = settle(s.deals.find((d) => d.id === a.dealId)!, today);
+      if (cureError(deal, today)) return s;
+      const cured = { by: a.by, at: now(), note: a.note };
+      // Back to whatever the payments say it is.
+      return { ...s, deals: upd(deal.id, () => settle({ ...deal, status: "servicing_current", defaults: deal.defaults?.map((x) => (x.cured ? x : { ...x, cured })) }, today)), audit: log(`${deal.loanNumber}: default cured by ${a.by}`) };
+    }
+    case "requestExtension": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (extensionRequestError(deal, a.months, serviceDay(s), a.byTeam)) return s;
+      const extension: LoanExtension = { id: `ext${uid()}`, months: a.months, reason: a.reason, requestedBy: a.by, requestedAt: now(), fee: extensionFee(deal, a.months), fromMaturity: maturityOf(deal), status: "requested", approvers: [] };
+      return { ...s, deals: upd(deal.id, (d) => ({ ...d, extensions: [...(d.extensions ?? []), extension] })), audit: log(`${deal.loanNumber}: ${a.months}-month extension requested by ${a.by}`) };
+    }
+    case "approveExtension": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const extension = deal.extensions?.find((x) => x.id === a.extensionId);
+      if (extension?.status !== "requested" || extension.approvers.includes(a.by)) return s;
+      const approvers = [...extension.approvers, a.by];
+      const done = approvers.length >= 2;
+      return { ...s, deals: upd(deal.id, (d) => ({ ...d, extensions: d.extensions?.map((x) => (x.id === a.extensionId ? { ...x, approvers, status: done ? "approved" : x.status } : x)) })), audit: log(`${deal.loanNumber}: extension approved by ${a.by}${done ? "" : "; second approver needed"}`) };
+    }
+    case "declineExtension": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const extension = deal.extensions?.find((x) => x.id === a.extensionId);
+      if (extension?.status !== "requested" && extension?.status !== "approved") return s;
+      return { ...s, deals: upd(deal.id, (d) => ({ ...d, extensions: d.extensions?.map((x) => (x.id === a.extensionId ? { ...x, status: "declined", declined: { by: a.by, at: now(), reason: a.reason } } : x)) })), audit: log(`${deal.loanNumber}: extension declined by ${a.by}: ${a.reason}`) };
+    }
+    case "executeExtension": {
+      const today = serviceDay(s);
+      const deal = settle(s.deals.find((d) => d.id === a.dealId)!, today);
+      const extension = deal.extensions?.find((x) => x.id === a.extensionId);
+      if (!extension || executeError(deal, extension, a.on, today)) return s;
+      const executed = { by: a.by, at: now(), on: a.on, method: a.method, reference: a.reference };
+      // A signed extension ends a default on the loan: the borrower is current and the maturity has moved.
+      const cured = { by: a.by, at: now(), note: "Cured by the extension" };
+      const next: Deal = { ...deal, status: "servicing_current", maturityNotices: undefined, extensions: deal.extensions?.map((x) => (x.id === a.extensionId ? { ...x, status: "executed", executed } : x)), defaults: deal.defaults?.map((x) => (x.cured ? x : { ...x, cured })) };
+      return { ...s, deals: upd(deal.id, () => settle(next, today)), audit: log(`${deal.loanNumber}: extended ${extension.months} months to ${maturityOf(next)}; fee of ${money(extension.fee)} received`) };
     }
     case "sendMessage": {
       const text = a.text.trim();

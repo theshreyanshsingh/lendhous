@@ -1,8 +1,8 @@
 // What a loan buyer sees and the arithmetic they rely on. Prices are a percent of the unpaid balance: 100 is par,
 // 98 is a 2% discount. Like a partner teaser, the tape names no street, borrower or entity until the sale closes.
-import { evaluate, fundedBalances, maturityDate } from "./engine";
+import { evaluate, fundedBalances } from "./engine";
 import type { Deal, LoanSale } from "./mockData";
-import { balanceOf, paymentsMade } from "./servicing";
+import { balanceOf, extendedMonths, maturityOf, paymentsMade } from "./servicing";
 
 /** Kept by LendHous as servicer, the same placeholder 1% strip as partner teasers (Spec 6.6). */
 export const SERVICING_STRIP_PCT = 1;
@@ -48,7 +48,7 @@ export function tapeOf(deal: Deal, sale: LoanSale) {
   const funded = fundedBalances(e, deal.app, deal.disbursedDraws);
   const made = paymentsMade(deal);
   const balance = balanceOf(deal);
-  const monthsLeft = Math.max(1, e.termMonths - made);
+  const monthsLeft = Math.max(1, e.termMonths + extendedMonths(deal) - made);
   const note: Note = { balance, ratePct: e.rate, months: monthsLeft, monthlyPayment: amortizing ? e.monthlyPayment : undefined };
   const band = Math.floor(deal.app.fico / 20) * 20;
   const paymentsLate = deal.paymentsLate ?? 0;
@@ -65,9 +65,9 @@ export function tapeOf(deal: Deal, sale: LoanSale) {
     holdbackLeft: funded.holdbackRemaining,
     noteRate: e.rate,
     netRate: round2(e.rate - SERVICING_STRIP_PCT),
-    termMonths: e.termMonths,
+    termMonths: e.termMonths + extendedMonths(deal),
     monthsLeft,
-    maturity: maturityDate(deal.closingDate, e.termMonths),
+    maturity: maturityOf(deal),
     paymentsMade: made,
     paymentsLate,
     current: paymentsLate === 0,

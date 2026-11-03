@@ -5,10 +5,12 @@ import { useMemo, useState } from "react";
 import { useStore, est, inHouseAvailable, capitalSummary } from "@/lib/store";
 import { evaluate, recommendRoute, matchPartner, fullBoatReserve, dutchReserve, evenDraws, type Application } from "@/lib/engine";
 import { pricingConfig } from "@/lib/pricing-config";
+import { PRE_FUNDING } from "@/lib/loan-exits";
 import { canAdvance, nextStage } from "@/lib/loan-stages";
 import { SERVICED } from "@/lib/servicing";
 import { teaserOf } from "@/lib/teaser";
 import { inviteBorrower } from "@/actions/book";
+import { CloseApplication } from "@/components/loan/CloseApplication";
 import { CreditReview } from "@/components/loan/CreditReview";
 import { DocUpload } from "@/components/loan/DocUpload";
 import { LoanLedger } from "@/components/loan/LoanLedger";
@@ -35,7 +37,7 @@ export default function DealWorkspace() {
   if (!d || !uwApp) return <div className="glass p-6">Deal not found. <Link href="/admin" className="underline">Back</Link></div>;
   const e = evaluate(uwApp); const orig = est(d.app);
   // The servicing tab only means something once there's money out.
-  const tabs = allTabs.filter((t) => t !== "Servicing" || SERVICED.includes(d.status));
+  const tabs = allTabs.filter((t) => t !== "Servicing" || SERVICED.includes(d.status) || d.status === "paid_off");
   const avail = inHouseAvailable(s.deals, s.sources, d.id);
   const rec = recommendRoute({ product: d.app.product, noteAmount: e.noteAmount, grade: e.score.grade, location: e.location, inHouseAvailable: avail });
   const cap = capitalSummary(s.deals, s.sources);
@@ -86,8 +88,10 @@ export default function DealWorkspace() {
             </div>
             {funding && d.fundingApprovers?.length ? <p className="mt-1 text-xs text-muted-foreground" data-testid="funding-approvers">Approved by {d.fundingApprovers.join(" and ")}.</p> : null}
             {stage.blockers.length > 0 && <ul className="mt-2 space-y-0.5 text-xs text-warn" data-testid="stage-blockers">{stage.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>}
+            {PRE_FUNDING.includes(d.status) && <div className="mt-3 border-t border-border pt-3"><CloseApplication deal={d} side="team" /></div>}
           </div>
         )}
+        {d.closure && <CloseApplication deal={d} side="team" />}
         <div className="mt-4 grid grid-cols-2 border-b border-border sm:grid-cols-3 xl:flex xl:gap-1">
           {tabs.map((t) => <button key={t} data-testid={`tab-${t}`} onClick={() => setTab(t)} className={`border-b-2 px-3 py-2 text-left text-sm font-semibold sm:whitespace-nowrap ${tab === t ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>{t}</button>)}
         </div>
@@ -204,7 +208,7 @@ export default function DealWorkspace() {
       )}
 
       {tab === "Credit review" && <CreditReview deal={d} />}
-      {tab === "Servicing" && SERVICED.includes(d.status) && <LoanLedger deal={d} />}
+      {tab === "Servicing" && (SERVICED.includes(d.status) || d.status === "paid_off") && <LoanLedger deal={d} />}
 
       {tab === "Messages" && (
         <div className="grid gap-4 lg:grid-cols-2">

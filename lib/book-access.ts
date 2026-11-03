@@ -5,6 +5,7 @@ import type { RoleCode } from "@prisma/client";
 import { emptyBook, type Book, type BookAction } from "./book";
 import { sponsorProblem, withSponsor } from "./credit";
 import { scopeError } from "./draws";
+import { cureError, defaultError, DECLINE_REASONS, executeError, extensionRequestError, isClosedApplication, payoffError, PRE_FUNDING, WITHDRAW_REASONS } from "./loan-exits";
 import { MAX_PHOTOS_PER_LINK, photoRequestState, photosClosed } from "./photo-requests";
 import { evaluate } from "./engine";
 import type { Deal, Doc, LoanPayment, LoanSale } from "./mockData";
@@ -27,14 +28,25 @@ const quietPayments = (deal: Deal, keepReference: boolean): Partial<Deal> => ({
   waivedFees: deal.waivedFees?.map((item) => ({ ...item, by: "", reason: "" })),
 });
 
+/**
+ * Declines, defaults, extensions and the payoff without who on the team decided or their notes. Why a loan was turned
+ * down goes to the borrower in the notice the attorney approves, not through the portal.
+ */
+const quietExits = (deal: Deal): Partial<Deal> => ({
+  closure: deal.closure && { ...deal.closure, by: "", note: "", reason: deal.closure.outcome === "declined" ? "" : deal.closure.reason },
+  defaults: deal.defaults?.map((item) => ({ ...item, by: "", note: "", cured: item.cured && { ...item.cured, by: "", note: "" } })),
+  extensions: deal.extensions?.map((item) => ({ ...item, approvers: item.approvers.map(() => ""), declined: item.declined && { ...item.declined, by: "" }, executed: item.executed && { ...item.executed, by: "" } })),
+  paidOff: deal.paidOff && { ...deal.paidOff, by: "", release: deal.paidOff.release && { ...deal.paidOff.release, by: "" } },
+});
+
 /** Removes what identifies the borrower, for a partner or buyer who hasn't closed on the loan. */
 function blind(deal: Deal): Deal {
-  return { ...deal, borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined, ...quietPayments(deal, false) };
+  return { ...deal, borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined, closure: undefined, defaults: undefined, extensions: undefined, paidOff: undefined, ...quietPayments(deal, false) };
 }
 
 /** What only the team sees on a loan it shares with a client. */
 function forClient(deal: Deal): Deal {
-  return { ...deal, allocations: [], teaserSentTo: [], route: undefined, capitalStatus: "not_started", contractorIsGtAffiliate: undefined, source: "", fundingApprovers: undefined, creditReview: undefined, ...quietPayments(deal, true) };
+  return { ...deal, allocations: [], teaserSentTo: [], route: undefined, capitalStatus: "not_started", contractorIsGtAffiliate: undefined, source: "", fundingApprovers: undefined, creditReview: undefined, ...quietPayments(deal, true), ...quietExits(deal) };
 }
 
 /** The part of the book this account may see. Nothing else leaves the server. */
@@ -360,9 +372,74 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       if (!(view === "borrower" && deal.borrowerId === viewer.id) && !(staff && allowed("service_loans"))) return no(NOT_ALLOWED);
       return ok({ ...action, by: viewer.name });
     }
-    case "sendPayoff": case "markPaidOff":
+    case "sendPayoff":
       if (!book.payoffs.some((payoff) => payoff.id === action.payoffId)) return no(GONE);
       return staffOnly("service_loans");
+    case "recordPayoff": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      if (!staff || !allowed("service_loans")) return no(NOT_ALLOWED);
+      const refused = payoffError(deal, action.amount, action.receivedOn, servicingDate(new Date()));
+      return refused ? no(refused) : ok({ ...action, reference: action.reference.trim(), by: viewer.name });
+    }
+    case "recordLienRelease": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      if (!staff || !allowed("service_loans")) return no(NOT_ALLOWED);
+      if (deal.status !== "paid_off" || !deal.paidOff) return no("Only a loan paid off here has a release to track.");
+      if (deal.paidOff.release?.recordedOn) return no("The release is already recorded.");
+      if (action.on > servicingDate(new Date())) return no("The date can't be in the future.");
+      if (action.on < deal.paidOff.receivedOn) return no("That's before the payoff arrived.");
+      const reference = action.reference.trim();
+      if (action.step === "recorded" && !reference) return no("Add where it was recorded: the book and page, or the instrument number.");
+      return ok({ ...action, reference, by: viewer.name });
+    }
+
+    case "closeApplication": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      if (!PRE_FUNDING.includes(deal.status)) return no(isClosedApplication(deal.status) ? "This application is already closed." : "A funded loan ends with a payoff, not a withdrawal.");
+      if (!(action.reason in (action.outcome === "declined" ? DECLINE_REASONS : WITHDRAW_REASONS))) return no("Choose a reason.");
+      // Turning a loan down is a credit decision. Withdrawing is the borrower's call, or the team's on their word.
+      const team = staff && (allowed("issue_term_sheet") || (action.outcome === "withdrawn" && allowed("manage_conditions")));
+      if (!team && !(action.outcome === "withdrawn" && view === "borrower" && deal.borrowerId === viewer.id)) return no(NOT_ALLOWED);
+      return ok({ ...action, by: viewer.name, byTeam: staff });
+    }
+    case "reopenApplication": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      if (!staff || !allowed("issue_term_sheet")) return no(NOT_ALLOWED);
+      return deal.closure ? ok({ ...action, by: viewer.name }) : no("This application isn't closed.");
+    }
+    case "declareDefault": case "cureDefault": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      if (!staff || !allowed("declare_default")) return no(NOT_ALLOWED);
+      const today = servicingDate(new Date());
+      const refused = action.t === "declareDefault" ? defaultError(deal, action.kind, action.effectiveOn, today) : cureError(deal, today);
+      return refused ? no(refused) : ok({ ...action, by: viewer.name });
+    }
+    case "requestExtension": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      if (!(view === "borrower" && deal.borrowerId === viewer.id) && !(staff && allowed("service_loans"))) return no(NOT_ALLOWED);
+      const refused = extensionRequestError(deal, action.months, servicingDate(new Date()), staff);
+      return refused ? no(refused) : ok({ ...action, by: viewer.name, byTeam: staff });
+    }
+    case "approveExtension": case "declineExtension": case "executeExtension": {
+      const deal = dealOf(action.dealId);
+      const extension = deal?.extensions?.find((item) => item.id === action.extensionId);
+      if (!deal || !extension) return no(GONE);
+      if (action.t === "executeExtension") {
+        if (!staff || !allowed("service_loans")) return no(NOT_ALLOWED);
+        const refused = executeError(deal, extension, action.on, servicingDate(new Date()));
+        return refused ? no(refused) : ok({ ...action, reference: action.reference.trim(), by: viewer.name });
+      }
+      if (!staff || !allowed("approve_extension")) return no(NOT_ALLOWED);
+      if (action.t === "declineExtension") return extension.status === "requested" || extension.status === "approved" ? ok({ ...action, by: viewer.name }) : no("That extension is already decided.");
+      if (extension.status !== "requested") return no("That extension is already decided.");
+      return extension.approvers.includes(viewer.name) ? no("A second, different approver is required.") : ok({ ...action, by: viewer.name });
+    }
 
     case "sendMessage": {
       const deal = dealOf(action.dealId);

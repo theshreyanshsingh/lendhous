@@ -3,18 +3,20 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { PageIntro } from "@/components/page-intro";
 import { RecordPayment } from "@/components/loan/RecordPayment";
+import { RecordPayoff } from "@/components/loan/RecordPayoff";
 import { Badge, Section, Stat, k, productLabel, statusLabel, usd } from "@/components/ui";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { isDemoBook } from "@/lib/book";
 import { downloadCsv } from "@/lib/csv";
 import { fundedBalances } from "@/lib/engine";
 import type { Deal } from "@/lib/mockData";
+import { lienReleaseDaysLeft, lienReleaseDue, lienReleaseOpen, maturityAfter, openExtension } from "@/lib/loan-exits";
 import { addDays, balanceOf, ledger, SERVICED, servicingDate } from "@/lib/servicing";
 import { est, useStore } from "@/lib/store";
 
 export default function Servicing() {
   const { s, dispatch } = useStore();
-  const [paying, setPaying] = useState<string | null>(null);
+  const [paying, setPaying] = useState<{ id: string; payoff: boolean } | null>(null);
   // Set after the first render: the server and the browser can disagree about today's date.
   const [today, setToday] = useState("");
   useEffect(() => { setToday(servicingDate(new Date())); }, []);
@@ -30,7 +32,9 @@ export default function Servicing() {
   // The nightly job stamps each loan it checks. If the newest stamp is old, the job has stopped and nothing is going late.
   const checked = isDemoBook(s) ? undefined : loans.map((deal) => deal.servicedThrough).filter(Boolean).sort().pop();
   const stale = Boolean(checked && today && checked < addDays(today, -1));
-  const open = loans.find((deal) => deal.id === paying);
+  const open = loans.find((deal) => deal.id === paying?.id);
+  const extensions = loans.filter((deal) => openExtension(deal));
+  const releases = s.deals.filter(lienReleaseOpen).sort((a, b) => lienReleaseDue(a)!.localeCompare(lienReleaseDue(b)!));
   return (
     <div className="space-y-4">
       <PageIntro eyebrow="Servicing" title="Loan servicing" lede="Every funded loan: what's due, what's late, what's maturing and who's paying off." />
@@ -54,13 +58,43 @@ export default function Servicing() {
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge tone={payoff.status === "sent" ? "blue" : "amber"}>{statusLabel(payoff.status)}</Badge>
                   {payoff.status === "requested" && <button className="btn-primary h-9! px-3! text-xs!" data-testid="send-payoff" onClick={() => dispatch({ t: "sendPayoff", payoffId: payoff.id })}>Mark statement sent</button>}
-                  {payoff.status === "sent" && <button className="btn-primary h-9! px-3! text-xs!" data-testid="mark-paid-off" onClick={() => dispatch({ t: "markPaidOff", payoffId: payoff.id })}>Mark paid off</button>}
+                  {SERVICED.includes(deal.status) && <button className={`${payoff.status === "sent" ? "btn-primary" : "btn-ghost"} h-9! px-3! text-xs!`} data-testid="record-payoff" onClick={() => setPaying({ id: deal.id, payoff: true })}>Record payoff</button>}
                 </div>
               </li>
             );
           })}
         </ul>
       </Section>
+      {extensions.length > 0 && (
+        <Section title={`Extension requests (${extensions.length})`}>
+          <ul className="divide-y divide-border">
+            {extensions.map((deal) => {
+              const extension = openExtension(deal)!;
+              return (
+                <li key={deal.id} className="flex flex-wrap items-center justify-between gap-2 py-3" data-testid="extension-row">
+                  <div className="min-w-0"><Link href={`/admin/deals/${deal.id}`} className="font-medium text-link hover:underline">{deal.loanNumber}</Link> <span className="text-sm">· {deal.borrowerName}</span><div className="text-xs text-muted-foreground">{extension.months} more month{extension.months === 1 ? "" : "s"}, {extension.fromMaturity} to {maturityAfter(deal, extension)} · fee {usd(extension.fee, 2)}</div></div>
+                  <Badge tone={extension.status === "approved" ? "blue" : "amber"}>{extension.status === "approved" ? "Approved: waiting for signatures" : `${extension.approvers.length} of 2 approvals`}</Badge>
+                </li>
+              );
+            })}
+          </ul>
+        </Section>
+      )}
+      {releases.length > 0 && (
+        <Section title={`Mortgage releases to record (${releases.length})`}>
+          <ul className="divide-y divide-border">
+            {releases.map((deal) => {
+              const left = today ? lienReleaseDaysLeft(deal, today) : 0;
+              return (
+                <li key={deal.id} className="flex flex-wrap items-center justify-between gap-2 py-3" data-testid="release-row">
+                  <div className="min-w-0"><Link href={`/admin/deals/${deal.id}`} className="font-medium text-link hover:underline">{deal.loanNumber}</Link> <span className="text-sm">· {deal.borrowerName}</span><div className="text-xs text-muted-foreground">Paid off {deal.paidOff!.receivedOn}{deal.paidOff!.release?.sentOn ? ` · sent for recording ${deal.paidOff!.release.sentOn}` : ""}</div></div>
+                  <span className={`text-xs ${left < 0 ? "text-bad" : left <= 14 ? "text-warn" : "text-muted-foreground"}`}>Due out by {lienReleaseDue(deal)}{today ? ` (${left < 0 ? `${-left} days late` : `${left} days left`})` : ""}</span>
+                </li>
+              );
+            })}
+          </ul>
+        </Section>
+      )}
       <div className="flex justify-end"><button type="button" className="btn-ghost w-full sm:w-auto" data-testid="export-servicing" disabled={loans.length === 0} onClick={() => downloadCsv("lendhous-servicing.csv", loans.map((deal) => { const e = est(deal.app); const l = of(deal); return { Loan: deal.loanNumber, Borrower: deal.borrowerName, Product: productLabel[deal.app.product], Status: statusLabel(deal.status), Balance: balanceOf(deal), Rate: e.rate, Payment: fundedBalances(e, deal.app, deal.disbursedDraws).nextPayment, "Next due": l.nextDue ?? "", "Past due": deal.paymentsLate ?? 0, "Days past due": l.daysPastDue, "Due now": l.amountDue, "Late fees owed": l.feesOwed, "Credit held": l.credit, Maturity: l.maturity, "Checked through": deal.servicedThrough ?? "" }; }))}>Export CSV</button></div>
       <div className="glass overflow-hidden px-4 lg:px-0">
         <table className="stack-table w-full" data-testid="servicing-table">
@@ -78,8 +112,8 @@ export default function Servicing() {
                   <td data-label="Due now" className={`text-right ${l.amountDue ? "text-bad" : ""}`} data-testid="serviced-due">{usd(l.amountDue, 2)}</td>
                   <td data-label="Next due" className="whitespace-nowrap" data-testid="serviced-next-due">{l.nextDue ?? "—"}</td>
                   <td data-label="Matures" className={`whitespace-nowrap ${l.matured ? "text-bad" : l.daysToMaturity <= 60 ? "text-warn" : ""}`}>{l.maturity}</td>
-                  <td data-label="Status">{l.matured ? <Badge tone="rose">Matured</Badge> : deal.paymentsLate ? <Badge tone="rose">{deal.paymentsLate} past due</Badge> : <Badge tone="green">Current</Badge>}{l.daysPastDue >= 30 && <div className="mt-1 text-xs text-bad">{l.daysPastDue} days</div>}</td>
-                  <td className="text-right"><button className="btn-ghost h-9! w-full px-3! text-xs! lg:w-auto" data-testid="record-payment" onClick={() => setPaying(deal.id)}>Record payment</button></td>
+                  <td data-label="Status">{deal.status === "default" ? <Badge tone="rose">Default</Badge> : l.matured ? <Badge tone="rose">Matured</Badge> : deal.paymentsLate ? <Badge tone="rose">{deal.paymentsLate} past due</Badge> : <Badge tone="green">Current</Badge>}{l.daysPastDue >= 30 && <div className="mt-1 text-xs text-bad">{l.daysPastDue} days</div>}</td>
+                  <td className="text-right"><button className="btn-ghost h-9! w-full px-3! text-xs! lg:w-auto" data-testid="record-payment" onClick={() => setPaying({ id: deal.id, payoff: false })}>Record payment</button></td>
                 </tr>
               );
             })}
@@ -90,12 +124,12 @@ export default function Servicing() {
         <Sheet open onOpenChange={(next) => { if (!next) setPaying(null); }}>
           <SheetContent side="right" className="w-full! gap-0! overflow-y-auto p-0 sm:max-w-lg!">
             <header className="border-b border-border p-5 pr-12">
-              <p className="eyebrow">Record a payment</p>
+              <p className="eyebrow">{paying?.payoff ? "Record the payoff" : "Record a payment"}</p>
               <SheetTitle className="mt-2 font-heading text-2xl font-normal text-foreground wrap-anywhere">{open.loanNumber}</SheetTitle>
               <div className="mt-2 text-sm text-muted-foreground">{open.borrowerName} · {of(open).amountDue ? `${usd(of(open).amountDue, 2)} due now` : "current"}</div>
             </header>
             <div className="p-5">
-              <RecordPayment deal={open} onDone={() => setPaying(null)} />
+              {paying?.payoff ? <RecordPayoff deal={open} onDone={() => setPaying(null)} /> : <RecordPayment deal={open} onDone={() => setPaying(null)} />}
               <Link href={`/admin/deals/${open.id}`} className="mt-4 inline-block text-sm text-link hover:underline">Open the loan&apos;s full payment history</Link>
             </div>
           </SheetContent>

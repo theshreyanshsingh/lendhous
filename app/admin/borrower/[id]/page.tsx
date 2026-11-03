@@ -2,10 +2,14 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useRef, useState } from "react";
-import { ledger } from "@/lib/servicing";
+import { isClosedApplication, PRE_FUNDING } from "@/lib/loan-exits";
+import { ledger, SERVICED } from "@/lib/servicing";
 import { useStore, est } from "@/lib/store";
-import { fundedBalances, maturityDate } from "@/lib/engine";
+import { fundedBalances } from "@/lib/engine";
+import { CloseApplication } from "@/components/loan/CloseApplication";
 import { DrawPanel } from "@/components/loan/DrawPanel";
+import { Extensions } from "@/components/loan/Extensions";
+import { PaidOff } from "@/components/loan/PaidOff";
 import { LoanMessages } from "@/components/loan/LoanMessages";
 import { PaymentsPanel } from "@/components/loan/PaymentsPanel";
 import { ScopeOfWork } from "@/components/loan/ScopeOfWork";
@@ -21,7 +25,7 @@ export default function BorrowerLoan() {
   const d = s.deals.find((x) => x.id === id);
   const fileRef = useRef<HTMLInputElement>(null); const [target, setTarget] = useState<string | null>(null); const [drag, setDrag] = useState<string | null>(null);
   if (!d) return <div className="glass p-6">Loan not found. <Link className="underline" href="/admin/borrower">Back</Link></div>;
-  const e = est(d.app); const funded = ["servicing_current", "servicing_delinquent", "funded", "matured"].includes(d.status);
+  const e = est(d.app); const funded = SERVICED.includes(d.status); const closed = isClosedApplication(d.status);
   const b = fundedBalances(e, d.app, d.disbursedDraws);
   const keyRatios = e.ratios.filter((r) => ["ltc", "ltarv", "ltv", "dscr"].includes(r.key)); // flip: LTC/LTARV · bridge: LTV · DSCR: LTV/DSCR
   const upload = (docId: string, file: File) => uploadDoc(d.id, docId, file);
@@ -30,9 +34,10 @@ export default function BorrowerLoan() {
     <div className="space-y-4">
       <Link href="/admin/borrower" className="text-sm text-link">← My loans</Link>
       <div className="glass p-5">
-        <div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0"><div className="text-xs text-muted-foreground">{d.loanNumber} · {productLabel[d.app.product]} · {d.entityName}</div><h1 className="text-xl font-normal tracking-tight">{d.address}, {d.city} {d.zip}</h1></div><Badge tone={funded ? "green" : "blue"}>{statusLabel(d.status)}</Badge></div>
-        <div className="mt-4"><Tracker status={d.status} /></div>
-        <div className="mt-3 text-sm text-muted-foreground">Next step: {d.status === "term_sheet_issued" ? "Review and accept your term sheet below." : funded ? "Make your monthly payment or request a draw." : d.docs.some((x) => x.status === "requested" || x.status === "rejected") ? "Upload the documents marked Requested below." : "Your team is reviewing. We'll notify you of the next step."}</div>
+        <div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0"><div className="text-xs text-muted-foreground">{d.loanNumber} · {productLabel[d.app.product]} · {d.entityName}</div><h1 className="text-xl font-normal tracking-tight">{d.address}, {d.city} {d.zip}</h1></div><Badge tone={d.status === "default" ? "rose" : funded || d.status === "paid_off" ? "green" : closed ? "slate" : "blue"}>{statusLabel(d.status)}</Badge></div>
+        {closed ? <CloseApplication deal={d} side="borrower" /> : <div className="mt-4"><Tracker status={d.status} /></div>}
+        {!closed && <div className="mt-3 text-sm text-muted-foreground">Next step: {d.status === "paid_off" ? "Nothing. Your loan is paid in full." : d.status === "term_sheet_issued" ? "Review and accept your term sheet below." : funded ? "Make your monthly payment or request a draw." : d.docs.some((x) => x.status === "requested" || x.status === "rejected") ? "Upload the documents marked Requested below." : "Your team is reviewing. We'll notify you of the next step."}</div>}
+        {PRE_FUNDING.includes(d.status) && <div className="mt-3"><CloseApplication deal={d} side="borrower" /></div>}
       </div>
       {!d.sponsor && ["submitted", "initial_review", "underwriting"].includes(d.status) && (
         <div className="glass flex flex-wrap items-center justify-between gap-3 border-warn/40 p-4" data-testid="finish-profile">
@@ -72,12 +77,14 @@ export default function BorrowerLoan() {
             <div className="grid grid-cols-2 gap-3">
               <Stat label="Note amount" value={usd(e.noteAmount)} />
               <Stat label="Rate" value={`${e.rate.toFixed(2)}%`} sub={d.app.product === "dscr" ? "30-yr amortizing" : d.app.accrual === "dutch" ? "on disbursed funds" : "full-boat"} />
-              {funded ? <><Stat label="Disbursed" value={usd(b.disbursed)} /><Stat label="Holdback left" value={usd(b.holdbackRemaining)} /><Stat label="Next payment" value={usd(b.nextPayment)} sub={`due ${ledger(d).nextDue ?? "—"}`} /><Stat label="Maturity" value={maturityDate(d.closingDate, e.termMonths)} sub={`${e.termMonths}-month term`} /></>
+              {funded ? <><Stat label="Disbursed" value={usd(b.disbursed)} /><Stat label="Holdback left" value={usd(b.holdbackRemaining)} /><Stat label="Next payment" value={usd(b.nextPayment)} sub={`due ${ledger(d).nextDue ?? "—"}`} /><Stat label="Maturity" value={ledger(d).maturity} sub={`${e.termMonths}-month term${d.extensions?.some((x) => x.status === "executed") ? ", extended" : ""}`} /></>
                 : <><Stat label="Cash to close" value={usd(e.cashToClose)} /><Stat label="Target closing" value={d.closingDate} /><Stat label={keyRatios.map((r) => r.label).join(" / ")} value={keyRatios.map((r) => (r.key === "dscr" ? r.actual.toFixed(2) + "x" : pct(r.actual))).join(" / ")} /><Stat label="Points" value={usd(e.points)} /></>}
             </div>
           </Section>
           {funded && e.holdback > 0 && <DrawPanel deal={d} />}
           {funded && <PaymentsPanel deal={d} />}
+          {funded && <Extensions deal={d} side="borrower" />}
+          {d.status === "paid_off" && <PaidOff deal={d} side="borrower" />}
           <Section title="Your team">{local && <div className="text-sm">Processor: Pat Processor (FAKE)<br />Underwriter: Uma Underwriter (FAKE)</div>}<div className="rounded-md bg-bad/10 p-2 text-xs text-bad">Wire-fraud warning: we will never email you wire instructions. Always confirm by phone with a number you already have.</div></Section>
         </div>
       </div>

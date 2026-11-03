@@ -1,5 +1,6 @@
 // What's waiting on the team right now, across every queue. It drives the pipeline's list and the menu's counts.
 import type { Book } from "./book";
+import { lienReleaseOpen, openExtension } from "./loan-exits";
 
 export type AttentionItem = { key: string; label: string; count: number; href: string };
 
@@ -11,7 +12,9 @@ export function attentionCounts(s: Book, newLeads: number) {
   const payoffs = s.payoffs.filter((payoff) => payoff.status === "requested").length;
   const late = s.deals.filter((deal) => deal.paymentsLate).length;
   const matured = s.deals.filter((deal) => deal.status === "matured").length;
-  return { leads: newLeads, draws, offers, payoffs, late, matured, servicing: payoffs + late + matured };
+  const extensions = s.deals.filter((deal) => openExtension(deal)).length;
+  const releases = s.deals.filter(lienReleaseOpen).length;
+  return { leads: newLeads, draws, offers, payoffs, late, matured, extensions, releases, servicing: payoffs + late + matured + extensions + releases };
 }
 
 export function attentionItems(s: Book, newLeads: number): AttentionItem[] {
@@ -31,6 +34,8 @@ export function attentionItems(s: Book, newLeads: number): AttentionItem[] {
     { key: "payoffs", label: "Payoff requests", count: counts.payoffs, href: "/admin/servicing" },
     { key: "late", label: "Loans past due", count: counts.late, href: "/admin/servicing" },
     { key: "matured", label: "Loans past maturity", count: counts.matured, href: "/admin/servicing" },
+    { key: "extensions", label: "Extension requests to decide", count: counts.extensions, href: "/admin/servicing" },
+    { key: "releases", label: "Mortgage releases to record", count: counts.releases, href: "/admin/servicing" },
     { key: "offers", label: "Offers on loans for sale", count: counts.offers, href: "/admin/loan-sales" },
   ];
   return items.filter((item) => item.count > 0);

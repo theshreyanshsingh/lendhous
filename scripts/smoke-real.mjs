@@ -477,7 +477,8 @@ try {
   await go(owner, "/admin/servicing");
   ok("the payoff reaches servicing", await seen(owner.getByTestId("payoff-row").filter({ hasText: "LH-1001" })));
   await owner.getByTestId("send-payoff").click();
-  await seen(owner.getByTestId("mark-paid-off"));
+  await seen(owner.getByTestId("payoff-row").filter({ hasText: "LH-1001" }).getByText("Sent"));
+  ok("the borrower is told when they can ask for more time", (await borrower.getByTestId("extension-not-yet").innerText()).includes("before maturity"));
 
   // A website brief becomes a loan
   await go(owner, "/admin/leads");
@@ -506,6 +507,18 @@ try {
   ok("a loan started from a call waits for the borrower's profile", (await owner.getByTestId("credit-flags").innerText()).includes("No borrower profile"));
   await go(owner, "/admin/leads");
   ok("the leads page opens the loan", (await owner.locator("tr", { hasText: "Lena Lead" }).getByTestId("lead-loan").getAttribute("href")) === leadDeal);
+  // Declining it: the client is told, the team's notes stay encrypted and out of the email, and it can be reopened.
+  await go(owner, leadDeal);
+  await owner.getByTestId("close-application").click();
+  await owner.getByTestId("close-reason").selectOption("incomplete");
+  await owner.getByTestId("close-note").fill("SMOKE-DECLINE-NOTE never sent the bank statements");
+  await owner.getByTestId("confirm-close").click();
+  ok("staff decline an application", await seen(owner.getByTestId("application-closed")));
+  const declinedMail = await prisma.notification.findMany({ where: { toEmail: `lena@${DOMAIN}`, eventCode: "loan.declined" } });
+  ok("the client is told it was declined, without the team's notes", declinedMail.length === 1 && !JSON.stringify(declinedMail).includes("SMOKE-DECLINE-NOTE"));
+  ok("the decline notes are encrypted in the database", !(await rawRows("BookRecord")).includes("SMOKE-DECLINE-NOTE"));
+  await owner.getByTestId("reopen-application").click();
+  ok("a declined application can be reopened", await seen(owner.getByTestId("stage-panel")));
 
   // A partner lender, blind until they win
   await go(partner, "/admin/partner");

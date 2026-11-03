@@ -5,12 +5,16 @@ import { notify, notifyTeam } from "@/lib/email";
 import { evaluate } from "@/lib/engine";
 import type { Deal } from "@/lib/mockData";
 import { pricingConfig } from "@/lib/pricing-config";
+import { DEFAULT_KINDS, maturityAfter, WITHDRAW_REASONS } from "@/lib/loan-exits";
 import { prisma } from "@/lib/prisma";
-import { defaultRate, ledger } from "@/lib/servicing";
+import { defaultInterestFrom, defaultRate, ledger, maturityOf } from "@/lib/servicing";
 
 const origin = () => (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "");
 
 type Alert = { to: "team" | "borrower" | "broker" | "partner" | "buyer"; dealId?: string; firmId?: string; subject: string; body: string; event: string };
+
+/** The partner lenders and loan buyers who hold part of a loan, from who it's allocated to. */
+const holdersOf = (deal?: Deal) => (deal?.allocations ?? []).flatMap((item): Pick<Alert, "to" | "firmId">[] => (item.sourceId.startsWith("partner:") ? [{ to: "partner", firmId: item.sourceId.slice(8) }] : item.sourceId.startsWith("buyer:") ? [{ to: "buyer", firmId: item.sourceId.slice(6) }] : []));
 
 const dollars = (amount: number) => `$${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const longDate = (day: string) => new Date(`${day}T12:00:00Z`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
@@ -96,6 +100,91 @@ export function alertsFor(before: Book, after: Book, action: BookAction): Alert[
     case "sendPayoff": {
       const payoff = after.payoffs.find((item) => item.id === action.payoffId);
       return payoff ? [{ to: "borrower", dealId: payoff.dealId, subject: `Your payoff statement: ${number(payoff.dealId)}`, body: `Your payoff is ready, good through ${payoff.goodThrough}. Sign in to see it. We will never email wire instructions.`, event: "payoff.sent" }] : [];
+    }
+    case "recordPayoff": {
+      const deal = loan(action.dealId);
+      if (!deal?.paidOff) return [];
+      const { amount, owed, receivedOn } = deal.paidOff;
+      const over = amount - owed >= 0.01 ? ` You paid ${dollars(amount - owed)} more than the payoff; your LendHous team will refund it.` : "";
+      return [
+        { to: "borrower", dealId: deal.id, subject: `Paid in full: ${deal.loanNumber}`, body: `We received your payoff of ${dollars(amount)} on ${longDate(receivedOn)}. Your loan is paid in full. We'll send the satisfaction of your mortgage to be recorded.${over}`, event: "loan.paid_off" },
+        { to: "team", subject: `Paid off: ${deal.loanNumber}`, body: `${deal.borrowerName} paid off the loan with ${dollars(amount)} received ${longDate(receivedOn)} (${dollars(owed)} owed). Get the satisfaction of mortgage out within ${pricingConfig.lienReleaseDays} days.`, event: "loan.paid_off" },
+        // The allocations are gone once it's paid off, so who held it comes from before.
+        ...holdersOf(before.deals.find((item) => item.id === deal.id)).map((holder) => ({ ...holder, subject: `A loan you hold was paid off: ${deal.loanNumber}`, body: `${deal.loanNumber} was paid off on ${longDate(receivedOn)}. Your share follows under your agreement.`, event: "loan.paid_off" })),
+      ];
+    }
+    case "recordLienRelease": {
+      const deal = loan(action.dealId);
+      if (!deal || action.step !== "recorded") return [];
+      return [{ to: "borrower", dealId: deal.id, subject: `Your mortgage release is recorded: ${deal.loanNumber}`, body: `The satisfaction of the mortgage on ${deal.address}, ${deal.city} was recorded on ${longDate(action.on)} (${action.reference}).`, event: "loan.lien_released" }];
+    }
+    case "closeApplication": {
+      const deal = loan(action.dealId);
+      if (!deal) return [];
+      const where = `${deal.address}, ${deal.city}`;
+      const clients = (subject: string, body: string, event: string): Alert[] => [{ to: "borrower", dealId: deal.id, subject, body, event }, { to: "broker", dealId: deal.id, subject, body: body.replace("your application", "your client's application"), event }];
+      // The reasons go out in the notice the attorney approves, so the email doesn't give them.
+      if (action.outcome === "declined") return clients(`About your application: ${deal.loanNumber}`, `After review, LendHous can't offer a loan on your application for ${where}. Your LendHous team will follow up.`, "loan.declined");
+      const reason = (WITHDRAW_REASONS[action.reason] ?? action.reason).toLowerCase();
+      if (action.byTeam) return clients(`Your application is closed: ${deal.loanNumber}`, `We've closed your application for ${where} as withdrawn (${reason}). If that's not right, contact your LendHous team.`, "loan.withdrawn");
+      const subject = `Application withdrawn: ${deal.loanNumber}`;
+      return [
+        { to: "team", subject, body: `${deal.borrowerName} withdrew the application for ${where}: ${reason}.${action.note ? ` They said: ${action.note}` : ""}`, event: "loan.withdrawn" },
+        { to: "broker", dealId: deal.id, subject, body: `${deal.borrowerName} withdrew the application for ${where}.`, event: "loan.withdrawn" },
+      ];
+    }
+    case "reopenApplication": {
+      const deal = loan(action.dealId);
+      return deal ? [{ to: "borrower", dealId: deal.id, subject: `Your application is open again: ${deal.loanNumber}`, body: `Your application for ${deal.address}, ${deal.city} is open again. Sign in to see its next step.`, event: "loan.reopened" }] : [];
+    }
+    case "declareDefault": {
+      const deal = loan(action.dealId);
+      if (!deal) return [];
+      const kind = DEFAULT_KINDS[action.kind].toLowerCase();
+      const rate = defaultRate(evaluate(deal.app).rate).toFixed(2);
+      return [
+        { to: "borrower", dealId: deal.id, subject: `Your loan is in default: ${deal.loanNumber}`, body: `LendHous has declared your loan in default, effective ${longDate(action.effectiveOn)} (${kind}). Interest now runs at the default rate of ${rate}% from ${longDate(defaultInterestFrom(deal))}. Your LendHous servicing team will contact you; call them to talk about bringing the loan current.`, event: "loan.default" },
+        { to: "team", subject: `Default declared: ${deal.loanNumber}`, body: `${deal.borrowerName}: ${action.by} declared the loan in default, effective ${longDate(action.effectiveOn)} (${kind}). Send the notice of default from the attorney's template.`, event: "loan.default" },
+        ...holdersOf(deal).map((holder) => ({ ...holder, subject: `A loan you hold is in default: ${deal.loanNumber}`, body: `LendHous declared ${deal.loanNumber} in default, effective ${longDate(action.effectiveOn)} (${kind}).`, event: "loan.default" })),
+      ];
+    }
+    case "cureDefault": {
+      const deal = loan(action.dealId);
+      if (!deal) return [];
+      return [
+        { to: "borrower", dealId: deal.id, subject: `Your loan is out of default: ${deal.loanNumber}`, body: "Thank you. Your loan is current again and interest is back at the note rate.", event: "loan.default_cured" },
+        { to: "team", subject: `Default cured: ${deal.loanNumber}`, body: `${deal.borrowerName}: ${action.by} lifted the default. ${action.note}`, event: "loan.default_cured" },
+        ...holdersOf(deal).map((holder) => ({ ...holder, subject: `A loan you hold is out of default: ${deal.loanNumber}`, body: `${deal.loanNumber} is current again.`, event: "loan.default_cured" })),
+      ];
+    }
+    case "requestExtension": {
+      const deal = loan(action.dealId);
+      const extension = deal?.extensions?.at(-1);
+      if (!deal || !extension) return [];
+      const team: Alert = { to: "team", subject: `Extension requested: ${deal.loanNumber}`, body: `${action.by} asked for ${action.months} more month${action.months === 1 ? "" : "s"} on ${deal.borrowerName}'s loan: ${action.reason}. It needs two approvers.`, event: "extension.requested" };
+      return action.byTeam ? [team, { to: "borrower", dealId: deal.id, subject: `Your extension request: ${deal.loanNumber}`, body: `We've asked for a ${action.months}-month extension on your loan for you. The fee would be ${dollars(extension.fee)}. We'll tell you when it's decided.`, event: "extension.requested" }] : [team];
+    }
+    case "approveExtension": {
+      const deal = loan(action.dealId);
+      const extension = deal?.extensions?.find((item) => item.id === action.extensionId);
+      // Only once both approvers have signed off.
+      if (!deal || extension?.status !== "approved" || before.deals.find((item) => item.id === deal.id)?.extensions?.find((item) => item.id === action.extensionId)?.status === "approved") return [];
+      return [{ to: "borrower", dealId: deal.id, subject: `Extension approved: ${deal.loanNumber}`, body: `Your ${extension.months}-month extension is approved. To finish it, sign the extension agreement and pay the ${dollars(extension.fee)} fee; your servicing team will send them. Your loan will then mature on ${longDate(maturityAfter(deal, extension))}.`, event: "extension.approved" }];
+    }
+    case "declineExtension": {
+      const deal = loan(action.dealId);
+      return deal ? [{ to: "borrower", dealId: deal.id, subject: `About your extension request: ${deal.loanNumber}`, body: `Your extension request wasn't approved: ${action.reason}. Your loan still matures on ${longDate(maturityOf(deal))}. Call your servicing team to talk about the payoff.`, event: "extension.declined" }] : [];
+    }
+    case "executeExtension": {
+      const deal = loan(action.dealId);
+      const extension = deal?.extensions?.find((item) => item.id === action.extensionId);
+      if (!deal || extension?.status !== "executed") return [];
+      const maturity = longDate(maturityOf(deal));
+      return [
+        { to: "borrower", dealId: deal.id, subject: `Your loan is extended: ${deal.loanNumber}`, body: `Your loan now matures on ${maturity}. We received the ${dollars(extension.fee)} extension fee. Thank you.`, event: "extension.executed" },
+        { to: "team", subject: `Extended: ${deal.loanNumber}`, body: `${deal.borrowerName}'s loan now matures on ${maturity}.`, event: "extension.executed" },
+        ...holdersOf(deal).map((holder) => ({ ...holder, subject: `A loan you hold was extended: ${deal.loanNumber}`, body: `${deal.loanNumber} was extended ${extension.months} month${extension.months === 1 ? "" : "s"}; it now matures on ${maturity}.`, event: "extension.executed" })),
+      ];
     }
     case "sendMessage":
       if (action.side === "internal") return [];

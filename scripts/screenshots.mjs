@@ -408,6 +408,17 @@ ok("the borrower sees a payoff figure", (await page.getByTestId("payoff-total").
 await page.getByTestId("request-payoff").click();
 ok("the borrower requests a payoff statement", await seen(page.getByTestId("my-payoffs")));
 ok("no dead draw button is left", (await page.getByText("coming soon").count()) === 0);
+// d2 matures well over 60 days out, so the borrower is told when they can ask for more time.
+ok("the borrower is told when they can ask for an extension", (await seen(page.getByTestId("extension-not-yet"))) && (await page.getByTestId("extension-not-yet").innerText()).includes("before maturity"));
+// The application they started this run: they change their mind and withdraw it.
+await page.goto(BASE + "/admin/borrower");
+await page.getByTestId("borrower-loan-card").filter({ hasText: newLoan }).click();
+await page.getByTestId("close-application").click();
+await page.getByTestId("close-reason").selectOption("fell_through");
+await page.getByTestId("confirm-close").click();
+ok("the borrower withdraws their own application", (await seen(page.getByTestId("application-closed"))) && (await page.getByTestId("application-closed").innerText()).includes("purchase fell through"));
+await page.goto(BASE + "/admin/borrower");
+ok("a withdrawn application has no steps left", (await page.getByTestId("borrower-loan-card").filter({ hasText: newLoan }).getByTestId("tracker").innerText()).includes("withdrawn"));
 
 // 9. The same loans from the staff side: draws, servicing, moving a loan forward, and the conversation
 await actAs(SEATS.staff);
@@ -491,14 +502,86 @@ await page.getByTestId("servicing-reason").fill("First late payment");
 await page.getByTestId("confirm-servicing").click();
 ok("servicing waives a late fee with a reason", await seen(page.getByTestId("fee-waived").first()));
 await shot(page, "19c-admin-loan-ledger.png");
+// Still a payment behind after one month's payment, so it can be declared in default, and can't be cured yet.
+await page.getByTestId("declare-default").click();
+await seen(page.getByTestId("default-form"));
+ok("a default on a late loan starts as a payment default", (await page.getByTestId("default-kind").inputValue()) === "monetary" && !(await page.getByTestId("default-blocked").isVisible()));
+await page.getByTestId("default-kind").selectOption("maturity");
+ok("a maturity default is refused before maturity", (await seen(page.getByTestId("default-blocked"))) && (await page.getByTestId("confirm-default").isDisabled()));
+await page.getByTestId("default-kind").selectOption("monetary");
+await page.getByTestId("default-note").fill("Notice of default sent by counsel (FAKE).");
+await page.getByTestId("confirm-default").click();
+ok("the owner declares a default", (await seen(page.getByTestId("open-default"))) && (await page.getByTestId("loan-ledger").innerText()).includes("Default"));
+await page.getByTestId("cure-default").click();
+ok("a default can't be cured while money is owed", (await seen(page.getByTestId("cure-blocked"))) && (await page.getByTestId("confirm-cure").isDisabled()));
+await shot(page, "19d-admin-default.png");
+
+// An extension: the borrower called, two people approve it, and it moves the maturity once signed.
+await page.goto(BASE + "/admin/servicing");
+ok("servicing lists the extension request", await seen(page.getByTestId("extension-row").filter({ hasText: "LH-DEMO-1014" })));
+await page.goto(BASE + "/admin/deals/d14");
+await page.getByTestId("tab-Servicing").click();
+await seen(page.getByTestId("extension-open"));
+ok("the extension shows what to check before approving", (await page.getByTestId("extension-checks").innerText()).includes("Payments are current"));
+await page.getByTestId("approve-extension").click();
+ok("one approval isn't enough for an extension", (await seen(page.getByTestId("extension-approvers").getByText("1 of 2"))) && (await page.getByTestId("approve-extension").isDisabled()));
+await shot(page, "19e-admin-extension.png");
+await actAs(SEATS.underwriter);
+await page.goto(BASE + "/admin/deals/d14");
+await page.getByTestId("tab-Servicing").click();
+await page.getByTestId("approve-extension").click();
+await seen(page.getByTestId("execute-extension-form"));
+ok("an extension can't be recorded before it's signed", await page.getByTestId("execute-extension").isDisabled());
+await page.getByTestId("extension-signed").check();
+await page.getByTestId("extension-fee-reference").fill("EXT-FEE-1 (FAKE)");
+await page.getByTestId("execute-extension").click();
+ok("a signed extension moves the maturity", (await seen(page.getByTestId("ledger-maturity").getByText("2027-04-15"))) && (await page.getByTestId("extensions-used").innerText()).startsWith("1 of 2"));
+await actAs(SEATS.staff);
+
+// Paying a loan off: a short amount is refused, the payoff closes the loan, then the mortgage release is tracked.
 await page.goto(BASE + "/admin/servicing");
 const payoffRow = page.getByTestId("payoff-row").filter({ hasText: "LH-DEMO-1011" });
 await payoffRow.getByTestId("send-payoff").click();
 const capitalBeforePayoff = await capitalNow();
 await page.goto(BASE + "/admin/servicing");
-await page.getByTestId("payoff-row").filter({ hasText: "LH-DEMO-1011" }).getByTestId("mark-paid-off").click();
+await page.getByTestId("payoff-row").filter({ hasText: "LH-DEMO-1011" }).getByTestId("record-payoff").click();
+await seen(page.getByTestId("record-payoff-form"));
+const owedText = await page.getByTestId("payoff-owed-total").innerText();
+await page.getByTestId("payoff-amount").fill(String(Math.floor(Number(owedText.replace(/[^0-9.]/g, "")) - 100)));
+ok("a payoff short of what's owed is refused", (await seen(page.getByTestId("payoff-short"))) && (await page.getByTestId("save-payoff").isDisabled()));
+await page.getByTestId("payoff-amount").fill("");
+await page.getByTestId("payoff-reference").fill("TITLE-FAKE-77");
+await shot(page, "19f-admin-record-payoff.png", false);
+await page.getByTestId("save-payoff").click();
 ok("a paid-off loan leaves servicing", await page.getByTestId("serviced-loan").filter({ hasText: "LH-DEMO-1011" }).waitFor({ state: "detached", timeout: 5000 }).then(() => true, () => false));
 ok("a payoff frees capital", (await capitalNow()) > capitalBeforePayoff);
+await page.goto(BASE + "/admin/servicing");
+ok("the mortgage release waits to be recorded", await seen(page.getByTestId("release-row").filter({ hasText: "LH-DEMO-1011" })));
+await page.goto(BASE + "/admin/deals/d11");
+await page.getByTestId("tab-Servicing").click();
+ok("the paid-off loan shows what paid it", (await page.getByTestId("paid-off").innerText()).includes("TITLE-FAKE-77"));
+await page.getByTestId("lien-record").click();
+ok("a release can't be recorded without where", await page.getByTestId("save-lien").isDisabled());
+await page.getByTestId("lien-reference").fill("OR Book 1234 Page 56 (FAKE)");
+await page.getByTestId("save-lien").click();
+ok("the release of the mortgage is recorded", await seen(page.getByTestId("lien-recorded")));
+
+// Declining an application: it leaves the active pipeline with its reason, and can be reopened.
+await page.goto(BASE + "/admin/deals/d16");
+await page.getByTestId("close-application").click();
+await page.getByTestId("close-reason").selectOption("experience");
+await page.getByTestId("close-note").fill("First flip; ask them back after one with a partner (FAKE).");
+await shot(page, "19g-admin-decline.png", false);
+await page.getByTestId("confirm-close").click();
+ok("staff decline an application with a reason", (await seen(page.getByTestId("application-closed"))) && (await page.getByTestId("application-closed").innerText()).includes("Not enough experience"));
+await page.goto(BASE + "/admin");
+// The page first draws the seed book, then the one this browser saved, so wait for the row to go.
+ok("a declined application leaves the active pipeline", await page.getByTestId("pipeline-table").getByText("LH-DEMO-1016").waitFor({ state: "detached", timeout: 5000 }).then(() => true, () => false));
+await page.getByTestId("pipeline-ended").selectOption("ended");
+ok("and is listed with the declined and withdrawn", await seen(page.getByTestId("pipeline-table").getByText("LH-DEMO-1016")));
+await page.goto(BASE + "/admin/deals/d16");
+await page.getByTestId("reopen-application").click();
+ok("a declined application can be reopened where it was", (await seen(page.getByTestId("stage-panel"))) && (await page.getByTestId("advance-loan").innerText()) === "Start initial review");
 
 await page.goto(BASE + "/admin/deals/d18");
 await seen(page.getByTestId("advance-loan"));

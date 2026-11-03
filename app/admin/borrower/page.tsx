@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
-import { ledger } from "@/lib/servicing";
+import { isClosedApplication } from "@/lib/loan-exits";
+import { ledger, SERVICED } from "@/lib/servicing";
 import { useStore, est } from "@/lib/store";
 import { fundedBalances } from "@/lib/engine";
 import Tracker from "@/components/Tracker";
@@ -21,14 +22,14 @@ export default function BorrowerHome() {
       {mine.length === 0 && <div className="glass p-6 text-sm text-muted-foreground" data-testid="no-loans">No loans yet. Start an application to get an instant estimate.</div>}
       <div className="grid gap-4 lg:grid-cols-2">
         {mine.map((d) => {
-          const e = est(d.app); const funded = ["servicing_current", "servicing_delinquent", "funded", "matured"].includes(d.status);
+          const e = est(d.app); const funded = SERVICED.includes(d.status);
           const open = d.docs.filter((x) => x.status === "requested" || x.status === "rejected").length;
           const b = fundedBalances(e, d.app, d.disbursedDraws);
           return (
             <Link key={d.id} href={`/admin/borrower/${d.id}`} className="glass block min-w-0 p-5 transition-colors hover:border-faint" data-testid="borrower-loan-card">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0"><div className="text-xs text-muted-foreground">{d.loanNumber} · {productLabel[d.app.product]}</div><div className="text-lg font-semibold">{d.address}, {d.city}</div></div>
-                <Badge tone={funded ? "green" : "blue"}>{statusLabel(d.status)}</Badge>
+                <Badge tone={d.status === "default" ? "rose" : funded || d.status === "paid_off" ? "green" : isClosedApplication(d.status) ? "slate" : "blue"}>{statusLabel(d.status)}</Badge>
               </div>
               <div className="my-4"><Tracker status={d.status} /></div>
               {funded ? (

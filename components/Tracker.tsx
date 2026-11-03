@@ -1,6 +1,8 @@
 "use client";
 import { borrowerTimeline, timelineIndex } from "@/lib/mockData";
 export default function Tracker({ status }: { status: Parameters<typeof timelineIndex>[0] }) {
+  // An application that ended before funding has no next step to show.
+  if (status === "declined" || status === "withdrawn") return <p className="text-sm text-muted-foreground" data-testid="tracker">This application is {status}.</p>;
   const idx = timelineIndex(status);
   return (
     <div data-testid="tracker">

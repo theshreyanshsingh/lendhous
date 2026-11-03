@@ -118,6 +118,14 @@ export const pricingConfig = {
    * maturityNoticeDays before it.
    */
   servicing: { graceDays: 10, lateFeePct: 0.05, delinquentDays: 30, defaultNoticeDays: 90, defaultRateAdd: 6, defaultRateMax: 18, maturityNoticeDays: [60, 30] },
+  /**
+   * Extensions (Spec 8.4). PLACEHOLDER: a loan can be extended at most maxCount times, by up to monthsEach months each
+   * time, for feePoints points of the note amount per monthsEach months. Borrowers can ask from requestWindowDays before
+   * maturity; the team can file a request at any time.
+   */
+  extensions: { maxCount: 2, monthsEach: 3, feePoints: 1, requestWindowDays: 60 },
+  /** Days after payoff to get the satisfaction of mortgage out. Florida's is 60 (Fla. Stat. 701.04); the attorney confirms. */
+  lienReleaseDays: 60,
   routing: { dualApprovalFundingAlways: true, splitEnabled: true /* prototype demo; Spec: off until M8 */ },
 };
 export type PricingConfig = typeof pricingConfig;

@@ -9,6 +9,7 @@ const money = z.number().finite().min(0).max(100_000_000);
 const optionalMoney = money.optional();
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const product = z.enum(["fix_flip", "bridge", "ground_up", "dscr"]);
+const method = z.enum(["wire", "ach", "check", "other"]);
 
 const application = z.object({
   product,
@@ -98,12 +99,21 @@ const schema = z.discriminatedUnion("t", [
   z.object({ t: z.literal("approveDrawRequest"), drawId: id, by: z.string().max(120) }),
   z.object({ t: z.literal("rejectDraw"), drawId: id, reason: text(500).min(1) }),
   z.object({ t: z.literal("releaseDraw"), drawId: id }),
-  z.object({ t: z.literal("recordPayment"), dealId: id, amount: z.number().positive().max(100_000_000), receivedOn: date, method: z.enum(["wire", "ach", "check", "other"]), reference: text(120), by: z.string().max(120) }),
+  z.object({ t: z.literal("recordPayment"), dealId: id, amount: z.number().positive().max(100_000_000), receivedOn: date, method, reference: text(120), by: z.string().max(120) }),
   z.object({ t: z.literal("reversePayment"), dealId: id, paymentId: id, reason: text(300).min(1), by: z.string().max(120) }),
   z.object({ t: z.literal("waiveLateFee"), dealId: id, due: date, reason: text(300).min(1), by: z.string().max(120) }),
   z.object({ t: z.literal("requestPayoff"), dealId: id, goodThrough: date, by: z.string().max(120) }),
   z.object({ t: z.literal("sendPayoff"), payoffId: id }),
-  z.object({ t: z.literal("markPaidOff"), payoffId: id }),
+  z.object({ t: z.literal("recordPayoff"), dealId: id, amount: z.number().positive().max(100_000_000), receivedOn: date, method, reference: text(120), by: z.string().max(120) }),
+  z.object({ t: z.literal("recordLienRelease"), dealId: id, step: z.enum(["sent", "recorded"]), on: date, reference: text(200), by: z.string().max(120) }),
+  z.object({ t: z.literal("closeApplication"), dealId: id, outcome: z.enum(["declined", "withdrawn"]), reason: text(40).min(1), note: text(1000), by: z.string().max(120), byTeam: z.boolean() }),
+  z.object({ t: z.literal("reopenApplication"), dealId: id, by: z.string().max(120) }),
+  z.object({ t: z.literal("declareDefault"), dealId: id, kind: z.enum(["monetary", "maturity", "covenant", "insurance_lapse", "tax_delinquency"]), effectiveOn: date, note: text(1000).min(1), by: z.string().max(120) }),
+  z.object({ t: z.literal("cureDefault"), dealId: id, note: text(1000).min(1), by: z.string().max(120) }),
+  z.object({ t: z.literal("requestExtension"), dealId: id, months: z.number().int().min(1).max(12), reason: text(1000).min(1), by: z.string().max(120), byTeam: z.boolean() }),
+  z.object({ t: z.literal("approveExtension"), dealId: id, extensionId: id, by: z.string().max(120) }),
+  z.object({ t: z.literal("declineExtension"), dealId: id, extensionId: id, reason: text(300).min(1), by: z.string().max(120) }),
+  z.object({ t: z.literal("executeExtension"), dealId: id, extensionId: id, on: date, method, reference: text(120), by: z.string().max(120) }),
   z.object({ t: z.literal("sendMessage"), dealId: id, from: z.string().max(120), side: z.enum(["team", "borrower", "broker", "internal"]), text: text(4000).min(1) }),
 ]);
 

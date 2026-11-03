@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { attentionItems } from "@/lib/attention";
+import { closureReason, isClosedApplication } from "@/lib/loan-exits";
 import { downloadCsv } from "@/lib/csv";
 import { useStore, est } from "@/lib/store";
 import { pipelineStages } from "@/lib/mockData";
@@ -11,14 +12,14 @@ import { Badge, GradeBadge, ColorDot, usd, pct, k, productLabel, statusLabel, ca
 export default function Pipeline() {
   const { s, newLeads } = useStore();
   const attention = attentionItems(s, newLeads);
-  const [product, setProduct] = useState("all"); const [q, setQ] = useState("");
-  const rows = useMemo(() => s.deals.map((d) => ({ d, e: est(d.app) })).filter(({ d }) => (product === "all" || d.app.product === product) && (q === "" || (d.borrowerName + d.address + d.loanNumber).toLowerCase().includes(q.toLowerCase()))), [s.deals, product, q]);
-  const pre = s.deals.filter((d) => !["servicing_current", "servicing_delinquent", "paid_off", "funded", "matured", "default"].includes(d.status));
+  const [product, setProduct] = useState("all"); const [q, setQ] = useState(""); const [ended, setEnded] = useState(false);
+  const rows = useMemo(() => s.deals.map((d) => ({ d, e: est(d.app) })).filter(({ d }) => isClosedApplication(d.status) === ended && (product === "all" || d.app.product === product) && (q === "" || (d.borrowerName + d.address + d.loanNumber).toLowerCase().includes(q.toLowerCase()))), [s.deals, product, q, ended]);
+  const pre = s.deals.filter((d) => !["servicing_current", "servicing_delinquent", "paid_off", "funded", "matured", "default", "declined", "withdrawn"].includes(d.status));
   const counts = pipelineStages.slice(0, 9).map((st) => ({ ...st, n: s.deals.filter((d) => d.status === st.code).length, amt: s.deals.filter((d) => d.status === st.code).reduce((a, d) => a + est(d.app).noteAmount, 0) }));
   const headline = "min-w-0 glass px-3 py-2";
   const figure = "font-heading text-base font-semibold wrap-anywhere sm:text-xl";
   const empty = s.deals.length === 0 ? "No loans in the pipeline yet." : "No loans match this search.";
-  const exportRows = () => downloadCsv("lendhous-pipeline.csv", rows.map(({ d, e }) => ({ Loan: d.loanNumber, Borrower: d.borrowerName, Entity: d.entityName, Address: d.address, City: d.city, County: d.app.county, State: d.app.state, Product: productLabel[d.app.product], Amount: e.noteAmount, Rate: e.rate, Grade: e.score.grade, Score: e.score.score, Status: statusLabel(d.status), Capital: statusLabel(d.capitalStatus), "Target closing": d.closingDate })));
+  const exportRows = () => downloadCsv("lendhous-pipeline.csv", rows.map(({ d, e }) => ({ Loan: d.loanNumber, Borrower: d.borrowerName, Entity: d.entityName, Address: d.address, City: d.city, County: d.app.county, State: d.app.state, Product: productLabel[d.app.product], Amount: e.noteAmount, Rate: e.rate, Grade: e.score.grade, Score: e.score.score, Status: statusLabel(d.status), "Closed because": d.closure ? closureReason(d.closure) : "", Capital: statusLabel(d.capitalStatus), "Target closing": d.closingDate })));
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
@@ -46,6 +47,7 @@ export default function Pipeline() {
         <div className="flex flex-wrap gap-2 border-b border-border p-3">
           <input className="desk-input w-full sm:w-56" placeholder="Search borrower, address, loan #" value={q} onChange={(e) => setQ(e.target.value)} />
           <select className="desk-input w-full sm:w-auto" value={product} onChange={(e) => setProduct(e.target.value)}><option value="all">All products</option>{Object.entries(productLabel).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+          <select className="desk-input w-full sm:w-auto" data-testid="pipeline-ended" value={ended ? "ended" : "active"} onChange={(e) => setEnded(e.target.value === "ended")}><option value="active">Active loans</option><option value="ended">Declined and withdrawn ({s.deals.filter((d) => isClosedApplication(d.status)).length})</option></select>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground sm:ml-auto"><span className="flex items-center gap-1"><ColorDot color="green" /> within limit</span><span className="flex items-center gap-1"><ColorDot color="yellow" /> within 2.5 pts</span><span className="flex items-center gap-1"><ColorDot color="red" /> over limit</span></div>
           <button type="button" className="btn-ghost h-10! w-full sm:w-auto" data-testid="export-pipeline" disabled={rows.length === 0} onClick={exportRows}>Export CSV</button>
         </div>

@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { evaluate } from "@/lib/engine";
 import type { Deal } from "@/lib/mockData";
 import { pricingConfig } from "@/lib/pricing-config";
-import { BILL_LABEL, billTone, balanceOf, defaultRate, ledger, METHODS, payoffFor, shownRows } from "@/lib/servicing";
+import { BILL_LABEL, billTone, balanceOf, defaultInterestFrom, defaultRate, ledger, METHODS, openDefault, payoffFor, shownRows } from "@/lib/servicing";
 import { useStore } from "@/lib/store";
 import { Badge, Section, Stat, statusLabel, usd } from "@/components/ui";
 
@@ -21,8 +21,10 @@ export function PaymentsPanel({ deal }: { deal: Deal }) {
   const quote = goodThrough ? payoffFor(deal, goodThrough) : null;
   const requests = s.payoffs.filter((payoff) => payoff.dealId === deal.id);
   return (
-    <Section title="Payments and payoff" right={l.matured ? <Badge tone="rose">Matured</Badge> : l.paymentsLate ? <Badge tone="rose">{l.paymentsLate} past due</Badge> : <Badge tone="green">Current</Badge>}>
-      {l.matured ? (
+    <Section title="Payments and payoff" right={openDefault(deal) ? <Badge tone="rose">Default</Badge> : l.matured ? <Badge tone="rose">Matured</Badge> : l.paymentsLate ? <Badge tone="rose">{l.paymentsLate} past due</Badge> : <Badge tone="green">Current</Badge>}>
+      {openDefault(deal) ? (
+        <p className="mb-3 rounded-md bg-bad/10 p-2 text-sm text-bad" data-testid="default-notice">Your loan is in default since {openDefault(deal)!.effectiveOn}. Interest runs at the default rate of {defaultRate(evaluate(deal.app).rate).toFixed(2)}% from {defaultInterestFrom(deal)}. Call your LendHous servicing team to talk about bringing it current.</p>
+      ) : l.matured ? (
         <p className="mb-3 rounded-md bg-bad/10 p-2 text-sm text-bad" data-testid="matured-notice">Your loan matured on {l.maturity}, so the full balance is due. Interest now runs at the default rate of {defaultRate(evaluate(deal.app).rate).toFixed(2)}%. Ask for a payoff statement below.</p>
       ) : l.amountDue > 0 && l.paymentsLate ? (
         <p className="mb-3 rounded-md bg-bad/10 p-2 text-sm text-bad" data-testid="late-notice">Your loan is {usd(l.amountDue, 2)} past due{l.feesOwed ? `, including ${usd(l.feesOwed, 2)} in late fees` : ""}. Please pay it as soon as you can.</p>
@@ -62,7 +64,7 @@ export function PaymentsPanel({ deal }: { deal: Deal }) {
           <dl className="mt-3 space-y-1 text-sm" data-testid="payoff-quote">
             <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Principal</dt><dd>{usd(quote.principal, 2)}</dd></div>
             <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Interest since last payment</dt><dd>{usd(quote.accrued, 2)}</dd></div>
-            {quote.defaultAccrued > 0 && <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Default interest after maturity</dt><dd>{usd(quote.defaultAccrued, 2)}</dd></div>}
+            {quote.defaultAccrued > 0 && <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Default interest</dt><dd>{usd(quote.defaultAccrued, 2)}</dd></div>}
             {quote.fees > 0 && <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Late fees</dt><dd>{usd(quote.fees, 2)}</dd></div>}
             {quote.credit > 0 && <div className="flex justify-between gap-3"><dt className="text-muted-foreground">Credit held</dt><dd>{usd(-quote.credit, 2)}</dd></div>}
             <div className="flex justify-between gap-3 border-t border-border pt-1 font-semibold"><dt>Estimated payoff</dt><dd data-testid="payoff-total">{usd(quote.total, 2)}</dd></div>
