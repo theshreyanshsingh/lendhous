@@ -7,6 +7,7 @@ import type { Deal, NoticeSent } from "@/lib/mockData";
 import { daysBetween } from "@/lib/servicing";
 import { useStore } from "@/lib/store";
 import { useServiceDay } from "./use-service-day";
+import { shortDay } from "@/lib/format";
 
 const small = "h-9! px-3! text-xs!";
 const sentLine = (label: string, sent: NoticeSent) => `${label} ${sent.method === "email" ? `emailed to ${sent.to.join(", ") || "the borrower"}${sent.result && sent.result !== "sent" ? (sent.result === "logged" ? " (mail isn't set up here, so it was only logged: mail it too)" : " (it couldn't be emailed: mail it)") : ""}` : "mailed"} on ${sent.sentOn}${sent.by ? ` by ${sent.by}` : ""}.`;
@@ -30,7 +31,7 @@ export function ApplicationRecord({ deal }: { deal: Deal }) {
       <div className="space-y-3 text-sm" data-testid="application-record">
         <div>
           <p className="font-medium">Complete application</p>
-          {deal.completed ? <p className="text-xs text-muted-foreground" data-testid="application-complete">Complete as of {deal.completed.on}{deal.completed.by ? `, marked by ${deal.completed.by}` : ""}. If it's declined, the notice is due 30 days from then.</p> : (
+          {deal.completed ? <p className="text-xs text-muted-foreground" data-testid="application-complete">Complete as of {shortDay(deal.completed.on)}{deal.completed.by ? `, marked by ${deal.completed.by}` : ""}. If it's declined, the notice is due 30 days from then.</p> : (
             <div className="mt-1 flex flex-wrap items-end gap-2">
               <p className="min-w-0 flex-1 basis-60 text-xs text-muted-foreground">Mark it once you have everything you normally need to decide: Reg B&apos;s 30 days to answer start then. Signing off the credit review marks it if nobody has.</p>
               <label className="block"><span className="label">Complete as of</span><input className="desk-input" type="date" data-testid="complete-on" max={today || undefined} value={on || today} onChange={(event) => setOn(event.target.value)} /></label>
@@ -94,7 +95,7 @@ export function AdverseActionPanel({ deal }: { deal: Deal }) {
         <Badge tone={owed ? (left !== null && left < 0 ? "rose" : "amber") : "green"}>{owed ? (owed.kind === "notice" ? "Notice to send" : "Reasons to send") : "Sent"}</Badge>
       </div>
       <p className="text-xs text-muted-foreground">{action.large ? `The business had over ${usd(REVENUE_LIMIT)} in revenue, so the notice comes in a reasonable time and the specific reasons only if they ask in writing within ${REQUEST_DAYS} days (12 CFR 1002.9(a)(3)(ii)).` : `${deal.revenue ? `The business had ${usd(REVENUE_LIMIT)} or less in revenue` : "The business's revenue isn't recorded, so the stricter rule applies"}: a written notice with the specific reasons within 30 days of the completed application (12 CFR 1002.9(a)(1)).`}</p>
-      {owed && <p className={`text-xs ${left !== null && left < 0 ? "text-bad" : "text-warn"}`} data-testid="notice-due">{owed.kind === "notice" ? "Notice" : "Statement of reasons"} due by {owed.dueOn}{left !== null ? ` (${left < 0 ? `${-left} days late` : left === 0 ? "today" : `${left} days left`})` : ""}.</p>}
+      {owed && <p className={`text-xs ${left !== null && left < 0 ? "text-bad" : "text-warn"}`} data-testid="notice-due">{owed.kind === "notice" ? "Notice" : "Statement of reasons"} due by {shortDay(owed.dueOn)}{left !== null ? ` (${left < 0 ? `${-left} days late` : left === 0 ? "today" : `${left} days left`})` : ""}.</p>}
 
       {editable && (
         <div className="space-y-2" data-testid="notice-reasons">
@@ -135,7 +136,7 @@ export function AdverseActionPanel({ deal }: { deal: Deal }) {
           {received && today && requestProblem(action, received, today) && <p className="w-full text-xs text-warn">{requestProblem(action, received, today)}</p>}
         </div>
       )}
-      {action.request && <p className="text-xs text-muted-foreground">They asked for the reasons in writing on {action.request.receivedOn}; the statement is due by {action.request.dueOn}.</p>}
+      {action.request && <p className="text-xs text-muted-foreground">They asked for the reasons in writing on {shortDay(action.request.receivedOn)}; the statement is due by {shortDay(action.request.dueOn)}.</p>}
       {action.statement && <p className="text-xs text-good">{sentLine("Statement of reasons", action.statement)}</p>}
 
       <div className="border-t border-border pt-2 text-xs">

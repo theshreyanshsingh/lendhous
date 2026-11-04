@@ -6,7 +6,7 @@ import { latestScreening, OFAC, screeningSubjects, unscreenedNames } from "@/lib
 import { useStore } from "@/lib/store";
 import { Badge, Section, shortDate } from "@/components/ui";
 
-const ROLE = { entity: "Borrowing company", borrower: "Borrower", guarantor: "Guarantor" } as const;
+const ROLE = { entity: "Borrowing company", borrower: "Borrower", guarantor: "Guarantor", principal: "Owner or officer" } as const;
 const STATUS = { clear: ["Clear", "green"], cleared: ["Cleared after review", "green"], review: ["Possible match", "rose"], match: ["Confirmed match", "rose"] } as const;
 
 /**

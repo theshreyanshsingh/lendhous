@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { audit } from "@/lib/audit";
 import { getCurrentUser } from "@/lib/auth";
 import { readField } from "@/lib/crypto";
-import { canOpenFile } from "@/lib/book-access";
+import { canOpenFile, firmOf } from "@/lib/book-access";
 import { permissionCheck, readBook } from "@/lib/book-store";
 import { viewFor } from "@/lib/permissions";
 import { notDeleted, prisma } from "@/lib/prisma";
@@ -21,6 +21,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const allowed = await permissionCheck(user);
   // A lead's photos, sent with a quote request before there's a loan, are for the team that answers leads.
   if (document.ownerType === "LEAD") { if (viewFor(user.roleCodes) !== "admin" || !allowed("view_pipeline")) return refused(); }
+  // A brokerage's own papers: for the brokerage, and the team that approves brokers.
+  else if (document.ownerType === "BROKER") { if (!(viewFor(user.roleCodes) === "admin" ? allowed("manage_brokers") : viewFor(user.roleCodes) === "broker" && firmOf(user) === document.ownerId)) return refused(); }
   else if (!canOpenFile((await readBook()).book, user, document.ownerId, allowed)) return refused();
   const view = new URL(request.url).searchParams.get("view");
   // A thumbnail is a glance at a photo on a draw or of the property. Opening it, like opening any other file, is what gets logged.

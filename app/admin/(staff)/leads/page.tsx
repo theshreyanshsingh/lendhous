@@ -2,6 +2,7 @@ import Link from "next/link";
 import { markLeadContacted } from "@/actions/leads";
 import { PageIntro } from "@/components/page-intro";
 import { requirePermission } from "@/lib/auth";
+import { readBook } from "@/lib/book-store";
 import { SendApplicationLink } from "@/components/SendApplicationLink";
 import { linkSummaries } from "@/lib/application-links";
 import { openLead, openQuote } from "@/lib/lead-store";
@@ -22,6 +23,8 @@ export default async function Leads() {
   // Photos sent with each quote request, until the lead becomes a loan and they move to it.
   const photoRows = await prisma.document.findMany({ where: { ownerType: "LEAD", ownerId: { in: leads.map((lead) => lead.id) }, documentType: PROPERTY_PHOTO, ...notDeleted }, select: { id: true, ownerId: true }, orderBy: { createdAt: "asc" } });
   const photosFor = (leadId: string) => photoRows.filter((row) => row.ownerId === leadId);
+  // Leads that came by a broker's referral link, with the brokerage's name.
+  const brokers = leads.some((lead) => lead.brokerId) ? new Map((await readBook()).book.brokers.map((broker) => [broker.id, broker.name])) : new Map<string, string>();
   return (
     <div className="space-y-4">
       <PageIntro eyebrow="Website" title="Website leads" lede="Quote requests from the public site, from borrowers and brokers. Send the borrower the secure application link to turn one into a loan." />
@@ -34,7 +37,7 @@ export default async function Leads() {
             <tbody>
               {leads.length === 0 && <tr><td colSpan={6} className="text-muted-foreground">No briefs yet.</td></tr>}
               {leads.map((lead) => (
-                <tr key={lead.id} className="border-b border-border align-top last:border-0">
+                <tr key={lead.id} id={`lead-${lead.id}`} className="scroll-mt-20 border-b border-border align-top last:border-0">
                   <td>
                     <div className="font-medium">{lead.name}</div>
                     <a className="block text-xs text-link underline underline-offset-2" href={`mailto:${lead.email}`}>{lead.email}</a>
@@ -43,7 +46,7 @@ export default async function Leads() {
                   <td data-label="Received" className="lg:whitespace-nowrap">{when(lead.createdAt)}</td>
                   <td data-label="Project">
                     <div>
-                      <div>{lead.strategy}{lead.submitter === "broker" && <span className="ml-1 text-xs text-link">· broker</span>}</div>
+                      <div>{lead.strategy}{lead.submitter === "broker" && <span className="ml-1 text-xs text-link">· broker</span>}{lead.brokerId && <span className="ml-1 text-xs text-link" data-testid="lead-referral">· referred by {brokers.get(lead.brokerId) ?? "a broker"}</span>}</div>
                       <div className="text-xs text-muted-foreground">{lead.request ? `${lead.request.address.street}, ${lead.request.address.city}, ${lead.request.address.state} ${lead.request.address.zip}` : `${lead.city}, ${lead.state}`}{lead.experience ? ` · ${lead.experience}` : ""}</div>
                       {lead.request && <div className="text-xs text-muted-foreground">{CREDIT_LABEL[lead.request.creditBand]} credit · {CITIZENSHIP_LABEL[lead.request.citizenship]}{lead.request.comps.length ? ` · ${lead.request.comps.length} comp${lead.request.comps.length === 1 ? "" : "s"}` : ""}</div>}
                       {lead.targetClosing && <div className="text-xs text-muted-foreground">Target closing {lead.targetClosing}</div>}

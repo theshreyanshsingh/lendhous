@@ -7,6 +7,7 @@ import { METHODS } from "@/lib/servicing";
 import { useStore } from "@/lib/store";
 import { usd } from "@/components/ui";
 import { useServiceDay } from "./use-service-day";
+import { shortDay } from "@/lib/format";
 
 const amountOf = (text: string) => Math.round((Number(text.replace(/[^0-9.]/g, "")) || 0) * 100) / 100;
 
@@ -65,7 +66,7 @@ export function RecordPayoff({ deal, onDone }: { deal: Deal; onDone?: () => void
           <p className="text-muted-foreground">Florida holds us to a letter we sent. If this was paid on one of these, it&apos;s a payoff: the mortgage is released, and what the letter left out is still owed by the borrower.</p>
           {letters.map(({ payoff, letter }) => {
             const key = `${payoff.id}:${letter.number}`;
-            return <label key={key} className="flex items-start gap-2"><input type="radio" name="on-letter" className="mt-0.5" data-testid="payoff-letter-choice" checked={onLetter === key} onChange={() => setOnLetter(key)} /><span>Letter {letter.number} to {requesterLine(payoff)}: {usd(letter.total, 2)} through {letter.goodThrough}</span></label>;
+            return <label key={key} className="flex items-start gap-2"><input type="radio" name="on-letter" className="mt-0.5" data-testid="payoff-letter-choice" checked={onLetter === key} onChange={() => setOnLetter(key)} /><span>Letter {letter.number} to {requesterLine(payoff)}: {usd(letter.total, 2)} through {shortDay(letter.goodThrough)}</span></label>;
           })}
           {onLetter && <button type="button" className="text-link underline" onClick={() => setOnLetter("")}>Not paid on a letter</button>}
         </fieldset>

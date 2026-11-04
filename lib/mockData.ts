@@ -13,7 +13,13 @@ export type CapitalStatus = "not_started" | "recommended" | "teaser_out" | "bids
 export type DocStatus = "requested" | "uploaded" | "in_review" | "accepted" | "rejected" | "waived";
 
 /** stage: when a document has to be in. Unset means before clear to close; "funding" before the money goes out; "post_close" after. */
-export interface Doc { id: string; name: string; category: string; status: DocStatus; fileName?: string; note?: string; documentId?: string; stage?: "funding" | "post_close" }
+export interface Doc {
+  id: string; name: string; category: string; status: DocStatus; fileName?: string; note?: string; documentId?: string; stage?: "funding" | "post_close";
+  /** The day it was accepted, which decides whether it can carry over to the borrower's next loan (lib/repeat-borrower.ts). */
+  acceptedOn?: string;
+  /** The earlier loan it was accepted on, when it carried over. */
+  carriedFrom?: string;
+}
 /** Someone who personally guarantees the loan. Everyone owning 20% or more of the borrowing entity should be one. */
 export interface Guarantor { name: string; ownershipPct: number; fico: number; citizenship: "us" | "resident" | "foreign" }
 /** A deal the borrower says they've done. Staff check it against its settlement statement before it counts for pricing. */
@@ -24,6 +30,22 @@ export interface Sponsor { entityState: string; guarantors: Guarantor[]; trackRe
 /** A credit officer's sign-off. Pricing then uses only the experience they verified. */
 export interface CreditReview { by: string; at: string; note: string; verifiedDeals: number }
 export interface Allocation { sourceId: string; amount: number }
+/** A partner lender's share of a loan and its money for closing (Spec P7, lib/partner-funding.ts). */
+export interface PartnerFunding {
+  partnerId: string; amount: number;
+  sent?: { on: string; reference: string; by: string; at: string };
+  received?: { on: string; by: string; at: string };
+  /** Where to send it: the verified escrow wire. Only in the winning partner's own copy of the loan, never stored. */
+  sendTo?: { beneficiary: string; bankName: string; routing: string; account: string; reference: string; verifiedOn: string };
+}
+/** Someone at LendHous on a loan, as they were when assigned: the borrower sees how to reach them. */
+export interface TeamMember { id: string; name: string; email: string; phone: string; title: string }
+/** The demo's own team. The demo seats sign in with these emails, so "Mine" works for them. */
+export const DEMO_TEAM: TeamMember[] = [
+  { id: "demo-olivia", name: "Olivia Owner (FAKE)", email: "olivia.owner@lendhous.test", phone: "(954) 555-0101", title: "Owner" },
+  { id: "demo-uma", name: "Uma Underwriter (FAKE)", email: "uma.underwriter@lendhous.test", phone: "(954) 555-0102", title: "Underwriter" },
+  { id: "demo-pat", name: "Pat Processor (FAKE)", email: "pat.processor@lendhous.test", phone: "(954) 555-0103", title: "Processor" },
+];
 /** When a loan moved into a stage. */
 export interface StageEntry { status: LoanStatus; at: string }
 export interface Deal {
@@ -83,6 +105,14 @@ export interface Deal {
   screenings?: Screening[];
   /** Each stage the loan moved into and when, oldest first. Loans started before this was kept begin partway through. */
   stages?: StageEntry[];
+  /** Who works the loan (lib/loan-team.ts). */
+  team?: { officer?: TeamMember; processor?: TeamMember };
+  /** A partner lender's share and its money for closing. */
+  partnerFunding?: PartnerFunding;
+  /** The broker's fee as paid, once it is (lib/brokers.ts). Until then it's expected from the points. */
+  brokerFeePaid?: { amount: number; on: string; reference: string; by: string; at: string };
+  /** The broker whose referral link brought this borrower, and when (lib/brokers.ts). */
+  referredBy?: { brokerId: string; on: string };
 }
 export interface ClosingAgent {
   company: string; contact: string; phone: string; email: string; fileNumber: string;
@@ -102,7 +132,7 @@ export interface WireInstruction {
   verification?: { by: string; at: string; phone: string; phoneSource: string; spokeWith: string };
   replaced?: { by: string; at: string };
 }
-export type ScreeningRole = "entity" | "borrower" | "guarantor";
+export type ScreeningRole = "entity" | "borrower" | "guarantor" | "principal";
 export interface ScreeningHit { uid: number; name: string; type: string; program: string; score: number }
 export interface Screening {
   id: string; at: string; by: string;
@@ -208,6 +238,8 @@ export interface TermSheetTerms {
   noteAmount: number; initialAdvance: number; holdback: number; financedReserve: number;
   rate: number; pointsPct: number; points: number; lenderFees: number; termMonths: number; monthlyPayment: number; cashToClose: number;
   interestReserve: "none" | "financed"; accrual: "full_boat" | "dutch"; prepay: string;
+  /** A broker's fee, which the borrower pays at closing: on the term sheet so every borrower-paid fee is disclosed. */
+  brokerPoints?: number; brokerFee?: number;
 }
 /** An exception to the pricing matrix: the rate and points asked for, why they're outside it, and who approved them. */
 export interface PricingException {
@@ -256,7 +288,21 @@ export interface PayoffRequest {
   refused?: { by: string; at: string; reason: string };
 }
 export interface LoanMessage { id: string; dealId: string; from: string; side: "team" | "borrower" | "broker" | "internal"; text: string; at: string }
-export interface Broker { id: string; name: string }
+export interface Broker {
+  id: string; name: string;
+  /** Where the firm stands (lib/brokers.ts). Only an approved one can send deals; one on file from before the program has none. */
+  status?: "applied" | "approved" | "suspended";
+  /** The broker agreement as signed, with what the firm told LendHous about itself. */
+  application?: { legalName: string; entityState: string; principals: string[]; nmls: string; license: string; agreementVersion: string; signedName: string; signedAt: string; ip: string };
+  /** OFAC screening of the firm and its principals when it applied. */
+  screening?: Screening;
+  approved?: { by: string; at: string; reason?: string };
+  suspended?: { by: string; at: string; reason: string };
+  /** The code in the broker's referral link (/start?ref=…). */
+  referralCode?: string;
+  /** The firm's formation documents and certificate of good standing, sent with its application. The files are encrypted Documents. */
+  docs?: { kind: "articles" | "good_standing"; documentId: string; fileName: string; at: string }[];
+}
 export interface CapitalSource { id: string; name: string; type: "gt_balance_sheet" | "gt_credit_line" | "partner_lender"; commitment: number; baseDeployed: number; baseUnfunded: number; lineUndrawn?: number; orgId?: string }
 export interface Partner { id: string; name: string; ndaSigned: boolean; buyBox: BuyBox }
 export interface Bid { id: string; dealId: string; partnerId: string; pct: number; lenderRate: number; lenderPoints: number; conditions: string; status: "submitted" | "accepted" | "declined" | "withdrawn"; type: "bid" | "accept_as_offered"; at: string }
@@ -358,7 +404,12 @@ export const seedLoanSales: LoanSale[] = [
   { id: "s-d14", dealId: "d14", askPct: 99.5, status: "sold", soldTo: DEMO_BUYER_ID, soldPct: 99.25, soldAt: "2026-08-18", listedAt: "2026-08-03" },
 ];
 
-export const brokers: Broker[] = [{ id: DEMO_BROKER_ID, name: "Demo Brokerage (FAKE)" }];
+export const brokers: Broker[] = [{
+  id: DEMO_BROKER_ID, name: "Demo Brokerage (FAKE)", status: "approved", referralCode: "demobrkr",
+  application: { legalName: "Demo Brokerage (FAKE)", entityState: "FL", principals: ["Bea Broker (FAKE)"], nmls: "", license: "", agreementVersion: "PLACEHOLDER-2026-11-04", signedName: "Bea Broker (FAKE)", signedAt: "2026-09-02T14:00:00Z", ip: "203.0.113.10" },
+  screening: { id: "ofac-demo-broker", at: "2026-09-02T14:00:05Z", by: "Broker application", checkedAt: "2026-09-02T14:00:05Z", list: { fetchedAt: "2026-09-02T06:00:00Z", names: 18_000 }, subjects: [{ name: "Demo Brokerage (FAKE)", role: "entity", hits: [] }, { name: "Bea Broker (FAKE)", role: "principal", hits: [] }], status: "clear" },
+  approved: { by: "Olivia Owner (FAKE)", at: "2026-09-03T13:30:00Z" },
+}];
 
 // What a finished photo link looks like. The demo keeps no files, so these show as placeholders.
 export const seedPhotoRequests: PhotoRequest[] = [

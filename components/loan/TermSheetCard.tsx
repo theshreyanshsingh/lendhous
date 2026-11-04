@@ -8,6 +8,7 @@ import { est, useStore } from "@/lib/store";
 import { latestSheet, respondProblem, sheetContent, SHEET_STATUS } from "@/lib/term-sheets";
 import { Badge, Section, Stat, shortDate, usd } from "@/components/ui";
 import { useServiceDay } from "./use-service-day";
+import { shortDay } from "@/lib/format";
 
 const TONE = { sent: "amber", accepted: "green", changes_requested: "blue", declined: "rose", expired: "slate", superseded: "slate" } as const;
 
@@ -91,11 +92,11 @@ export function TermSheetCard({ deal, canSign }: { deal: Deal; canSign: boolean 
         <p className="text-xs text-muted-foreground">{content.paragraphs[0]}</p>
         <div className="flex flex-wrap items-center gap-3 text-xs">
           <a className="text-link underline" href={local ? "/api/term-sheets/demo" : `/api/term-sheets/${deal.id}`} target="_blank" rel="noreferrer" data-testid="term-sheet-download">Download the PDF</a>
-          {sheet.status === "sent" && !expired && today && <span className={left <= 2 ? "text-warn" : "text-muted-foreground"} data-testid="term-sheet-expires">Open until {sheet.expiresOn} ({left === 0 ? "last day" : `${left} day${left === 1 ? "" : "s"} left`})</span>}
+          {sheet.status === "sent" && !expired && today && <span className={left <= 2 ? "text-warn" : "text-muted-foreground"} data-testid="term-sheet-expires">Open until {shortDay(sheet.expiresOn)} ({left === 0 ? "last day" : `${left} day${left === 1 ? "" : "s"} left`})</span>}
         </div>
         {sheet.status === "accepted" && <p className="text-muted-foreground" data-testid="term-sheet-signed">Accepted by {sheet.response?.signedName} on {shortDate(sheet.response!.at)}.</p>}
         {sheet.status === "changes_requested" && <p className="rounded-md bg-link/10 p-2 text-xs" data-testid="term-sheet-changes">You asked for changes: “{sheet.response?.note}”. Your loan officer will send a new term sheet.</p>}
-        {expired && <p className="rounded-md bg-muted p-2 text-xs" data-testid="term-sheet-expired">This term sheet expired on {sheet.expiresOn}. Your loan officer can send a new one.</p>}
+        {expired && <p className="rounded-md bg-muted p-2 text-xs" data-testid="term-sheet-expired">This term sheet expired on {shortDay(sheet.expiresOn)}. Your loan officer can send a new one.</p>}
         {sheet.status === "sent" && !expired && !canSign && <p className="text-muted-foreground">Waiting for the borrower to answer it.</p>}
         {open && canSign && <Respond deal={deal} />}
       </div>

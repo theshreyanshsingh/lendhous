@@ -2,6 +2,7 @@
 // sign-up to funding, documents, draws, payoff, a partner bid, a loan sale and a broker deal, checking what each person
 // can and can't see. It wipes the loan book when it starts and ends, so it refuses anything but a local database.
 // Usage: npm run db:seed && npm run build && npm start, then npm run smoke:real
+import { execFileSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -22,7 +23,7 @@ const prisma = new PrismaClient();
 const wipe = async () => {
   await prisma.bookRecord.deleteMany();
   await prisma.bookVersion.deleteMany();
-  await prisma.document.deleteMany({ where: { ownerType: { in: ["LOAN", "LEAD"] } } });
+  await prisma.document.deleteMany({ where: { ownerType: { in: ["LOAN", "LEAD", "BROKER"] } } });
   await prisma.lead.deleteMany();
   await prisma.pricingVersion.deleteMany();
   await prisma.sanctionsList.deleteMany();
@@ -36,8 +37,13 @@ const wipe = async () => {
   await prisma.user.deleteMany({ where: { email: { endsWith: DOMAIN } } });
   await prisma.rateWindow.deleteMany({ where: { key: { contains: DOMAIN } } });
   await prisma.platformSettings.update({ where: { id: "default" }, data: { offerSampleData: true, allowSignup: true } });
+  await prisma.jobRun.deleteMany({ where: { runKey: { startsWith: "smoke-" } } });
+  await prisma.errorEvent.deleteMany({ where: { hash: { startsWith: "smoke" } } });
+  await prisma.investorStatement.deleteMany();
 };
 await wipe();
+// As if the nightly jobs ran this morning, so the owners' panel has no warning until the script takes one away.
+await prisma.jobRun.createMany({ data: ["servicing", "sanctions"].map((job) => ({ job, runKey: `smoke-${job}`, ok: true, finishedAt: new Date() })) });
 // A small stand-in for Treasury's sanctions list, so applications are screened as they arrive (the nightly job downloads the real one).
 await prisma.sanctionsList.create({ data: { id: "sdn", fetchedAt: new Date(), names: 2, hash: "smoke", entries: [[90001, "DOE, Jonathan", "individual", "SDGT"], [90002, "LISTED TRADING CO", "entity", "SDNTK"]] } });
 
@@ -50,6 +56,7 @@ await account("other", "Oscar Other", "BORROWER");
 await account("broker", "Brook Broker", "BROKER");
 await account("partner", "Parker Partner", "PARTNER_LENDER");
 await account("buyer", "Blair Buyer", "LOAN_BUYER");
+await account("proc", "Percy Processor", "PROCESSOR");
 const lead = await prisma.lead.create({ data: { name: "Lena Lead", email: `lena@${DOMAIN}`, strategy: "Fix & flip", city: "Miami", state: "FL", propertyValueCents: 40_000_000, renovationCents: 8_000_000, requestedLoanCents: 34_000_000, notes: "Wants to start next month." } });
 
 const browser = await chromium.launch({ executablePath: CHROME, args: ["--no-sandbox"] });
@@ -100,31 +107,32 @@ try {
   const broker = await person("broker");
   const partner = await person("partner");
   const buyer = await person("buyer");
+  const proc = await person("proc");
 
   // A quote request from the public site, as a visitor sends it from a phone
   const visitorContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const visitor = await visitorContext.newPage();
   visitor.on("pageerror", (error) => errors.push(`visitor: ${error.message}`));
-  const fillQuote = async (first, email, notes) => {
-    await visitor.goto(`${BASE}/start`);
-    await visitor.getByTestId("quote-first").fill(first);
-    await visitor.getByTestId("quote-last").fill("Visitor");
-    await visitor.getByTestId("quote-email").fill(email);
-    await visitor.getByTestId("quote-phone").fill("(555) 010-0300");
-    await visitor.getByTestId("quote-citizen").selectOption("us");
-    await visitor.getByTestId("quote-credit").selectOption("720-759");
-    await visitor.getByTestId("quote-experience").selectOption("1-2");
-    await visitor.getByTestId("quote-address-street").fill("44 Visitor Lane");
-    await visitor.getByTestId("quote-address-city").fill("Tampa");
-    await visitor.getByTestId("quote-address-state").fill("FL");
-    await visitor.getByTestId("quote-address-zip").fill("33602");
-    await visitor.getByTestId("quote-address-county").fill("Hillsborough");
-    await visitor.getByTestId("quote-purchasePrice").fill("300000");
-    await visitor.getByTestId("quote-rehab").fill("60000");
-    await visitor.getByTestId("quote-arv").fill("480000");
-    await visitor.getByTestId("quote-requestedAmount").fill("270000");
-    await visitor.getByTestId("quote-date").fill("2027-01-15");
-    await visitor.locator("textarea").first().fill(notes);
+  const fillQuote = async (first, email, notes, path = "/start", page = visitor) => {
+    await page.goto(`${BASE}${path}`);
+    await page.getByTestId("quote-first").fill(first);
+    await page.getByTestId("quote-last").fill("Visitor");
+    await page.getByTestId("quote-email").fill(email);
+    await page.getByTestId("quote-phone").fill("(555) 010-0300");
+    await page.getByTestId("quote-citizen").selectOption("us");
+    await page.getByTestId("quote-credit").selectOption("720-759");
+    await page.getByTestId("quote-experience").selectOption("1-2");
+    await page.getByTestId("quote-address-street").fill("44 Visitor Lane");
+    await page.getByTestId("quote-address-city").fill("Tampa");
+    await page.getByTestId("quote-address-state").fill("FL");
+    await page.getByTestId("quote-address-zip").fill("33602");
+    await page.getByTestId("quote-address-county").fill("Hillsborough");
+    await page.getByTestId("quote-purchasePrice").fill("300000");
+    await page.getByTestId("quote-rehab").fill("60000");
+    await page.getByTestId("quote-arv").fill("480000");
+    await page.getByTestId("quote-requestedAmount").fill("270000");
+    await page.getByTestId("quote-date").fill("2027-01-15");
+    await page.locator("textarea").first().fill(notes);
   };
   await fillQuote("Vera", `vera@${DOMAIN}`, "Refinance into a rental next spring.");
   const housePhoto = await cameraJpeg(visitor);
@@ -224,39 +232,61 @@ try {
   await go(under, "/admin/capital");
   ok("everyone on the team sees it", (await under.getByTestId("capital-available").innerText()) === "$5.00M");
 
-  // A real borrower applies
+  // A real borrower applies from the portal: the same signed application as the secure link, saved as they go.
+  const CLOSE_ON = new Date(Date.now() + 40 * 86_400_000).toISOString().slice(0, 10);
+  const fillAddress = async (page, testid, place) => { for (const [key, value] of Object.entries(place)) await page.getByTestId(`${testid}-${key}`).fill(value); };
   await go(borrower, "/admin/apply");
-  await borrower.getByTestId("next").click();
-  await borrower.getByLabel("Property address").fill("100 Real Street");
-  await borrower.getByLabel("City").fill("Hollywood");
-  await borrower.getByLabel("ZIP").fill("33020");
-  for (let i = 0; i < 3; i++) await borrower.getByTestId("next").click();
-  await borrower.getByTestId("guarantor-name-0").fill("Bonnie Borrower");
-  await borrower.getByTestId("guarantor-fico-0").fill("745");
-  await borrower.getByTestId("next").click();
+  ok("the portal application starts from the borrower's account", (await borrower.getByTestId("app-email").inputValue()) === `borrower@${DOMAIN}` && (await borrower.getByTestId("app-first").inputValue()) === "Bonnie");
+  await borrower.getByTestId("app-phone").fill("(555) 010-0500");
+  await borrower.getByTestId("app-next").click();
+  await fillAddress(borrower, "app-address", { street: "100 Real Street", city: "Hollywood", state: "FL", zip: "33020", county: "Broward" });
+  await borrower.getByTestId("app-flood-no").click();
+  await borrower.getByTestId("app-type").selectOption("sfr");
+  await borrower.getByTestId("app-occupancy").selectOption("vacant");
+  await borrower.getByTestId("app-next").click();
+  for (const [key, value] of Object.entries({ purchasePrice: "300000", rehab: "100000", arv: "550000", liquidity: "150000" })) await borrower.getByTestId(`app-${key}`).fill(value);
+  await borrower.getByTestId("app-plan").fill("Kitchen, baths and paint, then sell.");
+  await borrower.getByTestId("app-exit-sell").click();
+  await borrower.getByTestId("app-close").fill(CLOSE_ON);
+  ok("the borrower sees the live estimate as the numbers go in", (await borrower.getByTestId("est-loan").innerText()).startsWith("$"));
+  await borrower.getByTestId("app-next").click();
+  await borrower.waitForTimeout(1500);
+  await seen(borrower.getByTestId("app-saved").getByText(/^Saved/));
+  await go(borrower, "/admin/apply");
+  ok("it saves as the borrower goes, and opens where they left off", (await borrower.getByTestId("app-step").innerText()).toLowerCase() === "step 4 of 5" && (await borrower.getByTestId("app-saved").innerText()).includes("Resumed"));
+  await borrower.getByTestId("app-llc-true").click();
+  await borrower.getByTestId("app-llc-name").fill("Real Flips LLC");
+  await fillAddress(borrower, "app-llc-address", { street: "1 Company Court", city: "Hollywood", state: "FL", zip: "33020" });
+  const g = (id) => borrower.getByTestId(`g0-${id}`);
+  ok("the guarantor starts as the borrower", (await g("first").inputValue()) === "Bonnie" && (await g("email").inputValue()) === `borrower@${DOMAIN}`);
+  for (const [id, value] of Object.entries({ phone: "(555) 010-0500", dob: "1979-06-02", fico: "745", ssn: "987654321", own: "100" })) await g(id).fill(value);
+  await fillAddress(borrower, "g0-home", { street: "12 Home Way", city: "Hollywood", state: "FL", zip: "33021" });
+  await g("citizen").selectOption("us");
+  for (const id of ["two-true", "mail-true", "marital-unmarried", "decl-occupy-false", "decl-lawsuit-true"]) await g(id).click();
+  for (const key of QUESTIONS.filter((item) => item !== "lawsuit")) await g(`decl-${key}-false`).click();
   await borrower.getByTestId("add-deal").click();
   await borrower.getByTestId("deal-address-0").fill("9 Past Flip Lane");
   await borrower.getByTestId("deal-completed-0").fill("2026-02");
   await borrower.getByTestId("deal-price-0").fill("210000");
   await borrower.getByTestId("deal-sale-0").fill("315000");
-  await borrower.getByTestId("next").click();
-  await borrower.getByTestId("next").click();
-  for (const c of ["bp", "noo", "consent", "true"]) await borrower.getByTestId(`cert-${c}`).check();
-  const stillNeeded = await borrower.getByTestId("submit-missing").innerText();
-  ok("a real application needs its details and every credit answer", stillNeeded.includes("borrowing entity") && stillNeeded.includes("every credit question") && (await borrower.getByTestId("submit").isDisabled()));
+  await borrower.getByTestId("app-next").click();
+  ok("a yes needs an explanation", (await borrower.getByTestId("app-problems").innerText()).includes("explanation"));
+  await g("explanation").fill("A 2025 dispute with a contractor, settled in August.");
+  await borrower.getByTestId("app-next").click();
+  await seen(borrower.getByTestId("app-review"));
   ok("the review lists what will be asked for, including proof of the past deal", (await borrower.getByTestId("needs-preview").innerText()).includes("Settlement statements for your past deals"));
-  await borrower.getByRole("button", { name: "Back" }).click();
-  await answerAll(borrower, ["lawsuit"]);
-  await borrower.getByTestId("next").click();
-  ok("a yes needs an explanation", (await borrower.getByTestId("submit-missing").innerText()).includes("explanation"));
-  await borrower.getByRole("button", { name: "Back" }).click();
-  await borrower.getByTestId("decl-explanation").fill("A 2025 dispute with a contractor, settled in August.");
-  for (let i = 0; i < 2; i++) await borrower.getByRole("button", { name: "Back" }).click();
-  await borrower.getByLabel("Borrowing entity (LLC)").fill("Real Flips LLC");
-  for (let i = 0; i < 3; i++) await borrower.getByTestId("next").click();
-  await borrower.getByTestId("submit").click();
-  await borrower.waitForURL("**/admin/borrower");
-  ok("a real borrower can submit an application", await seen(borrower.getByTestId("borrower-loan-card")));
+  await borrower.waitForTimeout(1500);
+  await seen(borrower.getByTestId("app-saved").getByText(/^Saved/));
+  const savedRows = await rawRows("ApplicationLink");
+  ok("what's saved is encrypted", savedRows.includes("enc1:") && !savedRows.includes("987654321") && !savedRows.includes("1979-06-02") && !savedRows.includes("Real Flips"));
+  ok("signing needs every consent and a name", await borrower.getByTestId("app-sign").isDisabled());
+  for (const key of ["application", "credit", "release", "esign"]) await borrower.getByTestId(`agree-${key}`).check();
+  await borrower.getByTestId("app-signature").fill("Someone Else");
+  await borrower.getByTestId("app-sign").click();
+  ok("a name that isn't on the application is refused", await seen(borrower.getByTestId("app-problems").getByText(/exactly as you entered/)));
+  await borrower.getByTestId("app-signature").fill("Bonnie Borrower");
+  await borrower.getByTestId("app-sign").click();
+  ok("a real borrower signs and sends it, and lands on the loan", await borrower.waitForURL("**/admin/borrower/d*").then(() => true, () => false));
   await go(borrower, "/admin/borrower");
   ok("it's still there after a reload", (await borrower.getByTestId("borrower-loan-card").count()) === 1);
   await borrower.getByTestId("borrower-loan-card").click();
@@ -278,6 +308,30 @@ try {
   await under.getByTestId("tab-Documents").click();
   ok("the team sees the borrower's photos on the loan", (await seen(under.getByTestId("property-photo"))) && (await under.getByTestId("property-photo").count()) === 2 && (await loaded(under.getByTestId("property-photo").locator("img"))));
   ok("they're filed as the borrower's", (await prisma.document.count({ where: { ownerType: "LOAN", ownerId: dealId, documentType: "property_photo", uploadedById: (await prisma.user.findUniqueOrThrow({ where: { email: `borrower@${DOMAIN}` } })).id } })) === 2);
+
+  // Who works the loan: a portal application waits for a loan officer, an owner gives it to the underwriter, and a
+  // processor takes the open seat. The borrower then sees who to call.
+  await go(owner, "/admin");
+  ok("a portal application waits for a loan officer", await seen(owner.getByTestId("attention-unassigned")));
+  await go(owner, dealHref);
+  await owner.getByTestId("assign-officer").selectOption({ label: "Ursula Under" });
+  const pickedOfficer = () => owner.getByTestId("assign-officer").evaluate((select) => select.selectedOptions[0]?.text ?? "");
+  for (let wait = 0; wait < 20 && (await pickedOfficer()) !== "Ursula Under"; wait++) await owner.waitForTimeout(250);
+  await owner.waitForTimeout(500);
+  ok("an owner gives the loan to the underwriter, and she's told", (await pickedOfficer()) === "Ursula Under" && (await prisma.notification.count({ where: { toEmail: `under@${DOMAIN}`, eventCode: "loan.assigned" } })) === 1);
+  await go(proc, dealHref);
+  ok("a processor can't reassign the loan officer", (await proc.getByTestId("assign-officer").count()) === 0 && (await proc.getByTestId("team-officer-name").innerText()) === "Ursula Under");
+  await proc.getByTestId("take-processor").click();
+  ok("but can take the open processor seat", await seen(proc.getByTestId("team-processor-name").getByText("Percy Processor")));
+  await go(under, "/admin");
+  await under.getByTestId("staff-search-input").fill("bonnie");
+  ok("the staff search finds the loan by the borrower's name", await seen(under.getByTestId("search-result").filter({ hasText: "LH-1001" })));
+  await under.getByTestId("staff-search-input").press("Escape");
+  await under.getByTestId("pipeline-team").selectOption("mine");
+  ok("the underwriter finds it under My loans", (await under.getByTestId("pipeline-table").getByTestId("officer").count()) === 1 && (await under.getByTestId("pipeline-table").innerText()).includes("Bonnie Borrower"));
+  await under.getByTestId("pipeline-team").selectOption("all");
+  await go(borrower, `/admin/borrower/${dealId}`);
+  ok("the borrower sees who's on the loan and how to reach them", (await borrower.getByTestId("your-team").innerText()).includes("Ursula Under") && (await borrower.getByTestId("your-team").innerText()).includes("Percy Processor") && (await borrower.getByTestId("your-team").getByRole("link", { name: "Email" }).first().getAttribute("href")) === `mailto:under@${DOMAIN}`);
   await go(owner, "/admin/account/notifications");
   ok("the owner is told about it", await seen(owner.getByTestId("notice").filter({ hasText: "New application" })));
   await go(other, "/admin/borrower");
@@ -434,10 +488,12 @@ try {
   await under.getByTestId("confirm-condition").click();
   await seen(titleCondition.getByText(/Waived by Ursula Under/));
   const beforeClosing = under.locator("section").filter({ has: under.getByRole("heading", { name: /^Prior to/ }) }).getByTestId("condition-row").filter({ has: under.getByTestId("clear-condition") });
+  // Like the waives above: each clear is saved before the next click, and a click a redraw swallowed is tried again.
   for (let left = await beforeClosing.count(), tries = 0; left > 0 && tries < 20; left = await beforeClosing.count(), tries++) {
     await beforeClosing.first().getByTestId("clear-condition").click();
-    await under.getByTestId("confirm-condition").click();
-    await under.waitForTimeout(250);
+    if (!(await seen(under.getByTestId("confirm-condition"), 5000))) continue;
+    if (!(await under.getByTestId("confirm-condition").click({ timeout: 5000 }).then(() => true, () => false))) continue;
+    for (let wait = 0; wait < 40 && (await beforeClosing.count()) >= left; wait++) await under.waitForTimeout(250);
   }
   ok("the team clears or waives everything before closing", await seen(under.getByTestId("conditions-summary").getByText("Everything before closing is cleared or waived")));
   ok("the borrower hears theirs clear", (await prisma.notification.count({ where: { toEmail: `borrower@${DOMAIN}`, eventCode: "condition.cleared" } })) === borrowerItems);
@@ -772,7 +828,7 @@ try {
   const loanRow = owner.getByTestId("serviced-loan").filter({ hasText: "LH-1001" });
   const dueBefore = await loanRow.getByTestId("serviced-next-due").innerText();
   await loanRow.getByTestId("record-payment").click();
-  ok("a payment before the first due date pays ahead", (await owner.getByTestId("payment-preview").innerText()).includes(`Pays ahead the ${dueBefore} payment`));
+  ok("a payment before the first due date pays ahead", (await owner.getByTestId("payment-preview").innerText()).includes(`Pays ahead the ${new Date(`${dueBefore}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })} payment`));
   await owner.getByTestId("payment-reference").fill("FED-SMOKE-1");
   await owner.getByTestId("save-payment").click();
   await owner.waitForFunction((due) => !document.querySelector("[data-testid=serviced-loan]")?.innerText.includes(due), dueBefore).catch(() => {});
@@ -886,6 +942,7 @@ try {
   const leadDealId = leadDeal.split("/").pop();
   const invited = await prisma.user.findUnique({ where: { email: `lena@${DOMAIN}` }, include: { roles: true, passwordLinks: true } });
   ok("staff create a loan from a brief", (await owner.locator("main").innerText()).includes("Lena Lead"));
+  ok("and whoever starts it is its loan officer", (await owner.getByTestId("assign-officer").evaluate((select) => select.selectedOptions[0]?.text ?? "")) === "Owen Owner");
   ok("the client is invited to the portal", invited?.roles[0]?.role === "BORROWER" && invited.passwordLinks.length === 1);
   const leadRow = await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } });
   ok("the brief links to its loan", leadRow.loanId === leadDealId && Boolean(leadRow.contactedAt));
@@ -1012,6 +1069,70 @@ try {
   ok("the buyer can open the loan's documents", (await buyer.request.get(BASE + bought)).status() === 200);
   await go(owner, "/admin/capital");
   ok("selling frees the capital", parseFloat((await owner.getByTestId("capital-available").innerText()).replace(/[^0-9.]/g, "")) > capitalBefore);
+  // The buyer's monthly statement, made for this month the way the 1st makes last month's, then downloaded.
+  execFileSync("npx", ["tsx", "scripts/make-statements.ts", new Date().toISOString().slice(0, 7)], { stdio: "ignore" });
+  await go(buyer, "/admin/buyer/portfolio");
+  const statementRow = buyer.getByTestId("statement-row").first();
+  ok("the buyer's statement shows in their portfolio", await seen(statementRow));
+  const statementHref = await statementRow.getByTestId("statement-pdf").getAttribute("href");
+  const statementPdf = await buyer.request.get(BASE + statementHref);
+  ok("it downloads as a PDF", statementPdf.status() === 200 && (await statementPdf.body()).subarray(0, 5).toString() === "%PDF-");
+  const statementCsv = await buyer.request.get(`${BASE}${statementHref}?format=csv`);
+  ok("and as a spreadsheet with the loan on it", statementCsv.status() === 200 && (await statementCsv.text()).includes("LH-1001"));
+  ok("another firm can't open it", (await partner.request.get(BASE + statementHref)).status() === 404);
+  ok("nor can anyone signed out", (await (await browser.newContext()).request.get(BASE + statementHref)).status() === 401);
+  ok("the buyer was emailed that it's ready", (await prisma.notification.count({ where: { toEmail: `buyer@${DOMAIN}`, eventCode: "statement.ready" } })) === 1);
+
+  // A broker signs the broker agreement with the firm's papers; an owner approves it before any deal goes in. One of its
+  // owners is close to a name on the sanctions list, so approving takes a reason.
+  await go(broker, "/admin/broker");
+  ok("a new broker is asked to sign the broker agreement first", await seen(broker.getByTestId("broker-agreement")));
+  await go(broker, "/admin/broker/new");
+  ok("and can't open the deal form until it's approved", await seen(broker.getByTestId("broker-not-approved")));
+  await go(broker, "/admin/broker");
+  await broker.getByTestId("broker-legal-name").fill("Brook Capital LLC");
+  await broker.getByTestId("broker-principals").fill("Brook Broker\nJonathan Doe");
+  await broker.getByTestId("broker-nmls").fill("123456");
+  await broker.getByTestId("broker-signature").fill("Brook Broker");
+  await broker.getByTestId("broker-apply").click();
+  ok("the agreement has to be agreed to", await seen(broker.getByTestId("broker-error").getByText(/agree/)));
+  await broker.getByTestId("broker-agree").check();
+  await broker.getByTestId("broker-apply").click();
+  ok("and the firm's papers sent with it", await seen(broker.getByTestId("broker-error").getByText(/articles/)));
+  await broker.getByTestId("broker-articles").setInputFiles({ ...PDF, name: "articles.pdf" });
+  await broker.getByTestId("broker-good-standing").setInputFiles({ ...PDF, name: "good-standing.pdf" });
+  await broker.getByTestId("broker-apply").click();
+  ok("the broker signs it and waits for approval", await seen(broker.getByTestId("broker-status").getByText("Waiting for approval"), 20_000));
+  ok("the owners are told", (await prisma.notification.count({ where: { toEmail: `owner@${DOMAIN}`, eventCode: "broker.applied" } })) === 1);
+  const brokerDocs = await prisma.document.findMany({ where: { ownerType: "BROKER" } });
+  ok("its papers are stored encrypted with the firm", brokerDocs.length === 2 && !(await rawRows("Document")).includes("good-standing.pdf"));
+  ok("and a borrower can't open them", (await borrower.request.get(`${BASE}/api/documents/${brokerDocs[0].id}`)).status() === 404);
+  ok("but the broker can", (await broker.request.get(`${BASE}/api/documents/${brokerDocs[0].id}`)).status() === 200);
+  await go(owner, "/admin/brokers");
+  const brokerRow = owner.getByTestId("broker-row").filter({ hasText: "Brook Capital LLC" });
+  ok("the owners see it waiting, with the possible sanctions match", (await seen(brokerRow)) && (await brokerRow.getByTestId("broker-ofac").innerText()).includes("Possible match") && (await brokerRow.getByTestId("broker-w9").innerText()).includes("Not on file"));
+  ok("approving waits on a reason for the match", await brokerRow.getByTestId("broker-approve").isDisabled());
+  await brokerRow.getByTestId("broker-clear-reason").fill("Different person: Jonathan Doe is a Florida-born co-founder, date of birth checked.");
+  await brokerRow.getByTestId("broker-approve").click();
+  ok("an owner approves the brokerage", await seen(owner.getByTestId("broker-row").filter({ hasText: "Brook Capital LLC" }).getByText("Referral link")));
+  await go(under, "/admin/brokers");
+  ok("an underwriter can't approve brokers", path(under) === "/admin");
+  await go(broker, "/admin/broker");
+  await seen(broker.getByTestId("referral-url").getByText(/^http/));
+  const referralUrl = await broker.getByTestId("referral-url").innerText();
+  ok("the approved broker gets a referral link", /\/start\?ref=[a-z2-9]{8}$/.test(referralUrl));
+  const client = await (await browser.newContext({ viewport: { width: 390, height: 844 } })).newPage();
+  client.on("pageerror", (error) => errors.push(`client: ${error.message}`));
+  await fillQuote("Riya", `riya@${DOMAIN}`, "Sent by my broker.", new URL(referralUrl).pathname + new URL(referralUrl).search, client);
+  ok("a client who follows it sees who referred them", (await client.getByTestId("quote-referral").innerText()).includes("Brook Capital LLC"));
+  await client.getByTestId("quote-submit").click();
+  await seen(client.getByTestId("quote-sent"));
+  const referredLead = await prisma.lead.findFirstOrThrow({ orderBy: { createdAt: "desc" } });
+  ok("the request is attributed to the brokerage", referredLead.brokerId === (await prisma.user.findUniqueOrThrow({ where: { email: `broker@${DOMAIN}` } })).id);
+  await go(owner, "/admin/leads");
+  ok("and the team sees who referred it", await seen(owner.getByTestId("leads-table").locator("tr", { hasText: "Riya Visitor" }).getByTestId("lead-referral").getByText(/Brook Capital LLC/)));
+  await client.goto(`${BASE}/start?ref=notacode`);
+  ok("a made-up code is ignored", (await seen(client.getByTestId("quote-form"))) && (await client.getByTestId("quote-referral").count()) === 0);
 
   // A broker
   await go(broker, "/admin/broker/new");
@@ -1026,6 +1147,9 @@ try {
   for (let i = 0; i < 2; i++) await broker.getByTestId("next").click();
   await answerAll(broker);
   await broker.getByTestId("next").click();
+  const [quotePdf] = await Promise.all([broker.waitForEvent("download"), broker.getByTestId("broker-quote-pdf").click()]);
+  ok("the broker downloads a quote for the client with the brokerage's name", quotePdf.suggestedFilename() === "lendhous-quote.pdf" && readFileSync(await quotePdf.path()).subarray(0, 5).toString() === "%PDF-");
+  ok("a borrower can't make one", (await borrower.request.post(`${BASE}/api/broker-quote`, { data: {} })).status() === 403);
   for (const c of ["bp", "noo", "consent", "true"]) await broker.getByTestId(`cert-${c}`).check();
   await broker.getByTestId("submit").click();
   await broker.waitForURL("**/admin/broker");
@@ -1036,7 +1160,112 @@ try {
   ok("the broker's deal reaches the team", await seen(owner.getByTestId("pipeline-table").getByText("Casey Client")));
   ok("a borrower's browser never gets other loans", !(await (async () => { await go(borrower, "/admin/borrower"); return received(borrower); })()).includes("Casey Client"));
 
+  // Running unattended: the health check, the owners' warning when a nightly job stops, and the errors page.
+  const health = await (await browser.newContext()).request.get(`${BASE}/api/health?watch=jobs`);
+  const healthBody = await health.json();
+  ok("the health check answers without signing in, with modes and job times only", health.status() === 200 && healthBody.ok === true && healthBody.staleJobs.length === 0 && !JSON.stringify(healthBody).includes(DOMAIN));
+  await prisma.jobRun.deleteMany({ where: { runKey: "smoke-sanctions" } });
+  const unhealthy = await (await browser.newContext()).request.get(`${BASE}/api/health?watch=jobs`);
+  ok("and the monitor's check says 503 when the sanctions job stops", unhealthy.status() === 503 && (await unhealthy.json()).staleJobs.includes("sanctions"));
+  await go(owner, "/admin");
+  ok("the owners see a warning in the panel", (await seen(owner.getByTestId("stale-jobs"))) && (await owner.getByTestId("stale-jobs").innerText()).includes("sanctions"));
+  await go(under, "/admin");
+  ok("the rest of the team doesn't", (await under.getByTestId("stale-jobs").count()) === 0);
+  await prisma.jobRun.create({ data: { job: "sanctions", runKey: "smoke-sanctions", ok: true, finishedAt: new Date() } });
+  await prisma.errorEvent.create({ data: { hash: "smoke-error", message: "Couldn't load the loan book", route: "/admin/deals/[id]", kind: "render", count: 3 } });
+  await go(owner, "/admin/errors");
+  const errorRow = owner.getByTestId("error-row").filter({ hasText: "Couldn't load the loan book" });
+  ok("the errors page shows what failed, where and how often", (await seen(errorRow)) && (await errorRow.innerText()).includes("/admin/deals/[id]") && (await owner.getByTestId("stale-jobs").count()) === 0);
+  await errorRow.getByTestId("mark-fixed").click();
+  ok("an owner marks it fixed", await seen(owner.getByTestId("error-row").filter({ hasText: "Couldn't load the loan book" }).getByText("Fixed")));
+  await go(under, "/admin/errors");
+  ok("an underwriter can't open it", path(under) === "/admin");
+
+  // A pre-approval letter for the borrower: issued by an owner, checked by a seller, downloaded, then withdrawn.
+  await go(owner, "/admin/letters");
+  await owner.getByTestId("letter-borrower").selectOption({ label: `Bonnie Borrower · borrower@${DOMAIN}` });
+  await owner.getByTestId("letter-entity").fill("Real Flips LLC");
+  await owner.getByTestId("letter-price").fill("400000");
+  await owner.getByTestId("letter-loan").fill("340000");
+  await owner.getByTestId("issue-letter").click();
+  ok("an owner issues a pre-approval letter", await seen(owner.getByTestId("letter-done")));
+  const letterRow = owner.getByTestId("letter-row").first();
+  ok("it gets a number and an expiry", /PA-\d{4}-0001/.test(await letterRow.innerText()) && (await letterRow.innerText()).includes("good through"));
+  const verifyHref = await letterRow.getByTestId("letter-verify-link").getAttribute("href");
+  const seller = await (await browser.newContext()).newPage();
+  await seller.goto(BASE + new URL(verifyHref).pathname);
+  ok("a seller checks it without signing in: genuine, whom it's for, the limits", (await seen(seller.getByTestId("verify-valid"))) && (await seller.getByTestId("verify-letter").innerText()).includes("Real Flips LLC") && (await seller.getByTestId("verify-letter").innerText()).includes("$340,000") && !(await seller.getByTestId("verify-letter").innerText()).includes(`borrower@${DOMAIN}`));
+  await go(borrower, "/admin/borrower");
+  ok("the borrower has it on their dashboard", await seen(borrower.getByTestId("my-letter")));
+  const letterPdfReply = await borrower.request.get(BASE + (await borrower.getByTestId("my-letter-pdf").getAttribute("href")));
+  ok("and downloads it as a PDF", letterPdfReply.status() === 200 && (await letterPdfReply.body()).subarray(0, 5).toString() === "%PDF-");
+  ok("another borrower can't", (await other.request.get(BASE + (await borrower.getByTestId("my-letter-pdf").getAttribute("href")))).status() === 404);
+  await letterRow.getByTestId("revoke-letter").click();
+  await seen(owner.getByTestId("letter-row").first().getByText("Withdrawn"));
+  await seller.reload();
+  ok("withdrawn, the check says so", await seen(seller.getByTestId("verify-revoked")));
+
+  // Tax forms: the partner signs a W-9 in its portal; the owners see the year's forms and export them for IRIS.
+  await go(partner, "/admin/account/tax");
+  ok("a partner is told what happens without a W-9", (await partner.getByTestId("tax-missing").innerText()).includes("24%"));
+  await partner.getByTestId("w9-name").fill("Parker Capital LLC");
+  await partner.getByTestId("w9-classification").selectOption("llc_p");
+  await partner.getByTestId("w9-tin").fill("12-3456789");
+  await partner.getByTestId("w9-street").fill("9 Fund Row");
+  await partner.getByTestId("w9-city").fill("Tampa");
+  await partner.getByTestId("w9-state").fill("FL");
+  await partner.getByTestId("w9-zip").fill("33602");
+  await partner.getByTestId("tax-signature").fill("Parker Partner");
+  await partner.getByTestId("tax-submit").click();
+  ok("it can't sign without certifying", await seen(partner.getByTestId("tax-error").getByText(/certify/)));
+  await partner.getByTestId("tax-certify").check();
+  await partner.getByTestId("tax-submit").click();
+  ok("the partner signs a W-9, and sees only the last digits of its EIN", (await seen(partner.getByTestId("tax-on-file"))) && (await partner.getByTestId("tax-on-file").innerText()).includes("•••-••-6789"));
+  ok("the EIN is encrypted in the database", !(await rawRows("TaxForm")).includes("123456789") && !(await rawRows("TaxForm")).includes("Parker Capital LLC"));
+  await go(owner, "/admin/tax");
+  ok("the owners' tax page shows the year", (await seen(owner.getByTestId("tax-summary"))) && (await owner.getByTestId("tax-deadlines").innerText()).includes("2027"));
+  // No loan with a partner or broker has paid this year, so there's nothing to file yet, and nothing is revealed.
+  await owner.getByTestId("tax-export").click();
+  ok("with nothing due, the IRIS export says so and reveals nothing", (await seen(owner.getByTestId("tax-board-error").getByText(/No forms are due/))) && (await prisma.auditEvent.count({ where: { action: "pii.revealed", entityType: "TaxYear" } })) === 0);
+  await go(under, "/admin/tax");
+  ok("an underwriter can't open the tax page", path(under) === "/admin");
+
+  // A repeat borrower: from the funded loan, the next application starts from the signed one, and the loan paid as agreed
+  // takes the repeat cut off the new one's price.
+  await go(borrower, `/admin/borrower/${dealId}`);
+  ok("the funded loan offers the next one, with what paying as agreed earns", (await borrower.getByTestId("repeat-status").innerText()).includes("1 LendHous loan paid as agreed takes 0.25% off"));
+  await borrower.getByTestId("new-loan-from").click();
+  await borrower.waitForURL("**/admin/apply?from=*");
+  ok("the next application starts from the one signed for LH-1001", (await seen(borrower.getByTestId("app-started-from").getByText(/LH-1001/))) && (await borrower.getByTestId("app-phone").inputValue()) === "(555) 010-0500");
+  await borrower.getByTestId("app-next").click();
+  await fillAddress(borrower, "app-address", { street: "200 Second Street", city: "Hollywood", state: "FL", zip: "33020", county: "Broward" });
+  await borrower.getByTestId("app-flood-no").click();
+  await borrower.getByTestId("app-type").selectOption("sfr");
+  await borrower.getByTestId("app-occupancy").selectOption("vacant");
+  await borrower.getByTestId("app-next").click();
+  for (const [key, value] of Object.entries({ purchasePrice: "320000", rehab: "90000", arv: "560000", liquidity: "160000" })) await borrower.getByTestId(`app-${key}`).fill(value);
+  await borrower.getByTestId("app-plan").fill("Paint, floors and a new roof, then sell.");
+  await borrower.getByTestId("app-exit-sell").click();
+  await borrower.getByTestId("app-close").fill(CLOSE_ON);
+  ok("the estimate takes the repeat cut", (await borrower.getByTestId("app-estimate").innerText()).includes("Repeat borrower, 1 loan paid as agreed: −0.25%"));
+  await borrower.getByTestId("app-next").click();
+  ok("the entity, guarantor and past deal are filled in; the SSN, birth date and score aren't", (await borrower.getByTestId("app-llc-name").inputValue()) === "Real Flips LLC" && (await g("first").inputValue()) === "Bonnie" && (await g("ssn").inputValue()) === "" && (await g("dob").inputValue()) === "" && (await g("fico").inputValue()) === "" && (await borrower.getByTestId("deal-address-0").inputValue()) === "9 Past Flip Lane");
+  for (const [id, value] of Object.entries({ dob: "1979-06-02", fico: "750", ssn: "987654321" })) await g(id).fill(value);
+  for (const key of [...QUESTIONS, "occupy"]) await g(`decl-${key}-false`).click();
+  await borrower.getByTestId("app-next").click();
+  await seen(borrower.getByTestId("app-review"));
+  for (const key of ["application", "credit", "release", "esign"]) await borrower.getByTestId(`agree-${key}`).check();
+  await borrower.getByTestId("app-signature").fill("Bonnie Borrower");
+  await borrower.getByTestId("app-sign").click();
+  ok("the repeat borrower signs it", await borrower.waitForURL("**/admin/borrower/d*").then(() => true, () => false));
+  const repeatId = borrower.url().split("/").pop();
+  ok("the past deal confirmed on LH-1001 isn't asked for again", repeatId !== dealId && (await seen(borrower.getByTestId("doc-track").getByText("Accepted"))));
+  await go(under, `/admin/deals/${repeatId}`);
+  ok("the team sees the repeat record it was priced on", (await under.getByTestId("deal-repeat").innerText()).includes("1 LendHous loan paid as agreed (LH-1001)"));
+
   // Exports, audit, settings
+  await go(owner, "/admin");
+  await owner.getByTestId("pipeline-ended").selectOption("all");
   const file = owner.waitForEvent("download");
   await owner.getByTestId("export-pipeline").click();
   const csv = await (await file).createReadStream();

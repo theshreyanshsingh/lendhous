@@ -5,6 +5,7 @@ import { capitalSummary, est } from "./capital";
 import { closureReason, PRE_FUNDING } from "./loan-exits";
 import type { Deal, LoanStatus } from "./mockData";
 import { addDays, balanceOf, ledger, SERVICED, servicingDate } from "./servicing";
+import { feeOf } from "./brokers";
 
 /** Both days included, as YYYY-MM-DD. */
 export type Period = { from: string; to: string };
@@ -102,6 +103,24 @@ export function businessReport(book: Book, period: Period, today: string) {
     .filter((row) => row.applications || row.termSheets || row.funded)
     .sort((a, b) => b.fundedAmount - a.fundedAmount || b.applications - a.applications);
 
+  const officerOf = (row: Row) => row.deal.team?.officer?.name ?? "";
+  const byOfficer = [...new Set(rows.map(officerOf))]
+    .map((name) => {
+      const of = (list: Row[]) => list.filter((row) => officerOf(row) === name);
+      return { name: name || "No loan officer", applications: of(applied).length, termSheets: of(sheets).length, funded: of(funded).length, fundedAmount: total(of(funded)) };
+    })
+    .filter((row) => row.applications || row.termSheets || row.funded)
+    .sort((a, b) => b.fundedAmount - a.fundedAmount || b.applications - a.applications);
+
+  // Brokered loans by brokerage, with how many came by its referral link and its fees on the loans funded.
+  const byBroker = [...new Set(rows.flatMap((row) => (row.deal.brokerId ? [row.deal.brokerId] : [])))]
+    .map((id) => {
+      const of = (list: Row[]) => list.filter((row) => row.deal.brokerId === id);
+      return { name: book.brokers.find((item) => item.id === id)?.name ?? "Broker (no firm record)", applications: of(applied).length, referred: of(applied).filter((row) => row.deal.referredBy).length, funded: of(funded).length, fundedAmount: total(of(funded)), fees: of(funded).reduce((sum, row) => sum + feeOf(row.deal).amount, 0) };
+    })
+    .filter((row) => row.applications || row.funded)
+    .sort((a, b) => b.fundedAmount - a.fundedAmount || b.applications - a.applications);
+
   const open = rows.filter((row) => PRE_FUNDING.includes(row.deal.status));
   const stuck = open
     .map((row) => ({ deal: row.deal, amount: row.amount, days: daysInStage(row.deal, today) }))
@@ -124,6 +143,8 @@ export function businessReport(book: Book, period: Period, today: string) {
       declined: tally(closed.filter((row) => row.deal.closure!.outcome === "declined")),
       withdrawn: tally(closed.filter((row) => row.deal.closure!.outcome === "withdrawn")),
       bySource,
+      byOfficer,
+      byBroker,
       // Of the applications that came in during the period, how far each has got.
       pullThrough: {
         applied: applied.length,
@@ -194,7 +215,7 @@ const longDay = (day: string) => new Date(`${day}T12:00:00Z`).toLocaleDateString
  * The owner's morning email: what happened yesterday, what's waiting on the team, what's stuck, and where the
  * portfolio and capital stand. Numbers and loan numbers only: no borrower names or addresses.
  */
-export function dailyDigest(book: Book, today: string, waiting: { label: string; count: number }[], link: string) {
+export function dailyDigest(book: Book, today: string, waiting: { label: string; count: number }[], link: string, errors = 0) {
   const yesterday = addDays(today, -1);
   const report = businessReport(book, { from: yesterday, to: yesterday }, today);
   const { pipeline, portfolio, capital } = report;
@@ -215,6 +236,7 @@ export function dailyDigest(book: Book, today: string, waiting: { label: string;
     "",
     `Portfolio: ${money(portfolio.outstanding)} outstanding across ${plural(portfolio.loans, "loan")}${portfolio.loans ? ` at ${portfolio.averageRate.toFixed(2)}% on average` : ""}. ${lateCount ? `${plural(lateCount, "loan")} past due.` : "None past due."} ${plural(portfolio.maturing[0].count, "loan")} maturing in the next 30 days${portfolio.pastMaturity ? `, ${portfolio.pastMaturity} past maturity` : ""}.`,
     `Capital: ${money(capital.available)} available, ${money(capital.deployed)} deployed.`,
+    ...(errors ? [`Server errors in the last day: ${errors}. See them at ${link.replace(/\/reports$/, "/errors")}.`] : []),
     "",
     `Open the reports: ${link}`,
   ];
@@ -241,6 +263,8 @@ export function summaryRows(report: Report) {
   add(p, "Median days, term sheet to funding", pipeline.cycleTimes.termSheetToFunding.days);
   add(p, "Median days, application to funding", pipeline.cycleTimes.toFunding.days);
   for (const source of pipeline.bySource) add(p, `Funded from ${source.label}`, Math.round(source.fundedAmount));
+  for (const officer of pipeline.byOfficer) add(p, `Funded by ${officer.name}`, Math.round(officer.fundedAmount));
+  for (const broker of pipeline.byBroker) add(p, `Funded through ${broker.name}`, Math.round(broker.fundedAmount));
   for (const closure of pipeline.closures) add(p, closure.key, closure.count);
   add(`Today ${report.today}`, `Open applications over ${STUCK_DAYS} days in one stage`, pipeline.stuck.length);
   const c = `Capital ${report.today}`;

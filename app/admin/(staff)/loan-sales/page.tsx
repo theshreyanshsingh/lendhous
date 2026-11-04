@@ -6,6 +6,7 @@ import type { Deal, LoanSale } from "@/lib/mockData";
 import { useStore } from "@/lib/store";
 import { PageIntro } from "@/components/page-intro";
 import { Badge, Section, Stat, k, productLabel, usd } from "@/components/ui";
+import { shortDay } from "@/lib/format";
 
 export default function LoanSales() {
   const { s, dispatch } = useStore();
@@ -76,7 +77,7 @@ function ListRow({ deal, onList }: { deal: Deal; onList: (askPct: number) => voi
   const [ask, setAsk] = useState(100);
   return (
     <li className="flex flex-wrap items-end justify-between gap-3 py-3" data-testid="eligible-row">
-      <div className="min-w-0 flex-1 basis-56"><Link href={`/admin/deals/${deal.id}`} className="font-medium text-link hover:underline">{deal.loanNumber}</Link> <span className="text-sm">· {productLabel[deal.app.product]} · {deal.borrowerName}</span><div className="text-xs text-muted-foreground">{deal.city} · closed {deal.closingDate}</div></div>
+      <div className="min-w-0 flex-1 basis-56"><Link href={`/admin/deals/${deal.id}`} className="font-medium text-link hover:underline">{deal.loanNumber}</Link> <span className="text-sm">· {productLabel[deal.app.product]} · {deal.borrowerName}</span><div className="text-xs text-muted-foreground">{deal.city} · closed {shortDay(deal.closingDate)}</div></div>
       <div className="flex items-end gap-2">
         <label className="block w-24"><span className="label">Asking</span><input className="desk-input" type="number" inputMode="decimal" step={0.25} min={50} max={120} aria-label={`Asking price for ${deal.loanNumber}`} data-testid="ask-input" value={ask} onChange={(event) => setAsk(Number(event.target.value) || 0)} /></label>
         <button type="button" className="btn-primary" data-testid="list-loan" disabled={ask < 50 || ask > 120} onClick={() => onList(ask)}>List</button>

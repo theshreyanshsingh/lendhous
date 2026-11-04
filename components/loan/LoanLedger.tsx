@@ -11,6 +11,7 @@ import { PaidOff } from "./PaidOff";
 import { PayoffRequests } from "./PayoffRequests";
 import { RecordPayment } from "./RecordPayment";
 import { RecordPayoff } from "./RecordPayoff";
+import { shortDay } from "@/lib/format";
 
 /** The servicing team's view of one loan: what's owed, every payment due and how it was paid, and the money received. */
 export function LoanLedger({ deal }: { deal: Deal }) {
@@ -43,7 +44,7 @@ export function LoanLedger({ deal }: { deal: Deal }) {
               <Stat label="Due now" value={<span className={l.amountDue ? "text-bad" : ""} data-testid="ledger-due">{usd(l.amountDue, 2)}</span>} sub={l.daysPastDue ? `${l.daysPastDue} days past due` : undefined} />
               <Stat label="Next payment" value={l.nextDue ?? "—"} sub={l.rows.find((row) => row.due === l.nextDue) ? usd(l.rows.find((row) => row.due === l.nextDue)!.amount, 2) : undefined} />
               <Stat label="Late fees owed" value={<span data-testid="ledger-fees">{usd(l.feesOwed, 2)}</span>} sub={l.credit ? `${usd(l.credit, 2)} credit held` : undefined} />
-              <Stat label="Matures" value={<span data-testid="ledger-maturity">{l.maturity}</span>} sub={l.matured ? `${-l.daysToMaturity} days ago` : `in ${l.daysToMaturity} days`} />
+              <Stat label="Matures" value={<span data-testid="ledger-maturity">{shortDay(l.maturity)}</span>} sub={l.matured ? `${-l.daysToMaturity} days ago` : `in ${l.daysToMaturity} days`} />
             </div>
             <p className="mt-3 text-xs text-muted-foreground">A payment is late {graceDays} days after it&apos;s due and then owes a {lateFeePct * 100}% late fee. {deal.servicedThrough ? `Checked through ${deal.servicedThrough}.` : "Not checked by the nightly job yet."}</p>
           </Section>
@@ -70,14 +71,14 @@ export function LoanLedger({ deal }: { deal: Deal }) {
           {(all ? rows : rows.slice(0, 12)).map((row) => (
             <li key={row.due} className="py-2" data-testid="ledger-row">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="font-medium">{row.due}</span>
+                <span className="font-medium">{shortDay(row.due)}</span>
                 <span className="flex flex-wrap items-center gap-2">
                   {usd(row.amount, 2)}
                   <Badge tone={billTone(row.status)}>{BILL_LABEL[row.status]}</Badge>
                 </span>
               </div>
               <div className="mt-0.5 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-                <span>{row.paidOn ? `Paid ${row.paidOn}` : row.status === "boarded" ? "Paid before payments were recorded here" : row.status === "late" ? `Late since ${row.lateOn}` : `Late from ${row.lateOn} if unpaid`}</span>
+                <span>{row.paidOn ? `Paid ${shortDay(row.paidOn)}` : row.status === "boarded" ? "Paid before payments were recorded here" : row.status === "late" ? `Late since ${row.lateOn}` : `Late from ${row.lateOn} if unpaid`}</span>
                 {row.late && (
                   <span className="flex flex-wrap items-center gap-2">
                     {row.waived ? <span data-testid="fee-waived">Late fee waived</span> : <span>Late fee {usd(row.fee, 2)}{row.feePaid >= row.fee ? " (paid)" : ""}</span>}
@@ -97,7 +98,7 @@ export function LoanLedger({ deal }: { deal: Deal }) {
           {[...(deal.payments ?? [])].reverse().map((payment) => (
             <li key={payment.id} className="py-2" data-testid="ledger-payment">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className={payment.reversed ? "text-muted-foreground line-through" : "font-medium"}>{usd(payment.amount, 2)} · {payment.receivedOn}</span>
+                <span className={payment.reversed ? "text-muted-foreground line-through" : "font-medium"}>{usd(payment.amount, 2)} · {shortDay(payment.receivedOn)}</span>
                 <span className="flex items-center gap-2 text-xs text-muted-foreground">
                   {METHODS[payment.method]}{payment.reference ? ` ${payment.reference}` : ""}
                   {!payment.reversed && !paidOff && reversing !== payment.id && <button type="button" className="text-link hover:underline" data-testid="reverse-payment" onClick={() => { close(); setReversing(payment.id); }}>Reverse</button>}

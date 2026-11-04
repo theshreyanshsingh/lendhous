@@ -6,6 +6,9 @@ import { useStore } from "@/lib/store";
 import { PageIntro } from "@/components/page-intro";
 import { Badge, Section, Stat, k, productLabel, usd } from "@/components/ui";
 import { BuyerGate } from "../buyer-gate";
+import { shortDay } from "@/lib/format";
+import { InvestorStatements } from "@/components/InvestorStatements";
+import { holdingsOf, splitOf } from "@/lib/investor-statements";
 
 export default function Portfolio() {
   return <BuyerGate>{(me) => <Holdings me={me} />}</BuyerGate>;
@@ -20,6 +23,8 @@ function Holdings({ me }: { me: LoanBuyer }) {
   const balance = owned.reduce((sum, row) => sum + row.tape.balance, 0);
   const income = owned.reduce((sum, row) => sum + row.holding.monthlyIncome, 0);
   const weighted = invested ? owned.reduce((sum, row) => sum + row.holding.yield * row.holding.paid, 0) / invested : 0;
+  const receivedOn = new Map(holdingsOf(s, { type: "buyer", id: me.id }).map((holding) => [holding.deal.id, splitOf(holding, () => true)]));
+  const received = [...receivedOn.values()].reduce((sum, split) => sum + split.net, 0);
   return (
     <div className="space-y-4">
       <PageIntro eyebrow={me.name} title="My loans & offers" lede="The loans you own, what they pay you, and where your offers stand." />
@@ -29,6 +34,7 @@ function Holdings({ me }: { me: LoanBuyer }) {
         <div className="glass p-4"><Stat label="Monthly income" value={usd(income)} /></div>
         <div className="glass p-4"><Stat label="Average yield" value={invested ? `${weighted.toFixed(2)}%` : "—"} sub="weighted by price paid" /></div>
       </div>
+      <div className="glass p-4" data-testid="buyer-received"><Stat label="Paid to you so far" value={usd(received, 2)} sub="since you bought each loan, after servicing" /></div>
       <Section title={`Loans you own (${owned.length})`}>
         {owned.length === 0 && <p className="text-sm text-muted-foreground">No loans yet. <Link className="text-link underline" href="/admin/buyer">See what&apos;s for sale</Link>.</p>}
         <ul className="divide-y divide-border">
@@ -40,13 +46,14 @@ function Holdings({ me }: { me: LoanBuyer }) {
                   <Stat label="Balance" value={usd(tape.balance)} />
                   <Stat label="You paid" value={usd(holding.paid)} sub={`${sale.soldPct?.toFixed(2)} on ${sale.soldAt}`} />
                   <Stat label="Yield" value={`${holding.yield.toFixed(2)}%`} />
-                  <Stat label="Monthly" value={usd(holding.monthlyIncome)} sub={`matures ${tape.maturity}`} />
+                  <Stat label="Monthly" value={usd(holding.monthlyIncome)} sub={`matures ${shortDay(tape.maturity)}`} />
                 </div>
               </Link>
             </li>
           ))}
         </ul>
       </Section>
+      <InvestorStatements investor={{ type: "buyer", id: me.id }} />
       <Section title={`Your offers (${offers.length})`}>
         {offers.length === 0 && <p className="text-sm text-muted-foreground">No open offers.</p>}
         <ul className="divide-y divide-border">

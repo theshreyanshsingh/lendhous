@@ -5,6 +5,7 @@ import { PRE_FUNDING } from "@/lib/loan-exits";
 import type { ClosingAgent, Deal, WireInstruction } from "@/lib/mockData";
 import { useStore } from "@/lib/store";
 import { TitleLinkPanel } from "./TitleLinkPanel";
+import { PartnerFunds } from "./PartnerFunds";
 import { Badge, Section, shortDate, statusLabel } from "@/components/ui";
 
 const blankAgent: ClosingAgent = { company: "", contact: "", phone: "", email: "", fileNumber: "" };
@@ -26,6 +27,7 @@ export function ClosingPanel({ deal }: { deal: Deal }) {
   );
   return (
     <div className="space-y-4" data-testid="closing-panel">
+      <PartnerFunds deal={deal} side="team" />
       <Section title="Closing agent" right={open && deal.closing && !editingAgent ? <button type="button" className="text-xs text-link underline" onClick={() => setEditingAgent(true)}>Change</button> : undefined}>
         {deal.closing && !editingAgent ? (
           <div className="text-sm" data-testid="closing-agent">

@@ -5,6 +5,7 @@ import type { Deal, PaymentMethod } from "@/lib/mockData";
 import { ledger, METHODS, previewPayment } from "@/lib/servicing";
 import { useStore } from "@/lib/store";
 import { usd } from "@/components/ui";
+import { shortDay } from "@/lib/format";
 
 const amountOf = (text: string) => Math.round((Number(text.replace(/[^0-9.]/g, "")) || 0) * 100) / 100;
 
@@ -51,7 +52,7 @@ export function RecordPayment({ deal, onDone }: { deal: Deal; onDone?: () => voi
         <div className="rounded-[2px] border border-border bg-muted/40 p-3 text-sm" data-testid="payment-preview">
           <p className="font-medium">Where it goes</p>
           <ul className="mt-1 space-y-0.5 text-muted-foreground">
-            {preview.pays.map((row) => <li key={row.due}>{row.due > (today || receivedOn) ? "Pays ahead" : "Pays"} the {row.due} payment: {usd(row.amount, 2)}</li>)}
+            {preview.pays.map((row) => <li key={row.due}>{row.due > (today || receivedOn) ? "Pays ahead" : "Pays"} the {shortDay(row.due)} payment: {usd(row.amount, 2)}</li>)}
             {preview.fees > 0 && <li>Late fees: {usd(preview.fees, 2)}</li>}
             {preview.credit > 0 && <li data-testid="preview-credit">Held as a credit until it covers a whole payment: {usd(preview.credit, 2)}</li>}
           </ul>

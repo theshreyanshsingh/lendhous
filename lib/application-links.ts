@@ -3,7 +3,7 @@
 // won't open. One link works per loan or lead at a time: sending a new one turns the old one off.
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { ApplicationLink } from "@prisma/client";
-import { completeDraft, LINK_DAYS, type AppDraft, type ConsentKey } from "./borrower-application";
+import { completeDraft, LINK_DAYS, PORTAL_DAYS, type AppDraft, type ConsentKey } from "./borrower-application";
 import { encryptField, readField } from "./crypto";
 import { prisma } from "./prisma";
 
@@ -40,6 +40,28 @@ export async function saveDraft(id: string, draft: AppDraft, step: number, now =
   await prisma.applicationLink.update({ where: { id }, data: { draft: seal(id, "draft", draft), step, savedAt: now } });
 }
 
+/** A signed-in borrower's application in progress, if they have one that hasn't lapsed. */
+export async function openPortalDraft(userId: string, now = new Date()) {
+  const row = await prisma.applicationLink.findFirst({ where: { userId, status: "open", expiresAt: { gt: now } }, orderBy: { createdAt: "desc" } });
+  return row ? { row, draft: completeDraft(row.draft ? unseal<unknown>(row.id, "draft", row.draft) : null) } : null;
+}
+
+/**
+ * Saves a borrower's portal application, starting it on the first save. It's kept like a link's, sealed the same way,
+ * and lapses PORTAL_DAYS after the last save. Returns its id.
+ */
+export async function savePortalDraft(user: { id: string; name: string; email: string }, draft: AppDraft, step: number, now = new Date()) {
+  const expiresAt = new Date(now.getTime() + PORTAL_DAYS * 86_400_000);
+  const open = await openPortalDraft(user.id, now);
+  if (open) {
+    await prisma.applicationLink.update({ where: { id: open.row.id }, data: { draft: seal(open.row.id, "draft", draft), step, savedAt: now, expiresAt } });
+    return open.row.id;
+  }
+  const id = randomUUID();
+  await prisma.applicationLink.create({ data: { id, tokenHash: hashOf(randomBytes(32).toString("base64url")), userId: user.id, recipient: seal(id, "recipient", { name: user.name, email: user.email }), officer: "Borrower's portal", sentById: user.id, draft: seal(id, "draft", draft), step, savedAt: now, expiresAt } });
+  return id;
+}
+
 export async function markSigned(id: string, draft: AppDraft, signature: Signature, dealId: string, now = new Date()) {
   await prisma.applicationLink.update({ where: { id }, data: { draft: seal(id, "draft", draft), status: "signed", signedAt: now, signature: seal(id, "signature", signature), dealId } });
 }
@@ -50,6 +72,13 @@ export const digestOf = (draft: AppDraft) => createHash("sha256").update(JSON.st
 export async function linkSummaries(where: { leadIds?: string[]; dealIds?: string[] }) {
   const rows = await prisma.applicationLink.findMany({ where: { OR: [...(where.leadIds?.length ? [{ leadId: { in: where.leadIds } }] : []), ...(where.dealIds?.length ? [{ dealId: { in: where.dealIds } }] : [])] }, orderBy: { createdAt: "desc" } });
   return rows.map((row) => ({ id: row.id, leadId: row.leadId, dealId: row.dealId, state: stateOf(row), step: row.step, savedAt: row.savedAt?.toISOString() ?? null, signedAt: row.signedAt?.toISOString() ?? null, createdAt: row.createdAt.toISOString(), expiresAt: row.expiresAt.toISOString(), to: unseal<Recipient>(row.id, "recipient", row.recipient).name }));
+}
+
+/** The newest signed application on any of these loans, for a repeat borrower's next one to start from. */
+export async function lastSignedDraft(dealIds: string[]) {
+  if (!dealIds.length) return null;
+  const row = await prisma.applicationLink.findFirst({ where: { dealId: { in: dealIds }, status: "signed" }, orderBy: { signedAt: "desc" } });
+  return row?.dealId ? { dealId: row.dealId, draft: completeDraft(unseal<unknown>(row.id, "draft", row.draft)) } : null;
 }
 
 /** The latest signed application on a loan: the full form and the signature record. */

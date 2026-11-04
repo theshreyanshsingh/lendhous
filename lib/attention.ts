@@ -3,10 +3,12 @@ import { serviceDay, type Book } from "./book";
 import { activeWire, wireVerified } from "./closing";
 import { lienReleaseOpen, openExtension, PRE_FUNDING } from "./loan-exits";
 import { latestScreening } from "./ofac";
-import { staleLetter } from "./payoffs";
+import { dueOf, staleLetter } from "./payoffs";
 import { noticeOwed } from "./adverse-action";
+import { needsOfficer } from "./loan-team";
 
-export type AttentionItem = { key: string; label: string; count: number; href: string };
+/** due: the soonest legal deadline among them, for the queues the law puts a clock on. */
+export type AttentionItem = { key: string; label: string; count: number; href: string; due?: string };
 
 const firstDeal = (ids: string[]) => (ids.length === 1 ? `/admin/deals/${ids[0]}` : "/admin");
 
@@ -36,23 +38,29 @@ export function attentionItems(s: Book, newLeads: number): AttentionItem[] {
   const notices = s.deals.filter((deal) => noticeOwed(deal));
   const submitted = s.deals.filter((deal) => deal.conditions?.some((item) => item.status === "submitted"));
   const conditionCount = submitted.reduce((sum, deal) => sum + deal.conditions!.filter((item) => item.status === "submitted").length, 0);
+  // The soonest legal deadline in each letter queue.
+  const soonest = (days: (string | undefined)[]) => days.filter((day): day is string => Boolean(day)).sort()[0];
+  const letterDue = soonest(s.payoffs.filter((payoff) => payoff.status === "requested").map((payoff) => dueOf(payoff)));
+  const noticeDue = soonest(notices.map((deal) => noticeOwed(deal)?.dueOn));
+  // Most urgent first: letters the law gives a deadline, then money that's about to move or is late, then reviews.
   const items: AttentionItem[] = [
-    { key: "leads", label: "Quote requests to answer", count: counts.leads, href: "/admin/leads" },
+    { key: "notices", label: "Decline notices to send (Reg B)", count: notices.length, href: firstDeal(notices.map((deal) => deal.id)), due: noticeDue },
+    { key: "payoffs", label: "Payoff requests", count: counts.payoffs, href: "/admin/servicing", due: letterDue },
     { key: "sanctions", label: "Possible sanctions matches to review", count: sanctions.length, href: firstDeal(sanctions.map((deal) => deal.id)) },
     { key: "wires", label: "Wire instructions to verify by phone", count: wires.length, href: firstDeal(wires.map((deal) => deal.id)) },
-    { key: "applications", label: "New applications", count: newApps.length, href: firstDeal(newApps.map((deal) => deal.id)) },
-    { key: "conditions", label: "Conditions sent in to review", count: conditionCount, href: firstDeal(submitted.map((deal) => deal.id)) },
-    { key: "documents", label: "Documents to review", count: docs, href: firstDeal(toReview.map((deal) => deal.id)) },
-    { key: "notices", label: "Decline notices to send (Reg B)", count: notices.length, href: firstDeal(notices.map((deal) => deal.id)) },
-    { key: "exceptions", label: "Pricing exceptions to decide", count: exceptions.length, href: firstDeal(exceptions.map((deal) => deal.id)) },
     { key: "funding", label: "Loans waiting on funding approval", count: funding.length, href: firstDeal(funding.map((deal) => deal.id)) },
-    { key: "bids", label: "Partner bids to decide", count: bids.length, href: firstDeal([...new Set(bids.map((bid) => bid.dealId))]) },
-    { key: "draws", label: "Draws in progress", count: counts.draws, href: "/admin/draws" },
-    { key: "payoffs", label: "Payoff requests", count: counts.payoffs, href: "/admin/servicing" },
     { key: "late", label: "Loans past due", count: counts.late, href: "/admin/servicing" },
     { key: "matured", label: "Loans past maturity", count: counts.matured, href: "/admin/servicing" },
     { key: "extensions", label: "Extension requests to decide", count: counts.extensions, href: "/admin/servicing" },
     { key: "releases", label: "Mortgage releases to record", count: counts.releases, href: "/admin/servicing" },
+    { key: "exceptions", label: "Pricing exceptions to decide", count: exceptions.length, href: firstDeal(exceptions.map((deal) => deal.id)) },
+    { key: "bids", label: "Partner bids to decide", count: bids.length, href: firstDeal([...new Set(bids.map((bid) => bid.dealId))]) },
+    { key: "draws", label: "Draws in progress", count: counts.draws, href: "/admin/draws" },
+    { key: "conditions", label: "Conditions sent in to review", count: conditionCount, href: firstDeal(submitted.map((deal) => deal.id)) },
+    { key: "documents", label: "Documents to review", count: docs, href: firstDeal(toReview.map((deal) => deal.id)) },
+    { key: "applications", label: "New applications", count: newApps.length, href: firstDeal(newApps.map((deal) => deal.id)) },
+    { key: "unassigned", label: "Applications with no loan officer", count: s.deals.filter(needsOfficer).length, href: "/admin?team=unassigned" },
+    { key: "leads", label: "Quote requests to answer", count: counts.leads, href: "/admin/leads" },
     { key: "offers", label: "Offers on loans for sale", count: counts.offers, href: "/admin/loan-sales" },
   ];
   return items.filter((item) => item.count > 0);

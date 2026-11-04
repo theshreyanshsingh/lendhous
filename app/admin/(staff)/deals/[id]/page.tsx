@@ -26,9 +26,12 @@ import { TermSheetBuilder } from "@/components/loan/TermSheetBuilder";
 import { ConditionsPanel } from "@/components/loan/ConditionsPanel";
 import { LienProtection } from "@/components/loan/LienProtection";
 import { PropertyPhotos } from "@/components/loan/PropertyPhotos";
+import { LoanTeam } from "@/components/loan/LoanTeam";
+import { closingIn, shortDay } from "@/lib/format";
 import { TermSheetCard } from "@/components/loan/TermSheetCard";
 import { useServiceDay } from "@/components/loan/use-service-day";
 import { Badge, GradeBadge, RatioPill, Section, Stat, usd, pct, k, productLabel, statusLabel, capTone, points, ratioGrid, statGrid } from "@/components/ui";
+import { BrokerFee } from "@/components/loan/BrokerFee";
 
 // Closing starts once the term sheet is accepted, and stays as the record of how the money went out.
 const CLOSING_TAB = ["term_sheet_accepted", "conditions", "clear_to_close", "closing", "funded", "servicing_current", "servicing_delinquent", "matured", "default", "paid_off"];
@@ -66,7 +69,7 @@ export default function DealWorkspace() {
   const matches = s.partners.map((p) => ({ p, m: matchPartner(p.buyBox, { product: d.app.product, state: d.app.state, noteAmount: e.noteAmount, ltarv: e.ratios.find((r) => r.key === "ltarv")?.actual, ltv: e.ratios.find((r) => r.key === "ltv")?.actual, fico: d.app.fico, tier: e.tier, rate: e.rate }) })).sort((a, b) => b.m.match - a.m.match);
   const num = (key: keyof Application, label: string) => (
     <label className="block"><span className="label">{label}</span>
-      <input className="desk-input" inputMode="numeric" value={Number(uwApp[key] ?? 0).toLocaleString("en-US")} onChange={(ev) => setOv({ ...ov, [key]: Number(ev.target.value.replace(/[^0-9.]/g, "") || 0) })} />
+      <input className="desk-input" inputMode="numeric" value={uwApp[key] || !label.includes("optional") ? Number(uwApp[key] ?? 0).toLocaleString("en-US") : ""} placeholder="Not given" onChange={(ev) => setOv({ ...ov, [key]: Number(ev.target.value.replace(/[^0-9.]/g, "") || 0) })} />
       {ov[key] !== undefined && ov[key] !== d.app[key] && <span className="text-[11px] text-warn">borrower said {Number(d.app[key] ?? 0).toLocaleString()}</span>}
     </label>);
   const holdMonths = pricingConfig.assumptions.holdMonths;
@@ -87,7 +90,10 @@ export default function DealWorkspace() {
           <div className="min-w-0"><div className="text-xs text-muted-foreground">{d.loanNumber} · {productLabel[d.app.product]} · source: {d.source.replace("_", " ")}</div>
             <h1 className="text-xl font-normal tracking-tight">{d.address}, {d.city} {d.zip} <span className="font-normal text-faint">({d.app.county})</span></h1>
             <div className="text-sm text-muted-foreground">{d.borrowerName} · {d.entityName} · FICO {d.app.fico} · Tier {e.tier}</div>
-            {broker && <div className="text-sm text-muted-foreground" data-testid="deal-broker">Broker: {broker.name} · {points(d.brokerPoints)} ({usd((orig.noteAmount * (d.brokerPoints ?? 0)) / 100)})</div>}</div>
+            {d.app.repeat && <div className="text-sm text-muted-foreground" data-testid="deal-repeat">{d.app.repeat.pausedBy ? <span className="text-warn">Repeat borrower, pricing paused: a late payment on {d.app.repeat.pausedBy} in the 24 months before {shortDay(d.app.repeat.asOf)}</span> : <>Repeat borrower: {d.app.repeat.loans} LendHous loan{d.app.repeat.loans === 1 ? "" : "s"} paid as agreed ({d.app.repeat.counted.join(", ")}) when it was submitted</>}</div>}
+            {broker && <div className="text-sm text-muted-foreground" data-testid="deal-broker">Broker: {broker.name} · {points(d.brokerPoints)} ({usd((orig.noteAmount * (d.brokerPoints ?? 0)) / 100)})</div>}
+            {PRE_FUNDING.includes(d.status) && <div className="mt-1 text-sm text-muted-foreground" data-testid="loan-facts">Target closing <b className="font-medium text-foreground">{shortDay(d.closingDate)}</b>{today && <> · {closingIn(d.closingDate, today)}</>}</div>}
+            <div className="mt-2"><LoanTeam deal={d} /></div></div>
           <div className="flex flex-wrap items-center gap-2"><GradeBadge grade={e.score.grade} score={e.score.score} /><Badge tone="blue">{statusLabel(d.status)}</Badge><Badge tone={capTone(d.capitalStatus)}>capital: {statusLabel(d.capitalStatus)}</Badge></div>
         </div>
         {d.contractorIsGtAffiliate && <div className="mt-3 rounded-lg bg-bad/10 p-3 text-sm text-bad" data-testid="coi-banner"><b>Conflict of interest:</b> LendHous&apos;s affiliated construction company is the contractor. Draw inspections must be by an independent third party, a second approver outside the construction company is required, and partners must be told.</div>}
@@ -100,7 +106,7 @@ export default function DealWorkspace() {
         {stage && (
           <div className="mt-4 rounded-[2px] border border-border p-3" data-testid="stage-panel">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="min-w-0 text-sm"><span className="text-muted-foreground">Next step:</span> <b>{stage.borrowerStep ? stage.action : statusLabel(stage.to)}</b></div>
+              <div className="min-w-0 text-sm" data-testid="next-step"><span className="text-muted-foreground">Next:</span> <b>{stage.next}</b></div>
               <div className="flex w-full flex-wrap gap-2 sm:w-auto">
                 {funding && wireVerified(d) && !d.fundingApprovers?.includes(viewerName) && (d.fundingApprovers?.length ?? 0) < 2 && <button className="btn-ghost flex-1 sm:flex-none" data-testid="approve-funding" onClick={() => dispatch({ t: "approveFunding", dealId: d.id, by: viewerName })}>Approve funding</button>}
                 {stage.to === "term_sheet_issued" ? <button className="btn-primary flex-1 sm:flex-none" data-testid="build-term-sheet" onClick={() => setTab("Term sheet")}>Build the term sheet</button>
@@ -109,7 +115,7 @@ export default function DealWorkspace() {
             </div>
             {funding && wireVerified(d) && <p className="mt-1 text-xs text-muted-foreground" data-testid="funding-wire">Funds go to {activeWire(d)!.beneficiary}, {activeWire(d)!.bankName}, account {maskAccount(activeWire(d)!.account)}, verified by call-back.</p>}
             {funding && d.fundingApprovers?.length ? <p className="mt-1 text-xs text-muted-foreground" data-testid="funding-approvers">Approved by {d.fundingApprovers.join(" and ")}.</p> : null}
-            {stage.blockers.length > 0 && <ul className="mt-2 space-y-0.5 text-xs text-warn" data-testid="stage-blockers">{stage.blockers.map((blocker) => <li key={blocker}>{blocker}</li>)}</ul>}
+            {stage.blockers.length > 0 && <div className="mt-2 text-xs" data-testid="stage-blockers"><p className="text-muted-foreground">Before that:</p><ul className="mt-1 space-y-0.5 text-warn">{stage.blockers.map((blocker) => <li key={blocker} className="flex gap-1.5"><span aria-hidden="true">○</span><span>{blocker}</span></li>)}</ul></div>}
             {PRE_FUNDING.includes(d.status) && <div className="mt-3 border-t border-border pt-3"><CloseApplication deal={d} side="team" /></div>}
           </div>
         )}
@@ -190,6 +196,7 @@ export default function DealWorkspace() {
       {tab === "Capital Routing" && (
         <div className="grid gap-4 lg:grid-cols-2">
           <div className="min-w-0 space-y-4">
+            <BrokerFee deal={d} />
             <Section title="Recommendation">
               <div className="flex flex-wrap items-center gap-2" data-testid="route-rec"><Badge tone={rec.route === "IN_HOUSE" ? "green" : rec.route === "SPLIT" ? "violet" : "amber"}>{rec.route.replace(/_/g, " ")}</Badge><span className="text-sm text-muted-foreground">because: {rec.reasons.join("; ")}</span></div>
               <p className="mt-1 text-[11px] text-faint">First matching rule wins. A human always confirms.</p>
@@ -255,7 +262,7 @@ export default function DealWorkspace() {
         {(d.scope?.length ?? 0) > 0 && <Section title="Site photos"><PhotoRequests deal={d} /></Section>}
         <Section title="Documents">
           <ul className="divide-y divide-border">{d.docs.map((x) => (
-            <li key={x.id} className="flex flex-wrap items-center justify-between gap-2 py-2"><div className="min-w-0"><div className="text-sm font-medium">{x.name}</div><div className="text-xs text-muted-foreground">{x.category}{x.fileName && !x.documentId && ` · ${x.fileName}`}{x.documentId && <> · <a className="text-link underline underline-offset-2" href={`/api/documents/${x.documentId}`} data-testid="doc-file">{x.fileName}</a></>}</div></div>
+            <li key={x.id} className="flex flex-wrap items-center justify-between gap-2 py-2"><div className="min-w-0"><div className="text-sm font-medium">{x.name}</div><div className="text-xs text-muted-foreground">{x.category}{x.fileName && !x.documentId && ` · ${x.fileName}`}{x.documentId && <> · <a className="text-link underline underline-offset-2" href={`/api/documents/${x.documentId}`} data-testid="doc-file">{x.fileName}</a></>}{x.carriedFrom && <> · <span className="text-good" data-testid="doc-carried">carried over from {x.carriedFrom}</span> <button type="button" className="text-link underline underline-offset-2" data-testid="doc-ask-again" onClick={() => dispatch({ t: "docStatus", dealId: d.id, docId: x.id, status: "requested" })}>ask again</button></>}</div></div>
               <div className="flex flex-wrap items-center gap-2"><Badge>{statusLabel(x.status)}</Badge><DocUpload dealId={d.id} doc={x} />{(x.status === "uploaded" || x.status === "in_review") && <><button className="btn-ghost py-1 text-xs" onClick={() => dispatch({ t: "docStatus", dealId: d.id, docId: x.id, status: "accepted" })}>Accept</button><button className="btn-ghost py-1 text-xs" onClick={() => dispatch({ t: "docStatus", dealId: d.id, docId: x.id, status: "rejected" })}>Reject</button></>}{x.status === "requested" && <button className="btn-ghost py-1 text-xs" data-testid={`waive-${x.id}`} onClick={() => dispatch({ t: "docStatus", dealId: d.id, docId: x.id, status: "waived" })}>Waive</button>}</div></li>))}</ul>
           <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-border pt-3" data-testid="request-doc">
             <label className="block min-w-0 flex-1 basis-48"><span className="label">Ask for another document</span><input data-testid="request-doc-name" className="desk-input" placeholder="e.g. Updated insurance binder" value={request.name} onChange={(ev) => setRequest({ ...request, name: ev.target.value })} /></label>

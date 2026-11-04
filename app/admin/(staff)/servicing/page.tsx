@@ -15,6 +15,7 @@ import { dueOf, latestLetter, receivedOf, requesterLine, requestState, staleLett
 import { lienReleaseDaysLeft, lienReleaseDue, lienReleaseOpen, maturityAfter, openExtension } from "@/lib/loan-exits";
 import { addDays, balanceOf, ledger, SERVICED } from "@/lib/servicing";
 import { est, useStore } from "@/lib/store";
+import { shortDay } from "@/lib/format";
 
 export default function Servicing() {
   const { s, dispatch } = useStore();
@@ -65,7 +66,7 @@ export default function Servicing() {
               <li key={payoff.id} className="flex flex-wrap items-center justify-between gap-2 py-3" data-testid="payoff-row">
                 <div className="min-w-0">
                   <Link href={`/admin/deals/${deal.id}`} className="font-medium text-link hover:underline">{deal.loanNumber}</Link> <span className="text-sm wrap-anywhere">· {requesterLine(payoff)}</span>
-                  <div className="text-xs text-muted-foreground">{letter ? `Letter ${letter.number}: ${usd(letter.total, 2)} through ${letter.goodThrough}` : `About ${usd(payoff.total, 2)} through ${payoff.goodThrough}`} · received {receivedOf(payoff)}</div>
+                  <div className="text-xs text-muted-foreground">{letter ? `Letter ${letter.number}: ${usd(letter.total, 2)} through ${shortDay(letter.goodThrough)}` : `About ${usd(payoff.total, 2)} through ${shortDay(payoff.goodThrough)}`} · received {shortDay(receivedOf(payoff))}</div>
                   {payoff.status === "requested" && <div className={`text-xs ${due.tone}`} data-testid="payoff-due">{due.text}. Florida gives 10 days.</div>}
                   {stale && <div className="text-xs text-bad" data-testid="payoff-row-stale">Out of date: now {usd(stale.now.total, 2)}. Send a corrected letter.</div>}
                 </div>
@@ -101,7 +102,7 @@ export default function Servicing() {
               const left = today ? lienReleaseDaysLeft(deal, today) : 0;
               return (
                 <li key={deal.id} className="flex flex-wrap items-center justify-between gap-2 py-3" data-testid="release-row">
-                  <div className="min-w-0"><Link href={`/admin/deals/${deal.id}`} className="font-medium text-link hover:underline">{deal.loanNumber}</Link> <span className="text-sm">· {deal.borrowerName}</span><div className="text-xs text-muted-foreground">Paid off {deal.paidOff!.receivedOn}{deal.paidOff!.release?.sentOn ? ` · sent for recording ${deal.paidOff!.release.sentOn}` : ""}</div></div>
+                  <div className="min-w-0"><Link href={`/admin/deals/${deal.id}`} className="font-medium text-link hover:underline">{deal.loanNumber}</Link> <span className="text-sm">· {deal.borrowerName}</span><div className="text-xs text-muted-foreground">Paid off {shortDay(deal.paidOff!.receivedOn)}{deal.paidOff!.release?.sentOn ? ` · sent for recording ${deal.paidOff!.release.sentOn}` : ""}</div></div>
                   <span className={`text-xs ${left < 0 ? "text-bad" : left <= 14 ? "text-warn" : "text-muted-foreground"}`}>Due out by {lienReleaseDue(deal)}{today ? ` (${left < 0 ? `${-left} days late` : `${left} days left`})` : ""}</span>
                 </li>
               );
@@ -125,7 +126,7 @@ export default function Servicing() {
                   <td data-label="Payment" className="text-right">{usd(fundedBalances(e, deal.app, deal.disbursedDraws).nextPayment)}</td>
                   <td data-label="Due now" className={`text-right ${l.amountDue ? "text-bad" : ""}`} data-testid="serviced-due">{usd(l.amountDue, 2)}</td>
                   <td data-label="Next due" className="whitespace-nowrap" data-testid="serviced-next-due">{l.nextDue ?? "—"}</td>
-                  <td data-label="Matures" className={`whitespace-nowrap ${l.matured ? "text-bad" : l.daysToMaturity <= 60 ? "text-warn" : ""}`}>{l.maturity}</td>
+                  <td data-label="Matures" className={`whitespace-nowrap ${l.matured ? "text-bad" : l.daysToMaturity <= 60 ? "text-warn" : ""}`}>{shortDay(l.maturity)}</td>
                   <td data-label="Status">{deal.status === "default" ? <Badge tone="rose">Default</Badge> : l.matured ? <Badge tone="rose">Matured</Badge> : deal.paymentsLate ? <Badge tone="rose">{deal.paymentsLate} past due</Badge> : <Badge tone="green">Current</Badge>}{l.daysPastDue >= 30 && <div className="mt-1 text-xs text-bad">{l.daysPastDue} days</div>}</td>
                   <td className="text-right"><button className="btn-ghost h-9! w-full px-3! text-xs! lg:w-auto" data-testid="record-payment" onClick={() => setPaying({ id: deal.id, payoff: false })}>Record payment</button></td>
                 </tr>

@@ -7,11 +7,12 @@ import { hasPermission, requirePermission } from "@/lib/auth";
 import type { Viewer } from "@/lib/book-access";
 import { sendAlerts } from "@/lib/book-alerts";
 import { readBook, runAction } from "@/lib/book-store";
-import { completeDraft, CONSENT_VERSION, CONSENTS, draftFromBrief, draftFromDeal, draftFromQuote, LINK_DAYS, signProblems, STEPS, toLoan, withoutSsn, type AppDraft, type ConsentKey } from "@/lib/borrower-application";
+import { completeDraft, CONSENT_VERSION, draftFromBrief, draftFromDeal, draftFromQuote, LINK_DAYS, signatureProblem, STEPS, toLoan, withoutSsn, type AppDraft, type ConsentKey } from "@/lib/borrower-application";
 import { isDemoEmail } from "@/lib/deploy";
 import { notify, notifyTeam } from "@/lib/email";
 import { openLead, openQuote } from "@/lib/lead-store";
 import { borrowerFor, screenAutomatically, staffActor } from "@/lib/loan-intake";
+import { memberById } from "@/lib/loan-team-store";
 import { notDeleted, prisma } from "@/lib/prisma";
 import { moveLeadPhotos } from "@/lib/property-photos";
 import { consumeRateLimit } from "@/lib/rate-limit";
@@ -72,13 +73,9 @@ export async function signApplication(token: string, raw: unknown, consents: Rec
   const link = await openApplicationLink(token);
   if (!link || link.state !== "open") return { error: "This link no longer works. Ask your loan officer for a new one." };
   const draft = completeDraft(raw);
-  const today = servicingDate(new Date());
-  const problems = signProblems(draft, today);
-  if (problems.length) return { error: problems[0] };
-  if (!CONSENTS.every((item) => consents[item.key] === true)) return { error: "Check each of the four boxes to agree." };
+  const problem = signatureProblem(draft, consents, signatureName, servicingDate(new Date()));
+  if (problem) return { error: problem };
   const signer = signatureName.replace(/\s+/g, " ").trim();
-  const names = [draft.contact, ...draft.guarantors].map((person) => `${person.firstName} ${person.lastName}`.replace(/\s+/g, " ").trim().toLowerCase());
-  if (!names.includes(signer.toLowerCase())) return { error: "Type your full legal name exactly as you entered it in the application." };
   const sender = await staffActor(link.row.sentById);
   if (!sender) return { error: "Your loan officer's account has changed. Ask them for a new link." };
   const loan = toLoan(draft);
@@ -91,10 +88,13 @@ export async function signApplication(token: string, raw: unknown, consents: Rec
     // A new loan, started by the loan officer who sent the link, for the borrower's portal account.
     const account = await borrowerFor(sender, loan.borrowerName, loan.email, true);
     if (account.error) return { error: "We couldn't set up your portal account. Your loan officer will be in touch." };
-    const result = await runAction(sender, { t: "submitApp", app: loan.app, address: loan.address, city: loan.city, zip: loan.zip, entityName: loan.entityName, exitStrategy: loan.exitStrategy, client: { name: loan.borrowerName, borrowerId: account.id }, source: "website_lead", sponsor: loan.sponsor });
+    const result = await runAction(sender, { t: "submitApp", app: loan.app, address: loan.address, city: loan.city, zip: loan.zip, entityName: loan.entityName, exitStrategy: loan.exitStrategy, closingDate: loan.closingDate, client: { name: loan.borrowerName, borrowerId: account.id }, source: "website_lead", sponsor: loan.sponsor });
     if ("error" in result) return { error: result.error };
     dealId = result.after.deals.find((item) => !result.before.deals.some((old) => old.id === item.id))!.id;
     await sendAlerts(result.before, result.after, result.action);
+    // The loan officer who sent the link is the loan's officer.
+    const officer = await memberById(sender.id);
+    if (officer) await runAction(sender, { t: "assignLoanTeam", dealId, role: "officer", member: officer, by: sender.name }, { trusted: true });
     if (link.row.leadId) {
       await prisma.lead.update({ where: { id: link.row.leadId }, data: { loanId: dealId } });
       // The photos sent with the quote or on this link go to the new loan.

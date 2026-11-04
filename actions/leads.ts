@@ -3,9 +3,10 @@
 import { revalidatePath } from "next/cache";
 import { audit } from "@/lib/audit";
 import { requirePermission } from "@/lib/auth";
+import { brokerByReferral } from "@/lib/broker-store";
 import { notifyTeam } from "@/lib/email";
-import { sealLead, sealQuote } from "@/lib/lead-store";
-import { prisma } from "@/lib/prisma";
+import { openLead, sealLead, sealQuote } from "@/lib/lead-store";
+import { notDeleted, prisma } from "@/lib/prisma";
 import { issuePhotoKey } from "@/lib/property-photos";
 import { EXPERIENCE_LABEL, LOAN_TYPES, quoteProblem, quoteSummary } from "@/lib/quote";
 import { consumeRateLimit } from "@/lib/rate-limit";
@@ -18,7 +19,7 @@ export type QuoteReply = { sent: boolean; error: string; photoKey?: string };
  * The public quote request. Open to anyone, so it's rate limited and has the same honeypot. The visitor's indicative terms
  * are worked out in their browser from the pricing the page was sent; this keeps the request for the team.
  */
-export async function sendQuote(raw: unknown, honeypot = ""): Promise<QuoteReply> {
+export async function sendQuote(raw: unknown, honeypot = "", referral?: string): Promise<QuoteReply> {
   if (honeypot) return { sent: true, error: "" };
   const checked = quoteProblem(raw);
   if ("error" in checked) return { sent: false, error: checked.error };
@@ -29,22 +30,33 @@ export async function sendQuote(raw: unknown, honeypot = ""): Promise<QuoteReply
   // The person to reply to: the broker who sent it, or the borrower.
   const contact = quote.submitter === "broker" && quote.broker ? { name: `${quote.broker.name} (broker for ${quote.borrower.firstName} ${quote.borrower.lastName})`, email: quote.broker.email, phone: quote.broker.phone } : { name: `${quote.borrower.firstName} ${quote.borrower.lastName}`, email: quote.borrower.email, phone: quote.borrower.phone };
   const details = { ...contact, strategy: LOAN_TYPES[quote.loanType], experience: EXPERIENCE_LABEL[quote.experience], city: quote.address.city, state: quote.address.state, propertyValueCents: Math.round(quote.purchasePrice * 100), renovationCents: Math.round(quote.rehab * 100), requestedLoanCents: Math.round((quote.requestedAmount ?? 0) * 100), targetClosing: quote.fundingDate, notes: quote.notes || "(no notes)" };
+  // Looked up here, not taken from the browser: only an approved brokerage's code counts.
+  const broker = await brokerByReferral(referral).catch(() => null);
   let leadId: string;
   try {
     const sealed = sealLead(details);
-    leadId = (await prisma.lead.create({ data: { ...sealed, submitter: quote.submitter, arvCents: quote.arv ? Math.round(quote.arv * 100) : null, quote: sealQuote(quote, sealed.id) } })).id;
+    leadId = (await prisma.lead.create({ data: { ...sealed, submitter: quote.submitter, brokerId: broker?.id ?? null, arvCents: quote.arv ? Math.round(quote.arv * 100) : null, quote: sealQuote(quote, sealed.id) } })).id;
   } catch (error) {
     console.error("[lendhous-leads] could not save a quote request:", error);
     return { sent: false, error: "We couldn't send this just now. Please try again in a few minutes." };
   }
   try {
-    await audit({ actorId: null, action: "lead.created", entityType: "Lead", entityId: leadId, after: { kind: "quote", submitter: quote.submitter } });
+    await audit({ actorId: null, action: "lead.created", entityType: "Lead", entityId: leadId, after: { kind: "quote", submitter: quote.submitter, ...(broker ? { referredBy: broker.id } : {}) } });
     const origin = process.env.NEXT_PUBLIC_APP_URL || "";
-    await notifyTeam(`New quote request: ${LOAN_TYPES[quote.loanType]}, ${quote.address.city}, ${quote.address.state}`, `${quoteSummary(quote)}\n\nOpen the leads inbox: ${origin}/admin/leads`, "lead.new", contact.email);
+    await notifyTeam(`New quote request: ${LOAN_TYPES[quote.loanType]}, ${quote.address.city}, ${quote.address.state}`, `${quoteSummary(quote)}${broker ? `\n\nReferred by ${broker.name}.` : ""}\n\nOpen the leads inbox: ${origin}/admin/leads`, "lead.new", contact.email);
   } catch (error) {
     console.error("[lendhous-leads] could not alert the team:", error);
   }
   return { sent: true, error: "", photoKey: await issuePhotoKey(leadId).catch(() => undefined) };
+}
+
+/** Website leads whose name, email or city has the text, newest first, for the staff search. They're sealed, so they're opened here. */
+export async function searchLeads(query: string): Promise<{ id: string; name: string; place: string }[]> {
+  await requirePermission("view_pipeline");
+  const needle = query.trim().toLowerCase();
+  if (needle.length < 2 || needle.length > 80) return [];
+  const rows = await prisma.lead.findMany({ where: notDeleted, orderBy: { createdAt: "desc" }, take: 300 });
+  return rows.map(openLead).filter((lead) => [lead.name, lead.email, lead.city].some((value) => value.toLowerCase().includes(needle))).slice(0, 5).map((lead) => ({ id: lead.id, name: lead.name, place: [lead.city, lead.state].filter(Boolean).join(", ") }));
 }
 
 export async function markLeadContacted(formData: FormData) {

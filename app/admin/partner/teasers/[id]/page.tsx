@@ -5,6 +5,8 @@ import { useState } from "react";
 import { useStore } from "@/lib/store";
 import { teaserOf } from "@/lib/teaser";
 import { Badge, GradeBadge, RatioPill, Section, Stat, usd, productLabel, ratioGrid, statGrid } from "@/components/ui";
+import { shortDay } from "@/lib/format";
+import { PartnerFunds } from "@/components/loan/PartnerFunds";
 
 export default function TeaserDetail() {
   const { id } = useParams<{ id: string }>(); const { s, dispatch } = useStore();
@@ -19,7 +21,7 @@ export default function TeaserDetail() {
   return (
     <div className="space-y-4">
       <Link href="/admin/partner" className="text-sm text-link">← Deal feed</Link>
-      <div className="glass p-5"><div className="flex flex-wrap items-start justify-between gap-2"><div><div className="text-xs text-muted-foreground">{t.teaserId} · {productLabel[t.product]} · closing target {t.closingDate}</div><h1 className="text-xl font-normal tracking-tight">{won ? `${d.address}, ${d.city} ${d.zip}` : `${t.county} County · ZIP ${t.zip3}`}</h1><div className="text-sm text-muted-foreground">{won ? `${d.borrowerName} · ${d.entityName}` : "Borrower identity hidden until a binding commitment"}</div></div><GradeBadge grade={t.grade} score={t.score} /></div></div>
+      <div className="glass p-5"><div className="flex flex-wrap items-start justify-between gap-2"><div><div className="text-xs text-muted-foreground">{t.teaserId} · {productLabel[t.product]} · closing target {shortDay(t.closingDate)}</div><h1 className="text-xl font-normal tracking-tight">{won ? `${d.address}, ${d.city} ${d.zip}` : `${t.county} County · ZIP ${t.zip3}`}</h1><div className="text-sm text-muted-foreground">{won ? `${d.borrowerName} · ${d.entityName}` : "Borrower identity hidden until a binding commitment"}</div></div><GradeBadge grade={t.grade} score={t.score} /></div></div>
       <div className="grid gap-4 lg:grid-cols-[1fr_380px]">
         <div className="space-y-4">
           <Section title="Blind summary">
@@ -33,6 +35,7 @@ export default function TeaserDetail() {
           </Section>
         </div>
         <div className="space-y-4">
+          {won && <PartnerFunds deal={d} side="partner" />}
           {myBid ? (
             <Section title="Your response"><div className="text-sm" data-testid="my-bid"><Badge tone={won ? "green" : myBid.status === "declined" ? "slate" : "violet"}>{won ? "accepted: commitment issued" : myBid.status}</Badge><p className="mt-2 text-muted-foreground">{myBid.type === "accept_as_offered" ? "Accepted as offered" : "Bid"}: {myBid.pct}% · {myBid.lenderRate}% yield · {myBid.lenderPoints} pts</p>{won && <p className="mt-2 rounded-md bg-good/10 p-2 text-good">Next: wire funds to the verified title escrow account by the funding deadline. Confirm by phone call-back before sending.</p>}</div></Section>
           ) : (

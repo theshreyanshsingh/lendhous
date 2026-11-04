@@ -40,6 +40,8 @@ export default function ApplicationWizard({ mode = "borrower", prefill }: { mode
   const staff = mode === "staff";
   const [client, setClient] = useState({ name: prefill?.name ?? "", email: prefill?.email ?? "", invite: Boolean(prefill?.email), points: 1 });
   const [sending, setSending] = useState(false);
+  const [quoting, setQuoting] = useState(false);
+  const [quoteNote, setQuoteNote] = useState("");
   const [step, setStep] = useState(0);
   const [direction, setDirection] = useState<1 | -1>(1);
   const move = (to: number) => { setDirection(to >= step ? 1 : -1); setStep(to); };
@@ -71,6 +73,18 @@ export default function ApplicationWizard({ mode = "borrower", prefill }: { mode
     ] : []),
   ].filter((item): item is string => Boolean(item));
   const needsClient = (broker || staff) && !client.name.trim();
+  // The broker's quote PDF for their client, priced on the server on today's numbers.
+  const downloadQuote = async () => {
+    setQuoting(true); setQuoteNote("");
+    const reply = await fetch("/api/broker-quote", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ app: priced, client: client.name, points: client.points, address: [addr.address, addr.city, addr.zip].filter(Boolean).join(", ") }) }).catch(() => null);
+    setQuoting(false);
+    if (!reply?.ok) return setQuoteNote(reply ? await reply.text() : "That didn't go through. Check your connection and try again.");
+    const url = URL.createObjectURL(await reply.blob());
+    const link = document.createElement("a");
+    link.href = url; link.download = "lendhous-quote.pdf"; link.click();
+    URL.revokeObjectURL(url);
+    setQuoteNote("Downloaded. It says it's an estimate, not a commitment.");
+  };
   const submit = async () => {
     setSending(true);
     const action = { t: "submitApp" as const, app: priced, address: addr.address, city: addr.city, zip: addr.zip, entityName: addr.entityName, exitStrategy: addr.exit, client: broker ? { name: client.name.trim(), brokerId: s.brokerId, brokerPoints: client.points } : staff ? { name: client.name.trim() } : undefined, source: staff ? "staff" : undefined, sponsor: collect ? sponsor : undefined };
@@ -152,7 +166,7 @@ export default function ApplicationWizard({ mode = "borrower", prefill }: { mode
               <label className="block"><span className="label">State the LLC was formed in</span><input className="desk-input" data-testid="entity-state" maxLength={2} value={profile.entityState} onChange={(x) => setProfile({ ...profile, entityState: x.target.value.replace(/[^a-zA-Z]/g, "").toUpperCase() })} /></label>
               <Num label="Cash and reserves you can show on bank statements" value={a.liquidity} onChange={(v) => set({ liquidity: v ?? 0 })} hint={`This loan needs about $${Math.round(e.cashToClose).toLocaleString()} to close, plus reserves`} />
               <Num label="Earnest money already paid" value={a.earnestMoney} onChange={(v) => set({ earnestMoney: v })} />
-              {staff && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!a.repeatBorrower} onChange={(x) => set({ repeatBorrower: x.target.checked })} /> Repeat LendHous borrower</label>}
+              {staff && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!a.repeatBorrower} onChange={(x) => set({ repeatBorrower: x.target.checked })} /> Paid a LendHous loan before this system (counts as one; loans here are counted on their own)</label>}
               {staff && <label className="flex items-start gap-2 text-sm sm:col-span-2"><input type="checkbox" className="mt-1" data-testid="collect-profile" checked={collect} onChange={(x) => setCollect(x.target.checked)} /> I have the guarantors, past deals and credit answers now. Otherwise the borrower is asked for them on their loan page.</label>}
               {staff && !collect && <>
                 <Num testid="fico" label="Credit score (estimate)" value={a.fico} onChange={(v) => set({ fico: v ?? 0 })} />
@@ -169,6 +183,13 @@ export default function ApplicationWizard({ mode = "borrower", prefill }: { mode
               <div>Price {a.purchasePrice.toLocaleString()} · Rehab {a.rehab.toLocaleString()} · ARV {a.arv.toLocaleString()}</div>
               <div>{collect ? `${profile.guarantors.length} guarantor${profile.guarantors.length === 1 ? "" : "s"} · qualifying score ${qualifyingFico(sponsor.guarantors)}` : `Score ${a.fico}`} · {priced.verifiedDeals} past deal{priced.verifiedDeals === 1 ? "" : "s"} · Tier {e.tier}</div>
             </div>
+            {broker && (
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border p-3" data-testid="broker-quote">
+                <p className="min-w-0 flex-1 basis-56 text-sm text-muted-foreground">A quote for your client with your brokerage&apos;s name, LendHous as the lender, and your fee shown. Nothing is sent to LendHous until you submit.</p>
+                <button type="button" className="btn-ghost" data-testid="broker-quote-pdf" disabled={quoting || !client.name.trim()} onClick={() => void downloadQuote()}>{quoting ? "Making it…" : "Download a quote (PDF)"}</button>
+                {quoteNote && <p className="w-full text-xs text-muted-foreground" role="status" data-testid="broker-quote-note">{quoteNote}</p>}
+              </div>
+            )}
             <div data-testid="needs-preview">
               <h2 className="text-sm font-medium">After you submit, we&apos;ll ask for</h2>
               <ul className="mt-2 grid gap-1 text-sm text-muted-foreground sm:grid-cols-2">{needsList(priced, collect ? sponsor : undefined).map((item) => <li key={item.id}>· {item.name}</li>)}</ul>

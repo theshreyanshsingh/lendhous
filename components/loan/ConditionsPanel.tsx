@@ -6,6 +6,7 @@ import { addProblem, blockingConditions, CATEGORIES, CONDITION_STATUS, isDone, l
 import type { ConditionCategory, ConditionOwner, Deal, LoanCondition } from "@/lib/mockData";
 import { useStore } from "@/lib/store";
 import { useServiceDay } from "./use-service-day";
+import { shortDay } from "@/lib/format";
 
 const small = "h-9! px-3! text-xs!";
 export const conditionTone = (status: LoanCondition["status"]) => (status === "cleared" ? "green" : status === "submitted" ? "blue" : status === "waived" ? "slate" : "amber") as "green";
@@ -79,7 +80,7 @@ export function ConditionsPanel({ deal }: { deal: Deal }) {
                     <div className="min-w-0"><p className="font-medium">{condition.title}</p>{condition.detail && <p className="text-xs text-muted-foreground">{condition.detail}</p>}</div>
                     <span className="flex flex-wrap items-center gap-1.5"><Badge>{OWNERS[condition.owner]}</Badge><Badge tone={conditionTone(condition.status)}>{CONDITION_STATUS[condition.status]}</Badge></span>
                   </div>
-                  <p className={`text-xs ${today && overdue(condition, today) ? "text-bad" : "text-muted-foreground"}`}>{condition.dueOn ? `Due ${condition.dueOn}${today && overdue(condition, today) ? " (overdue)" : ""}` : "No due date"} · added by {condition.addedBy} on {shortDate(condition.addedAt)}{condition.needsUpload ? " · needs a file" : ""}</p>
+                  <p className={`text-xs ${today && overdue(condition, today) ? "text-bad" : "text-muted-foreground"}`}>{condition.dueOn ? `Due ${shortDay(condition.dueOn)}${today && overdue(condition, today) ? " (overdue)" : ""}` : "No due date"} · added by {condition.addedBy} on {shortDate(condition.addedAt)}{condition.needsUpload ? " · needs a file" : ""}</p>
                   <ConditionFiles condition={condition} local={local} />
                   {condition.returned && condition.status === "open" && <p className="text-xs text-warn">Sent back by {condition.returned.by}: {condition.returned.reason}</p>}
                   {condition.cleared && <p className="text-xs text-good">Cleared by {condition.cleared.by} on {shortDate(condition.cleared.at)}{condition.cleared.note ? `: ${condition.cleared.note}` : ""}</p>}

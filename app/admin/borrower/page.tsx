@@ -7,6 +7,7 @@ import { fundedBalances } from "@/lib/engine";
 import Tracker from "@/components/Tracker";
 import { PageIntro } from "@/components/page-intro";
 import { Badge, usd, productLabel, statusLabel, Stat } from "@/components/ui";
+import { BorrowerLetters } from "@/components/BorrowerLetters";
 
 export default function BorrowerHome() {
   const { s, viewerName } = useStore();
@@ -16,9 +17,10 @@ export default function BorrowerHome() {
     <div className="space-y-5">
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div className="min-w-0"><PageIntro eyebrow="Welcome back" title={viewerName} lede="Your applications and funded loans. Open one to see its next step and upload documents." /></div>
-        <Link href="/admin/apply" className="btn-primary mb-6">+ Start a new loan</Link>
+        <Link href="/admin/apply" className="btn-primary mb-6">+ Apply for a loan</Link>
       </div>
       {tasks.length > 0 && <div className="glass border-warn/30 bg-warn/12 p-4 text-sm text-warn"><b>{tasks.length} document{tasks.length > 1 ? "s" : ""} needed</b> across your loans. Open a loan to upload.</div>}
+      <BorrowerLetters />
       {mine.length === 0 && <div className="glass p-6 text-sm text-muted-foreground" data-testid="no-loans">No loans yet. Start an application to get an instant estimate.</div>}
       <div className="grid gap-4 lg:grid-cols-2">
         {mine.map((d) => {

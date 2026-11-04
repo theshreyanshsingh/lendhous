@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { PageHead } from "@/components/site-chrome";
+import { brokerByReferral } from "@/lib/broker-store";
 import { loadPricing } from "@/lib/pricing-store";
 import { currentPricing } from "@/lib/pricing-versions";
 import { getSettings } from "@/lib/settings";
@@ -13,13 +14,15 @@ export const metadata: Metadata = {
 // Indicative terms come from the pricing the owner last published, so the page is built per visit.
 export const dynamic = "force-dynamic";
 
-export default async function Start() {
+export default async function Start({ searchParams }: { searchParams: Promise<{ ref?: string }> }) {
   await loadPricing();
+  // A broker's referral link: the request, and the loan it becomes, are attributed to the brokerage.
+  const referral = await brokerByReferral((await searchParams).ref).catch(() => null);
   return (
     <>
       <PageHead eyebrow="LOAN QUOTE REQUEST" title="Tell us about the deal." description="A borrower or a broker can send it. You'll see indicative terms as soon as it's in, and a loan officer follows up the same business day." />
       <main className="content quote-layout">
-        <QuoteRequest pricing={currentPricing()} signupOpen={(await getSettings()).allowSignup !== false} />
+        <QuoteRequest pricing={currentPricing()} signupOpen={(await getSettings()).allowSignup !== false} referral={referral ? { code: (await searchParams).ref!, name: referral.name } : undefined} />
         <aside className="panel" style={{ position: "sticky", top: 24 }}>
           <div className="eyebrow">WHAT HAPPENS NEXT</div>
           <ol className="quote-next">

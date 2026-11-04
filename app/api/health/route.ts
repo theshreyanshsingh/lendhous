@@ -1,4 +1,6 @@
 import { encryptionMode } from "@/lib/crypto";
+import { STALE_HOURS, staleJobs } from "@/lib/health";
+import { lastJobRuns } from "@/lib/health-store";
 import { resolveMailTransport } from "@/lib/mail-config";
 import { prisma } from "@/lib/prisma";
 import { limitStore } from "@/lib/rate-limit";
@@ -7,8 +9,9 @@ import { storageMode } from "@/lib/storage";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Unauthenticated, like UPB's: modes only, never secrets.
-export async function GET() {
+// Unauthenticated, like UPB's: modes only, never secrets. With ?watch=jobs (what the uptime monitor calls) it's also
+// 503 when the servicing or sanctions job hasn't finished in STALE_HOURS, so a stopped jobs process raises the alarm.
+export async function GET(request: Request) {
   let db: "ok" | "down" = "ok";
   try {
     await prisma.$runCommandRaw({ ping: 1 });
@@ -19,11 +22,13 @@ export async function GET() {
   let servicingCheckedAt: string | null = null;
   // And when Treasury's sanctions list was last downloaded: screenings against a stale list prove less every day.
   let sanctionsListAt: string | null = null;
+  let stale: string[] = [];
   if (db === "ok") {
     try {
       const run = await prisma.jobRun.findFirst({ where: { job: "servicing", ok: true }, orderBy: { finishedAt: "desc" }, select: { finishedAt: true } });
       servicingCheckedAt = run?.finishedAt?.toISOString() ?? null;
       sanctionsListAt = (await prisma.sanctionsList.findUnique({ where: { id: "sdn" }, select: { fetchedAt: true } }))?.fetchedAt.toISOString() ?? null;
+      stale = staleJobs(await lastJobRuns(), new Date());
     } catch {
       servicingCheckedAt = null;
     }
@@ -38,7 +43,10 @@ export async function GET() {
     cron: Boolean(process.env.CRON_SECRET),
     servicingCheckedAt,
     sanctionsListAt,
+    staleJobs: stale,
+    staleAfterHours: STALE_HOURS,
     time: new Date().toISOString(),
   };
-  return Response.json(body, { status: db === "ok" ? 200 : 503 });
+  const watching = new URL(request.url).searchParams.get("watch") === "jobs";
+  return Response.json(body, { status: db !== "ok" || (watching && stale.length) ? 503 : 200, headers: { "Cache-Control": "no-store" } });
 }

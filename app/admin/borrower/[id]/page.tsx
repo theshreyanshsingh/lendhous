@@ -17,13 +17,17 @@ import { TermSheetCard } from "@/components/loan/TermSheetCard";
 import { BorrowerConditions } from "@/components/loan/BorrowerConditions";
 import { PropertyPhotos } from "@/components/loan/PropertyPhotos";
 import Tracker from "@/components/Tracker";
+import { TeamContacts } from "@/components/loan/LoanTeam";
+import { NeedsFromYou } from "@/components/loan/NeedsFromYou";
+import { NextLoan } from "@/components/loan/NextLoan";
 import { Badge, Section, Stat, usd, pct, productLabel, statusLabel } from "@/components/ui";
 import type { DocStatus } from "@/lib/mockData";
+import { shortDay } from "@/lib/format";
 
 const docTone: Record<DocStatus, "slate" | "blue" | "amber" | "green" | "rose" | "violet"> = { requested: "amber", uploaded: "blue", in_review: "violet", accepted: "green", rejected: "rose", waived: "slate" };
 
 export default function BorrowerLoan() {
-  const { id } = useParams<{ id: string }>(); const { s, uploadDoc, local } = useStore();
+  const { id } = useParams<{ id: string }>(); const { s, uploadDoc } = useStore();
   const d = s.deals.find((x) => x.id === id);
   const fileRef = useRef<HTMLInputElement>(null); const [target, setTarget] = useState<string | null>(null); const [drag, setDrag] = useState<string | null>(null);
   if (!d) return <div className="glass p-6">Loan not found. <Link className="underline" href="/admin/borrower">Back</Link></div>;
@@ -41,14 +45,16 @@ export default function BorrowerLoan() {
         {!closed && <div className="mt-3 text-sm text-muted-foreground">Next step: {d.status === "paid_off" ? "Nothing. Your loan is paid in full." : d.status === "term_sheet_issued" ? "Review and accept your term sheet below." : funded ? "Make your monthly payment or request a draw." : d.docs.some((x) => x.status === "requested" || x.status === "rejected") ? "Upload the documents marked Requested below." : "Your team is reviewing. We'll notify you of the next step."}</div>}
         {PRE_FUNDING.includes(d.status) && <div className="mt-3"><CloseApplication deal={d} side="borrower" /></div>}
       </div>
+      {(funded || d.status === "paid_off") && <NextLoan deal={d} />}
       {!d.sponsor && ["submitted", "initial_review", "underwriting"].includes(d.status) && (
         <div className="glass flex flex-wrap items-center justify-between gap-3 border-warn/40 p-4" data-testid="finish-profile">
           <div className="min-w-0 flex-1 basis-64"><h2 className="text-base font-medium">Finish your application</h2><p className="text-sm text-muted-foreground">Add your guarantors and past deals, and answer the credit questions, so the team can price and approve your loan.</p></div>
           <Link href={`/admin/borrower/${d.id}/profile`} className="btn-primary">Finish it now</Link>
         </div>
       )}
+      {!closed && d.status !== "paid_off" && <NeedsFromYou deal={d} />}
       <TermSheetCard deal={d} canSign />
-      <BorrowerConditions deal={d} canUpload />
+      <div id="conditions"><BorrowerConditions deal={d} canUpload /></div>
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="min-w-0 space-y-4">
         <Section title="Document center" right={<span className="text-xs text-muted-foreground">{d.docs.filter((x) => x.status === "accepted").length}/{d.docs.length} accepted</span>}>
@@ -59,11 +65,11 @@ export default function BorrowerLoan() {
               <div key={c}><div className="mb-1.5 text-xs text-faint">{c}</div>
                 <ul className="divide-y divide-border rounded-lg border border-border">
                   {d.docs.filter((x) => x.category === c).map((x) => (
-                    <li key={x.id} data-testid={`doc-${x.id}`}
+                    <li key={x.id} id={`doc-${x.id}`} data-testid={`doc-${x.id}`}
                       onDragOver={(ev) => { ev.preventDefault(); setDrag(x.id); }} onDragLeave={() => setDrag(null)}
                       onDrop={(ev) => { ev.preventDefault(); setDrag(null); const f = ev.dataTransfer.files?.[0]; if (f) void upload(x.id, f); }}
                       className={`flex flex-wrap items-center justify-between gap-2 p-3 ${drag === x.id ? "bg-active" : ""}`}>
-                      <div className="min-w-0"><div className="text-sm font-medium">{x.name}</div>{x.fileName && (x.documentId ? <a href={`/api/documents/${x.documentId}`} className="block truncate text-xs text-link underline underline-offset-2" data-testid="doc-file">📎 {x.fileName}</a> : <div className="truncate text-xs text-muted-foreground">📎 {x.fileName}</div>)}{x.note && x.status !== "accepted" && <div className="text-xs text-muted-foreground">{x.note}</div>}{x.status === "rejected" && <div className="text-xs text-bad">Rejected: please upload a clearer, complete copy</div>}</div>
+                      <div className="min-w-0"><div className="text-sm font-medium">{x.name}</div>{x.fileName && (x.documentId ? <a href={`/api/documents/${x.documentId}`} className="block truncate text-xs text-link underline underline-offset-2" data-testid="doc-file">📎 {x.fileName}</a> : <div className="truncate text-xs text-muted-foreground">📎 {x.fileName}</div>)}{x.carriedFrom ? <div className="text-xs text-good" data-testid="doc-carried">On file from your loan {x.carriedFrom}</div> : x.note && x.status !== "accepted" && <div className="text-xs text-muted-foreground">{x.note}</div>}{x.status === "rejected" && <div className="text-xs text-bad">Rejected: please upload a clearer, complete copy</div>}</div>
                       <div className="flex items-center gap-2"><Badge tone={docTone[x.status]}>{statusLabel(x.status)}</Badge>
                         {(x.status === "requested" || x.status === "rejected" || x.status === "uploaded") && <button className="btn-ghost py-1 text-xs" onClick={() => { setTarget(x.id); fileRef.current?.click(); }}>{x.status === "uploaded" ? "Replace" : "Upload"}</button>}</div>
                     </li>))}
@@ -72,17 +78,17 @@ export default function BorrowerLoan() {
           </div>
         </Section>
         {d.sponsor && ["submitted", "initial_review", "underwriting"].includes(d.status) && <Link href={`/admin/borrower/${d.id}/profile`} className="block text-sm text-link underline underline-offset-2" data-testid="edit-profile">Update your guarantors, past deals or credit answers</Link>}
-        <PropertyPhotos deal={d} side="client" />
+        <div id="property-photos"><PropertyPhotos deal={d} side="client" /></div>
         <ScopeOfWork deal={d} editable />
-        <LoanMessages dealId={d.id} side="borrower" />
+        <div id="messages"><LoanMessages dealId={d.id} side="borrower" /></div>
         </div>
         <div className="min-w-0 space-y-4">
           <Section title={funded ? "Loan balance" : "Estimated terms"}>
             <div className="grid grid-cols-2 gap-3">
               <Stat label="Note amount" value={usd(e.noteAmount)} />
               <Stat label="Rate" value={`${e.rate.toFixed(2)}%`} sub={d.app.product === "dscr" ? "30-yr amortizing" : d.app.accrual === "dutch" ? "on disbursed funds" : "full-boat"} />
-              {funded ? <><Stat label="Disbursed" value={usd(b.disbursed)} /><Stat label="Holdback left" value={usd(b.holdbackRemaining)} /><Stat label="Next payment" value={usd(b.nextPayment)} sub={`due ${ledger(d).nextDue ?? "—"}`} /><Stat label="Maturity" value={ledger(d).maturity} sub={`${e.termMonths}-month term${d.extensions?.some((x) => x.status === "executed") ? ", extended" : ""}`} /></>
-                : <><Stat label="Cash to close" value={usd(e.cashToClose)} /><Stat label="Target closing" value={d.closingDate} /><Stat label={keyRatios.map((r) => r.label).join(" / ")} value={keyRatios.map((r) => (r.key === "dscr" ? r.actual.toFixed(2) + "x" : pct(r.actual))).join(" / ")} /><Stat label="Points" value={usd(e.points)} /></>}
+              {funded ? <><Stat label="Disbursed" value={usd(b.disbursed)} /><Stat label="Holdback left" value={usd(b.holdbackRemaining)} /><Stat label="Next payment" value={usd(b.nextPayment)} sub={ledger(d).nextDue ? `due ${shortDay(ledger(d).nextDue!)}` : "—"} /><Stat label="Maturity" value={shortDay(ledger(d).maturity)} sub={`${e.termMonths}-month term${d.extensions?.some((x) => x.status === "executed") ? ", extended" : ""}`} /></>
+                : <><Stat label="Cash to close" value={usd(e.cashToClose)} /><Stat label="Target closing" value={shortDay(d.closingDate)} /><Stat label={keyRatios.map((r) => r.label).join(" / ")} value={keyRatios.map((r) => (r.key === "dscr" ? r.actual.toFixed(2) + "x" : pct(r.actual))).join(" / ")} /><Stat label="Points" value={usd(e.points)} /></>}
             </div>
           </Section>
           {funded && e.holdback > 0 && <DrawPanel deal={d} />}
@@ -91,11 +97,11 @@ export default function BorrowerLoan() {
           {d.status === "paid_off" && <PaidOff deal={d} side="borrower" />}
           {d.closing && PRE_FUNDING.includes(d.status) && (
             <Section title="Closing">
-              <div className="text-sm" data-testid="borrower-closing"><p className="font-medium">{d.closing.company}</p><p className="text-muted-foreground">{[d.closing.contact, d.closing.phone].filter(Boolean).join(" · ")}{d.closing.fileNumber ? ` · file ${d.closing.fileNumber}` : ""}</p><p className="mt-1 text-muted-foreground">Target closing {d.closingDate}.</p></div>
+              <div className="text-sm" data-testid="borrower-closing"><p className="font-medium">{d.closing.company}</p><p className="text-muted-foreground">{[d.closing.contact, d.closing.phone].filter(Boolean).join(" · ")}{d.closing.fileNumber ? ` · file ${d.closing.fileNumber}` : ""}</p><p className="mt-1 text-muted-foreground">Target closing {shortDay(d.closingDate)}.</p></div>
               <p className="mt-2 rounded-md bg-bad/10 p-2 text-xs text-bad">If you&apos;re wiring money to close, call the title company at a number you looked up yourself to confirm their instructions before you send it. Instructions that change by email are a scam.</p>
             </Section>
           )}
-          <Section title="Your team">{local && <div className="text-sm">Processor: Pat Processor (FAKE)<br />Underwriter: Uma Underwriter (FAKE)</div>}<div className="rounded-md bg-bad/10 p-2 text-xs text-bad">Wire-fraud warning: we will never email you wire instructions. Always confirm by phone with a number you already have.</div></Section>
+          <Section title="Your team"><TeamContacts deal={d} /><div className="mt-3 rounded-md bg-bad/10 p-2 text-xs text-bad">Wire-fraud warning: we will never email you wire instructions. Always confirm by phone with a number you already have.</div></Section>
         </div>
       </div>
     </div>

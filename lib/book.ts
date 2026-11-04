@@ -1,10 +1,12 @@
 // The loan book's rules: one set of records and one reducer, with no React and no database. Demo seats and sample data
 // run it in the browser; real accounts run it on the server (lib/book-store.ts), after lib/book-access.ts checks them.
-import { evaluate, type Application, type BuyBox } from "./engine";
+import { evaluate, fundedBalances, round2, type Application, type BuyBox } from "./engine";
 import { countedDeals, missingDocs, needsList, withSponsor } from "./credit";
 import { approversNeeded, approvalError, defaultScope, drawRequestError, releaseToScope, reviewDraw } from "./draws";
 import { activeWire, fundsProblem, missingClosingItems, recordingProblem, verifyProblem, wireProblem } from "./closing";
 import { latestScreening, ofacBlocker, sameResult, screeningSubjects } from "./ofac";
+import { carryOverDocs, carryOverTrackRecord, earlierLoans, repeatHistory, trackDocCarried } from "./repeat-borrower";
+import { referralCodeFor, referralHolds } from "./brokers";
 import { cureError, defaultError, executeError, extensionFee, extensionRequestError, payoffError, payoffOn, PRE_FUNDING, reopenTo, closureReason, DEFAULT_KINDS } from "./loan-exits";
 import { canAdvance, nextStage } from "./loan-stages";
 import { issueProblem, latestLetter, letterFigures, receivedOnFor } from "./payoffs";
@@ -12,14 +14,15 @@ import { isLarge, noticeDueOn, noticeOwed, reasonsProblem, requestProblem, start
 import { defaultNocExpiry, drawHolds, insuranceChecks, lienFileProblem, partiesFor, unreleasedHolds, waiverCheckProblem } from "./lien-law";
 import { addProblem, changeProblem, DEFAULT_LIBRARY, fromTemplate, libraryOf, missingStandard, templateProblem, templatesFor, type ConditionInput } from "./conditions";
 import { draftSheet, exceptionDecisionProblem, exceptionReasons, exceptionRequestProblem, issueProblem as sheetProblem, latestSheet, matrixOf, pricedApp, respondProblem, startingTerms, termSheetChecks, type Prepay } from "./term-sheets";
-import { seedDeals, seedBids, seedDraws, seedLoanSales, seedLoanOffers, seedMessages, seedPhotoRequests, DEMO_SPONSORS, capitalSources, partners as seedPartners, brokers as seedBrokers, loanBuyers, BORROWER_ID, DEMO_PARTNER_ID, DEMO_BUYER_ID, DEMO_BROKER_ID, type Broker, type ClosingAgent, type Closure, type Deal, type DefaultKind, type Bid, type DrawRequest, type DrawRequestLine, type LoanExtension, type LoanMessage, type Screening, type WireInstruction, type Partner, type PayoffChannel, type PayoffLetter, type PayoffRequest, type NoticeToOwner, type LienWaiver, type ConditionTemplate, type LoanCondition, type DocStatus, type CapitalSource, type LoanBuyer, type LoanOffer, type LoanSale, type LoanPayment, type LoanStatus, type PaymentMethod, type PhotoRequest, type RequestPhoto, type ScopeLine, type Sponsor, type StageEntry } from "./mockData";
+import { DEMO_TEAM, seedDeals, seedBids, seedDraws, seedLoanSales, seedLoanOffers, seedMessages, seedPhotoRequests, DEMO_SPONSORS, capitalSources, partners as seedPartners, brokers as seedBrokers, loanBuyers, BORROWER_ID, DEMO_PARTNER_ID, DEMO_BUYER_ID, DEMO_BROKER_ID, type Broker, type ClosingAgent, type Closure, type Deal, type DefaultKind, type Bid, type DrawRequest, type DrawRequestLine, type LoanExtension, type LoanMessage, type Screening, type WireInstruction, type Partner, type PayoffChannel, type PayoffLetter, type PayoffRequest, type NoticeToOwner, type LienWaiver, type ConditionTemplate, type LoanCondition, type DocStatus, type CapitalSource, type LoanBuyer, type LoanOffer, type LoanSale, type LoanPayment, type LoanStatus, type TeamMember, type PaymentMethod, type PhotoRequest, type RequestPhoto, type ScopeLine, type Sponsor, type StageEntry } from "./mockData";
 import { BASE_VERSION, currentPricing, type PricingPayload } from "./pricing-versions";
+import { TEAM_ROLE_LABEL, type TeamRole } from "./loan-team";
 import { addDays, DEMO_SERVICING_DAY, firstDueDate, ledger, maturityOf, payoffFor, SERVICED, servicingDate, settle } from "./servicing";
 
 export interface Book { partnerId: string; buyerId: string; brokerId: string; borrowerId: string; loanPrefix: string; deals: Deal[]; bids: Bid[]; partners: Partner[]; buyers: LoanBuyer[]; brokers: Broker[]; sales: LoanSale[]; offers: LoanOffer[]; draws: DrawRequest[]; photoRequests: PhotoRequest[]; payoffs: PayoffRequest[]; messages: LoanMessage[]; sources: CapitalSource[]; conditionLibrary: ConditionTemplate[]; audit: { at: string; text: string }[]; sample?: boolean; /** The pricing its loans use, as sent to a browser. Not part of the records. */ pricing?: PricingPayload }
 
 export type BookAction =
-  | { t: "submitApp"; app: Application; address: string; city: string; zip: string; entityName: string; exitStrategy: string; client?: { name: string; borrowerId?: string; brokerId?: string; brokerPoints?: number }; source?: string; sponsor?: Sponsor }
+  | { t: "submitApp"; app: Application; address: string; city: string; zip: string; entityName: string; exitStrategy: string; closingDate?: string; client?: { name: string; borrowerId?: string; brokerId?: string; brokerPoints?: number }; source?: string; sponsor?: Sponsor }
   | { t: "saveSponsor"; dealId: string; sponsor: Sponsor }
   /** A signed borrower application, applied to a loan already started. Only the server does it, from the signed link. */
   | { t: "applyBorrowerInfo"; dealId: string; app: Application; address: string; city: string; zip: string; entityName: string; exitStrategy: string; sponsor: Sponsor; signedBy: string }
@@ -46,6 +49,20 @@ export type BookAction =
   | { t: "updateDealNumbers"; dealId: string; changes: Partial<Application> }
   | { t: "addDocRequest"; dealId: string; name: string; category: string }
   | { t: "linkBorrower"; dealId: string; borrowerId: string; borrowerName: string }
+  /** The winning partner says it has wired its share; staff confirm it arrived in escrow (Spec P7). */
+  | { t: "partnerFundsSent"; dealId: string; sentOn: string; reference: string; by: string }
+  | { t: "partnerFundsReceived"; dealId: string; on: string; by: string }
+  /** A brokerage signed the broker agreement (lib/brokers.ts). Only the server does it: it screens the firm and stores its files. */
+  | { t: "brokerApplied"; brokerId: string; application: NonNullable<Broker["application"]>; screening?: Screening; docs: NonNullable<Broker["docs"]> }
+  | { t: "brokerScreened"; brokerId: string; screening: Screening }
+  | { t: "approveBroker"; brokerId: string; reason: string; by: string }
+  | { t: "suspendBroker"; brokerId: string; reason: string; by: string }
+  | { t: "brokerFeePaid"; dealId: string; amount: number; on: string; reference: string; by: string }
+  /** A loan started from a lead that came by a broker's referral link. Only the server does it: it reads the lead. */
+  | { t: "referLoan"; dealId: string; brokerId: string; on: string }
+  | { t: "setBrokerPoints"; dealId: string; points: number }
+  /** Puts someone on the loan as its officer or processor, or takes them off (null). Only the server does it: it looks the person up. */
+  | { t: "assignLoanTeam"; dealId: string; role: TeamRole; member: TeamMember | null; by: string }
   | { t: "saveSource"; source: CapitalSource }
   | { t: "removeSource"; id: string }
   | { t: "saveFirm"; kind: "partner" | "buyer"; id: string; name: string; buyBox: BuyBox }
@@ -182,10 +199,17 @@ function demoStages(deal: Deal): StageEntry[] {
   return index >= 0 ? walk(PATH.slice(0, index + 1), entered) : [...walk(PATH.slice(0, 3), addDays(entered, -gap)), { status: deal.status, at: stamp(entered) }];
 }
 
+/** Demo loans split between two loan officers with one processor; new applications wait for an officer. */
+function demoTeam(deal: Deal): Deal["team"] {
+  if (deal.status === "submitted") return undefined;
+  const [olivia, uma, pat] = DEMO_TEAM;
+  return { officer: Number(deal.loanNumber.slice(-1)) % 2 ? uma : olivia, processor: pat };
+}
+
 export function demoBook(): Book {
   const deals = seedDeals.map((d) => {
     const e = evaluate(d.app);
-    const deal: Deal = { ...d, stages: demoStages(d), app: { ...d.app, pricingVersion: BASE_VERSION }, sponsor: DEMO_SPONSORS[d.id], scope: defaultScope(d.app.product, e.holdback, d.disbursedDraws ?? 0), allocations: d.allocations.map((a) => ({ ...a, amount: a.amount || e.noteAmount })) };
+    const deal: Deal = { ...d, stages: demoStages(d), team: demoTeam(d), app: { ...d.app, pricingVersion: BASE_VERSION }, sponsor: DEMO_SPONSORS[d.id], scope: defaultScope(d.app.product, e.holdback, d.disbursedDraws ?? 0), allocations: d.allocations.map((a) => ({ ...a, amount: a.amount || e.noteAmount })) };
     // Every demo loan was screened the day before the demo's day, and one has a possible match to review.
     deal.screenings = [{ id: `ofac-demo-${d.id}`, at: "2026-10-30T12:00:00Z", by: "Nightly sanctions check", checkedAt: "2026-10-30T12:00:00Z", list: { fetchedAt: "2026-10-30T11:00:00Z", names: 18_240 }, status: d.id === "d6" ? "review" : "clear",
       subjects: screeningSubjects(deal).map((subject) => ({ ...subject, hits: d.id === "d6" && subject.role === "borrower" ? [{ uid: 990_001, name: "MOCKUP, Morgan Alexei (FAKE)", type: "individual", program: "SDGT (FAKE)", score: 0.946 }] : [] })) }];
@@ -194,10 +218,21 @@ export function demoBook(): Book {
     const wire = (id: string, verified: boolean): WireInstruction => ({ id, bankName: "First Demo Bank (FAKE)", routing: "123456780", account: "000123456789", beneficiary: "Sample Title & Escrow Trust Account (FAKE)", reference: agent.fileNumber, source: "Title company's secure portal", enteredBy: "Pat Processor (FAKE)", enteredAt: "2026-10-27T10:00:00-07:00", verification: verified ? { by: "Olivia Owner (FAKE)", at: "2026-10-28T09:30:00-07:00", phone: "(954) 555-0100", phoneSource: "Title company's website", spokeWith: "Dana Escrow (FAKE)" } : undefined });
     if (d.id === "d15") return { ...deal, closing: agent, wires: [wire("wire-demo-15", true)], docs: [...deal.docs, ...missingClosingItems(deal).map((doc) => ({ ...doc, status: "accepted" as const }))] };
     if (d.id === "d7") return { ...deal, closing: agent, wires: [wire("wire-demo-7", false)], docs: [...deal.docs, ...missingClosingItems(deal).map((doc) => ({ ...doc, status: "accepted" as const }))] };
+    // One funded loan half-owned by the demo partner, paid through October, so its portfolio and statements show money.
+    if (d.id === "d11") {
+      const half = Math.round(e.noteAmount / 2);
+      const monthly = fundedBalances(e, deal.app, deal.disbursedDraws).nextPayment;
+      const paid = (on: string): LoanPayment => ({ id: `pay-demo-11-${on}`, amount: monthly, receivedOn: on, method: "ach", reference: `ACH ${on}`, by: "Sam Servicer (FAKE)", at: `${on}T15:00:00Z` });
+      return { ...deal, allocations: [{ sourceId: `partner:${DEMO_PARTNER_ID}`, amount: half }, { sourceId: "gt-main", amount: e.noteAmount - half }], route: "split" as const, teaserSentTo: [DEMO_PARTNER_ID], boardedThrough: "2026-09-01", payments: [paid("2026-09-01"), paid("2026-10-01")],
+        partnerFunding: { partnerId: DEMO_PARTNER_ID, amount: half, sent: { on: "2026-06-29", reference: "FED REF 2026-0629-11 (FAKE)", by: "Pia Partner (FAKE)", at: "2026-06-29T14:00:00Z" }, received: { on: "2026-06-30", by: "Cam Capital (FAKE)", at: "2026-06-30T13:00:00Z" } } };
+    }
     // One loan close to maturity whose borrower called to ask for more time, so the extension queue has something in it.
     if (d.id !== "d14") return deal;
     const extension: LoanExtension = { id: "ext-demo-1", months: 3, reason: "Kitchen cabinets are back-ordered; listing in February (FAKE)", requestedBy: "Pat Processor (FAKE)", requestedAt: "2026-10-28T10:00:00-07:00", fee: extensionFee(deal, 3), fromMaturity: maturityOf(deal), status: "requested", approvers: [] };
-    return { ...deal, extensions: [extension] };
+    // Paid through October since the demo buyer bought it, so the buyer's statement has payments in it.
+    const monthly = fundedBalances(e, deal.app, deal.disbursedDraws).nextPayment;
+    const paid = (on: string): LoanPayment => ({ id: `pay-demo-14-${on}`, amount: monthly, receivedOn: on, method: "ach", reference: `ACH ${on}`, by: "Sam Servicer (FAKE)", at: `${on}T15:00:00Z` });
+    return { ...deal, extensions: [extension], boardedThrough: "2026-09-01", payments: [paid("2026-09-01"), paid("2026-10-01")] };
   });
   // Term sheets: two waiting for the borrower (one is the demo borrower's), one accepted, and an underwriter's request to
   // price below the matrix waiting for an owner.
@@ -241,7 +276,7 @@ export function demoBook(): Book {
     { id: "payoff-1", dealId: "d11", goodThrough: "2026-11-15", requestedAt: "2026-10-22T10:00:00-07:00", by: "Avery Mock (FAKE)", status: "requested", receivedOn: "2026-10-22", channel: "portal", requester: { kind: "borrower", name: "Avery Mock (FAKE)" }, ...quoted },
     { id: "payoff-2", dealId: "d10", goodThrough: "2026-11-20", requestedAt: "2026-10-30T14:00:00-07:00", by: "Dana Escrow (FAKE)", status: "requested", receivedOn: "2026-10-30", channel: "web_form", requester: { kind: "title", name: "Dana Escrow (FAKE)", company: "Sample Title & Escrow (FAKE)", email: "closings@sample-title.test", phone: "(954) 555-0142", fileNumber: "ST-1010-B" }, check: { status: "pending", note: "Signed authorization uploaded with the request.", fileName: "borrower-authorization.pdf" }, ...payoffFor(deals.find((d) => d.id === "d10")!, "2026-11-20") },
   ];
-  return { partnerId: DEMO_PARTNER_ID, buyerId: DEMO_BUYER_ID, brokerId: DEMO_BROKER_ID, borrowerId: BORROWER_ID, loanPrefix: DEMO_PREFIX, deals, bids: seedBids, partners: seedPartners, buyers: loanBuyers, brokers: seedBrokers, sales: seedLoanSales, offers: seedLoanOffers, draws: seedDraws, photoRequests: seedPhotoRequests, payoffs, messages: seedMessages, sources: capitalSources, conditionLibrary: DEFAULT_LIBRARY, audit: [{ at: SEED_AT, text: "Demo data loaded (all records are FAKE)" }] };
+  return { partnerId: DEMO_PARTNER_ID, buyerId: DEMO_BUYER_ID, brokerId: DEMO_BROKER_ID, borrowerId: BORROWER_ID, loanPrefix: DEMO_PREFIX, deals, bids: [...seedBids, { id: "bid-demo-11", dealId: "d11", partnerId: DEMO_PARTNER_ID, pct: 50, lenderRate: 9.25, lenderPoints: 0.5, conditions: "", status: "accepted", type: "bid", at: "2026-06-20T14:00:00Z" }], partners: seedPartners, buyers: loanBuyers, brokers: seedBrokers, sales: seedLoanSales, offers: seedLoanOffers, draws: seedDraws, photoRequests: seedPhotoRequests, payoffs, messages: seedMessages, sources: capitalSources, conditionLibrary: DEFAULT_LIBRARY, audit: [{ at: SEED_AT, text: "Demo data loaded (all records are FAKE)" }] };
 }
 
 /** A book with no records: a new database, or an account with nothing to see yet. */
@@ -271,14 +306,24 @@ function apply(s: Book, a: BookAction): Book {
     case "clearSample": return emptyBook();
     case "submitApp": {
       // Credit inputs come from the people and deals listed, and nothing arrives already verified.
-      const sponsor = a.sponsor && { ...a.sponsor, trackRecord: a.sponsor.trackRecord.map(({ verified: _verified, ...item }) => item) };
+      // Past deals staff confirmed on the borrower's earlier loans stay confirmed (lib/repeat-borrower.ts).
+      const borrowerId = a.client?.borrowerId ?? (a.client ? `client-${uid()}` : s.borrowerId);
+      const earlier = earlierLoans(s.deals, borrowerId);
+      const sponsor = a.sponsor && carryOverTrackRecord({ ...a.sponsor, trackRecord: a.sponsor.trackRecord.map(({ verified: _verified, ...item }) => item) }, earlier);
+      // Their loans paid as agreed count toward pricing, counted now and kept with the application.
+      const history = earlier.length ? repeatHistory(s.deals, borrowerId, serviceDay(s)) : undefined;
+      const repeat = history && (history.loans || history.pausedBy) ? { repeat: history } : {};
+      // A borrower a broker referred stays the broker's for the agreement's protection window (lib/brokers.ts).
+      const protectedBy = a.client?.brokerId ? undefined : s.deals.find((item) => item.borrowerId === borrowerId && item.referredBy && referralHolds(item.referredBy.on, serviceDay(s)))?.referredBy;
       // Priced on today's pricing, and kept on it: publishing new numbers later doesn't change this loan.
-      const app = { ...(sponsor ? withSponsor(a.app, sponsor, new Date()) : a.app), pricingVersion: currentPricing().version };
+      const app = { ...(sponsor ? withSponsor(a.app, sponsor, new Date()) : a.app), pricingVersion: currentPricing().version, ...repeat };
       // The highest number so far, not a count: a count could repeat if a record ever went away.
       const n = Math.max(1000, ...s.deals.map((item) => Number(item.loanNumber.match(/(\d+)$/)?.[1]) || 0)) + 1;
-      const d: Deal = { id: `d${uid()}`, loanNumber: `${s.loanPrefix}${n}`, borrowerId: a.client?.borrowerId ?? (a.client ? `client-${uid()}` : s.borrowerId), borrowerName: a.client?.name || "Alex Sample (FAKE)", entityName: a.entityName || "Sample Flips LLC (FAKE)", address: a.address || "100 New Demo St", city: a.city || "Hollywood", zip: a.zip || "33020", app, status: "submitted", daysInStage: 0, capitalStatus: "not_started", allocations: [], teaserSentTo: [], source: a.source ?? (a.client?.brokerId ? "broker" : "web_quote"), brokerId: a.client?.brokerId, brokerPoints: a.client?.brokerPoints, scope: defaultScope(app.product, evaluate(app).holdback),
-        docs: needsList(app, sponsor), sponsor, exitStrategy: a.exitStrategy, closingDate: "2026-11-30" };
-      return { ...s, deals: [d, ...s.deals], audit: log(`Application ${d.loanNumber} submitted${a.client?.brokerId ? " by broker" : a.client ? " by staff" : " by borrower"}`) };
+      const d: Deal = { id: `d${uid()}`, loanNumber: `${s.loanPrefix}${n}`, borrowerId, borrowerName: a.client?.name || "Alex Sample (FAKE)", entityName: a.entityName || "Sample Flips LLC (FAKE)", address: a.address || "100 New Demo St", city: a.city || "Hollywood", zip: a.zip || "33020", app, status: "submitted", daysInStage: 0, capitalStatus: "not_started", allocations: [], teaserSentTo: [], source: a.source ?? (a.client?.brokerId ? "broker" : "web_quote"), brokerId: a.client?.brokerId ?? protectedBy?.brokerId, brokerPoints: a.client?.brokerPoints, ...(protectedBy ? { referredBy: protectedBy } : {}), scope: defaultScope(app.product, evaluate(app).holdback),
+        // The day they asked to close, or a month out.
+        docs: trackDocCarried(carryOverDocs(needsList(app, sponsor), earlier, { entityName: a.entityName, sponsor }, serviceDay(s)), sponsor), sponsor, exitStrategy: a.exitStrategy, closingDate: a.closingDate && /^\d{4}-\d{2}-\d{2}$/.test(a.closingDate) ? a.closingDate : addDays(serviceDay(s), 30) };
+      const carried = d.docs.filter((item) => item.carriedFrom).length;
+      return { ...s, deals: [d, ...s.deals], audit: log(`Application ${d.loanNumber} submitted${a.client?.brokerId ? " by broker" : a.client ? " by staff" : " by borrower"}${history?.loans ? `; repeat borrower, ${history.loans} loan${history.loans === 1 ? "" : "s"} paid as agreed` : ""}${carried ? `; ${carried} document${carried === 1 ? "" : "s"} carried over` : ""}`) };
     }
     case "approveFunding": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
@@ -352,7 +397,7 @@ function apply(s: Book, a: BookAction): Book {
     case "updateDealNumbers": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
       // The pricing version and the term sheet's rate and points are set by their own steps, never as a number edit.
-      const { pricingVersion: _version, termRate: _rate, termPoints: _points, ...changes } = a.changes;
+      const { pricingVersion: _version, termRate: _rate, termPoints: _points, repeat: _repeat, ...changes } = a.changes;
       const app = { ...deal.app, ...changes };
       const holdback = evaluate(app).holdback;
       // A new rehab budget starts its scope of work over, because the old split no longer adds up.
@@ -363,6 +408,50 @@ function apply(s: Book, a: BookAction): Book {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
       const doc = { id: `req-${uid()}`, name: a.name, category: a.category, status: "requested" as const };
       return { ...s, deals: upd(a.dealId, (d) => ({ ...d, docs: [...d.docs, doc] })), audit: log(`${deal.loanNumber}: requested ${a.name}`) };
+    }
+    case "partnerFundsSent": case "partnerFundsReceived": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const funding = deal.partnerFunding!;
+      const next = a.t === "partnerFundsSent" ? { ...funding, sent: { on: a.sentOn, reference: a.reference.trim(), by: a.by, at: now() } } : { ...funding, received: { on: a.on, by: a.by, at: now() } };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, partnerFunding: next })), audit: log(`${deal.loanNumber}: partner's share ${a.t === "partnerFundsSent" ? `sent ${a.sentOn}` : `received in escrow ${a.on}`} (${a.by})`) };
+    }
+    case "brokerApplied": {
+      const had = s.brokers.find((item) => item.id === a.brokerId);
+      // Signing again (a new version of the agreement) keeps an approved or suspended firm where it is.
+      const broker: Broker = { ...had, id: a.brokerId, name: a.application.legalName, status: had?.status === "approved" || had?.status === "suspended" ? had.status : "applied", application: a.application, docs: a.docs.length ? a.docs : had?.docs ?? [], ...(a.screening ? { screening: a.screening } : {}) };
+      return { ...s, brokers: had ? s.brokers.map((item) => (item.id === a.brokerId ? broker : item)) : [...s.brokers, broker], audit: log(`Broker ${broker.name} signed the broker agreement (${a.application.agreementVersion})`) };
+    }
+    case "brokerScreened": {
+      const broker = s.brokers.find((item) => item.id === a.brokerId)!;
+      return { ...s, brokers: s.brokers.map((item) => (item.id === a.brokerId ? { ...item, screening: a.screening } : item)), audit: log(`Broker ${broker.name}: OFAC screening ${a.screening.status === "clear" ? "clear" : "found a possible match"}`) };
+    }
+    case "approveBroker": {
+      const broker = s.brokers.find((item) => item.id === a.brokerId)!;
+      const approved = { by: a.by, at: now(), ...(a.reason.trim() ? { reason: a.reason.trim() } : {}) };
+      return { ...s, brokers: s.brokers.map((item) => (item.id === a.brokerId ? { ...item, status: "approved" as const, approved, suspended: undefined, referralCode: item.referralCode ?? referralCodeFor(item.id), ...(item.screening?.status === "review" ? { screening: { ...item.screening, status: "cleared" as const, decided: { by: a.by, at: approved.at, reason: a.reason.trim() } } } : {}) } : item)), audit: log(`Broker ${broker.name} approved by ${a.by}`) };
+    }
+    case "suspendBroker": {
+      const broker = s.brokers.find((item) => item.id === a.brokerId)!;
+      return { ...s, brokers: s.brokers.map((item) => (item.id === a.brokerId ? { ...item, status: "suspended" as const, suspended: { by: a.by, at: now(), reason: a.reason.trim() } } : item)), audit: log(`Broker ${broker.name} suspended by ${a.by}: ${a.reason.trim()}`) };
+    }
+    case "referLoan": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const broker = s.brokers.find((item) => item.id === a.brokerId);
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, referredBy: { brokerId: a.brokerId, on: a.on }, brokerId: d.brokerId ?? a.brokerId })), audit: log(`${deal.loanNumber}: referred by ${broker?.name ?? "a broker"}`) };
+    }
+    case "setBrokerPoints": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, brokerPoints: round2(a.points) })), audit: log(`${deal.loanNumber}: broker's fee set to ${round2(a.points)} points`) };
+    }
+    case "brokerFeePaid": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, brokerFeePaid: { amount: round2(a.amount), on: a.on, reference: a.reference.trim(), by: a.by, at: now() } })), audit: log(`${deal.loanNumber}: broker's fee of $${round2(a.amount).toLocaleString("en-US")} paid`) };
+    }
+    case "assignLoanTeam": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const { [a.role]: _gone, ...rest } = deal.team ?? {};
+      const team = a.member ? { ...rest, [a.role]: a.member } : rest;
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, team: Object.keys(team).length ? team : undefined })), audit: log(`${deal.loanNumber}: ${a.member ? `${a.member.name} is the ${TEAM_ROLE_LABEL[a.role].toLowerCase()}` : `no ${TEAM_ROLE_LABEL[a.role].toLowerCase()}`} (${a.by})`) };
     }
     case "linkBorrower": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
@@ -378,8 +467,8 @@ function apply(s: Book, a: BookAction): Book {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
       // Once a term sheet is out or credit is signed off, the numbers are underwriting's: the team updates it by hand.
       if (!["submitted", "initial_review", "underwriting"].includes(deal.status) || deal.creditReview) return s;
-      const sponsor = { ...a.sponsor, trackRecord: a.sponsor.trackRecord.map(({ verified: _verified, ...item }) => item) };
-      const app = withSponsor({ ...a.app, pricingVersion: deal.app.pricingVersion }, sponsor, new Date());
+      const sponsor = carryOverTrackRecord({ ...a.sponsor, trackRecord: a.sponsor.trackRecord.map(({ verified: _verified, ...item }) => item) }, earlierLoans(s.deals, deal.borrowerId).filter((item) => item.id !== deal.id));
+      const app = withSponsor({ ...a.app, pricingVersion: deal.app.pricingVersion, repeat: deal.app.repeat, repeatBorrower: deal.app.repeatBorrower }, sponsor, new Date());
       return { ...s, deals: upd(a.dealId, (d) => ({ ...d, app, sponsor, address: a.address, city: a.city, zip: a.zip, entityName: a.entityName, exitStrategy: a.exitStrategy, docs: [...d.docs, ...missingDocs(d.docs, app, sponsor)] })), audit: log(`${deal.loanNumber}: borrower application signed by ${a.signedBy}`) };
     }
     case "verifyTrackDeal": {
@@ -814,7 +903,7 @@ function apply(s: Book, a: BookAction): Book {
       return { ...s, messages: [...s.messages, { id: `msg${uid()}`, dealId: a.dealId, from: a.from, side: a.side, text, at: now() }] };
     }
     case "uploadDoc": return { ...s, deals: upd(a.dealId, (d) => ({ ...d, docs: d.docs.map((x) => (x.id === a.docId ? { ...x, status: "uploaded", fileName: a.fileName, documentId: a.documentId } : x)) })), audit: log(`Document uploaded: ${a.fileName}`) };
-    case "docStatus": return { ...s, deals: upd(a.dealId, (d) => ({ ...d, docs: d.docs.map((x) => (x.id === a.docId ? { ...x, status: a.status } : x)) })), audit: log(`Document ${a.docId} → ${a.status}`) };
+    case "docStatus": return { ...s, deals: upd(a.dealId, (d) => ({ ...d, docs: d.docs.map((x) => (x.id === a.docId ? { ...x, status: a.status, acceptedOn: a.status === "accepted" ? serviceDay(s) : undefined, carriedFrom: undefined, ...(x.carriedFrom && a.status === "requested" ? { fileName: undefined, documentId: undefined } : {}) } : x)) })), audit: log(`Document ${a.docId} → ${a.status}`) };
     case "route": {
       const deal = s.deals.find((d) => d.id === a.dealId)!; const L = evaluate(deal.app).noteAmount;
       const inH = a.route === "in_house" ? L : a.route === "partner" ? 0 : Math.min(L, Math.max(0, a.inHouseAmount));
@@ -834,7 +923,7 @@ function apply(s: Book, a: BookAction): Book {
       const allocations = [{ sourceId: `partner:${b.partnerId}`, amount: partnerAmt }, ...(inHouse > 0 ? [{ sourceId: "gt-main", amount: inHouse }] : [])];
       return { ...s,
         bids: s.bids.map((x) => (x.id === b.id ? { ...x, status: "accepted" } : x.dealId === b.dealId && x.status === "submitted" ? { ...x, status: "declined" } : x)),
-        deals: upd(b.dealId, (d) => ({ ...d, allocations, route: inHouse > 0 ? "split" : "partner", capitalStatus: "reserved" })),
+        deals: upd(b.dealId, (d) => ({ ...d, allocations, route: inHouse > 0 ? "split" : "partner", capitalStatus: "reserved", partnerFunding: { partnerId: b.partnerId, amount: partnerAmt } })),
         audit: log(`${deal.loanNumber}: bid from ${b.partnerId} accepted; partner commitment issued; other bids declined`) };
     }
     case "commit": return { ...s, deals: upd(a.dealId, (d) => ({ ...d, capitalStatus: "committed" })), audit: log(`Capital committed (required before clear to close)`) };

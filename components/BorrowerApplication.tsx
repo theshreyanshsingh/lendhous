@@ -1,19 +1,30 @@
 "use client";
 import { motion } from "framer-motion";
 import { Check, Lock, MapPin } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { saveApplicationDraft, signApplication } from "@/actions/application-links";
 import { AddressField, type AddressValue } from "@/components/AddressField";
+import EstimatePanel from "@/components/EstimatePanel";
 import { PropertyPhotoPicker } from "@/components/PropertyPhotoPicker";
 import { Logo } from "@/components/logo";
 import { Arrive, Reveal, StepSwap } from "@/components/motion";
 import { TrackRecordFields } from "@/components/SponsorForm";
-import { blankGuarantor, CONSENTS, num, signProblems, stepProblems, STEPS, type AppDraft, type ConsentKey, type GuarantorInfo } from "@/lib/borrower-application";
-import { CITIZENSHIP, DECLARATIONS } from "@/lib/credit";
+import { blankGuarantor, CONSENTS, num, signProblems, stepProblems, STEPS, toLoan, type AppDraft, type ConsentKey, type GuarantorInfo } from "@/lib/borrower-application";
+import { CITIZENSHIP, DECLARATIONS, needsList, withSponsor } from "@/lib/credit";
+import { evaluate } from "@/lib/engine";
 import { LOAN_TYPES, type LoanType } from "@/lib/quote";
+import type { RepeatRecord } from "@/lib/repeat-borrower";
 import { servicingDate } from "@/lib/servicing";
 
-type Props = { token: string | null; initial: AppDraft; startStep: number; savedAt: string | null; officer: string; expiresAt: string ; photos?: { id: string; name: string; src: string }[] };
+/** A signed-in borrower applying from their portal: how it saves (not at all for a demo account) and sends. */
+export type PortalMode = {
+  save?: (draft: AppDraft, step: number) => Promise<{ savedAt?: string; error?: string }>;
+  submit: (draft: AppDraft, consents: Record<ConsentKey, boolean>, signature: string) => Promise<{ error?: string; dealId?: string }>;
+  onDone: (dealId?: string) => void;
+  /** A repeat borrower's loans paid as agreed, which the estimate prices on as the server will. */
+  repeat?: RepeatRecord;
+};
+type Props = { token: string | null; initial: AppDraft; startStep: number; savedAt: string | null; officer: string; expiresAt: string ; photos?: { id: string; name: string; src: string }[]; portal?: PortalMode };
 
 const money = (text: string) => { const value = num(text); return value === undefined ? "" : value.toLocaleString("en-US"); };
 const clock = (iso: string) => new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }).toLowerCase().replace(" ", "");
@@ -36,10 +47,11 @@ function Pills<T extends string | boolean>({ value, options, onChange, testid }:
 const yesNo = [{ v: true, l: "Yes" }, { v: false, l: "No" }];
 
 /**
- * The borrower application behind a secure link (no sign-in): five steps, saved as the borrower goes, then four consents
- * and a typed signature. With no token it's a preview that keeps everything in the browser.
+ * The borrower application: five steps, saved as the borrower goes, then four consents and a typed signature. Behind a
+ * secure link (no sign-in) it's for the loan officer who sent it; in the portal it's the borrower's own, with a live
+ * estimate. With neither it's a preview that keeps everything in the browser.
  */
-export function BorrowerApplication({ token, initial, startStep, savedAt, officer, expiresAt, photos = [] }: Props) {
+export function BorrowerApplication({ token, initial, startStep, savedAt, officer, expiresAt, photos = [], portal }: Props) {
   const [draft, setDraft] = useState(initial);
   const [step, setStep] = useState(startStep);
   const [direction, setDirection] = useState<1 | -1>(1);
@@ -51,14 +63,23 @@ export function BorrowerApplication({ token, initial, startStep, savedAt, office
   const [done, setDone] = useState(false);
   const today = servicingDate(new Date());
   const first = useRef(true);
+  // In the portal, the estimate the loan will be priced on, as the numbers go in.
+  const inPortal = Boolean(portal);
+  const estimate = useMemo(() => {
+    if (!inPortal || !num(draft.loan.purchasePrice)) return null;
+    const loan = toLoan(draft);
+    const scored = { ...(draft.guarantors.some((g) => num(g.fico)) ? withSponsor(loan.app, loan.sponsor, new Date()) : { ...loan.app, fico: 700 }), ...(portal?.repeat ? { repeat: portal.repeat } : {}) };
+    return { e: evaluate(scored), product: loan.app.product, assumed: !draft.guarantors.some((g) => num(g.fico)), fico: scored.fico, deals: scored.verifiedDeals, needs: needsList(scored, loan.sponsor) };
+  }, [draft, inPortal, portal?.repeat]);
 
   // Saves a moment after each change, so closing the page loses at most the last few keystrokes.
   useEffect(() => {
     if (first.current) { first.current = false; return; }
-    if (!token) { setSaved("Preview: nothing is saved"); return; }
+    const save = portal ? portal.save : token ? (next: AppDraft, at: number) => saveApplicationDraft(token, next, at) : undefined;
+    if (!save) { setSaved(portal ? "Sample account: this stays in your browser" : "Preview: nothing is saved"); return; }
     setSaved("Saving…");
     const timer = setTimeout(async () => {
-      const reply = await saveApplicationDraft(token, draft, step).catch(() => ({ error: "Couldn't save. Check your connection." }));
+      const reply = await save(draft, step).catch(() => ({ error: "Couldn't save. Check your connection." }));
       setSaved("savedAt" in reply && reply.savedAt ? `Saved ${clock(reply.savedAt)}` : reply.error ?? "");
     }, 900);
     return () => clearTimeout(timer);
@@ -80,13 +101,15 @@ export function BorrowerApplication({ token, initial, startStep, savedAt, office
     const found = signProblems(draft, today);
     setProblems(found);
     if (found.length) return;
-    if (!token) { setDone(true); return; }
+    if (!token && !portal) { setDone(true); return; }
     setSigning(true);
-    const reply = await signApplication(token, draft, consents, signature).catch(() => ({ error: "That didn't go through. Check your connection and try again." }));
+    const sent: Promise<{ error?: string; dealId?: string }> = portal ? portal.submit(draft, consents, signature) : signApplication(token!, draft, consents, signature);
+    const reply = await sent.catch(() => ({ error: "That didn't go through. Check your connection and try again.", dealId: undefined }));
     setSigning(false);
     if (reply.error) return setProblems([reply.error]);
     setDone(true);
     window.scrollTo({ top: 0, behavior: "smooth" });
+    portal?.onDone(reply.dealId);
   };
 
   const address = draft.property.address;
@@ -99,13 +122,12 @@ export function BorrowerApplication({ token, initial, startStep, savedAt, office
     <Field label={label}>{input(draft.loan[key] as string, (value) => put({ loan: { ...draft.loan, [key]: money(value) } }), { mode: "numeric", testid: `app-${key}`, placeholder: "$0" })}{hint && <span className="mt-1 block text-[11px] text-faint">{hint}</span>}</Field>
   );
 
-  return (
-    <div className="min-h-screen bg-background">
-      <header className="bg-primary text-primary-foreground"><div className="mx-auto flex max-w-3xl items-center justify-between gap-3 px-4 py-3"><span className="[&_*]:text-primary-foreground!"><Logo /></span><span className="flex items-center gap-1.5 text-xs opacity-80"><Lock size={12} aria-hidden="true" /> Secure borrower application</span></div></header>
-      <main className="mx-auto max-w-3xl space-y-4 px-4 py-6" data-testid="borrower-application">
+  const page = (
+      <>
         <section className="glass p-5">
-          <h1 className="text-2xl font-normal tracking-tight">{done ? "Your application is signed" : "Complete your loan application"}</h1>
-          {!done && <p className="mt-1 text-sm text-muted-foreground">Your loan officer <b className="text-foreground">{officer}</b> has asked for the details below to finish your application. <b className="text-foreground">Your progress saves automatically</b>: close this page and come back any time until {longDay(expiresAt)}.</p>}
+          <h1 className="text-2xl font-normal tracking-tight">{done ? "Your application is signed" : portal ? "Apply for a loan" : "Complete your loan application"}</h1>
+          {!done && portal && <p className="mt-1 text-sm text-muted-foreground">Tell us about you, the property and the loan, then review it and sign. <b className="text-foreground">Your progress saves automatically</b>: close this page and pick up where you left off any time.</p>}
+          {!done && !portal && <p className="mt-1 text-sm text-muted-foreground">Your loan officer <b className="text-foreground">{officer}</b> has asked for the details below to finish your application. <b className="text-foreground">Your progress saves automatically</b>: close this page and come back any time until {longDay(expiresAt)}.</p>}
           {address.street && <p className="mt-3 inline-flex items-center gap-1.5 rounded-[2px] bg-muted px-2.5 py-1 font-mono text-xs text-muted-foreground"><MapPin size={12} aria-hidden="true" /> {[address.street, address.city, address.state, address.zip].filter(Boolean).join(", ")}</p>}
         </section>
 
@@ -113,8 +135,8 @@ export function BorrowerApplication({ token, initial, startStep, savedAt, office
           <Arrive className="glass space-y-3 p-6" >
             <div data-testid="application-signed">
               <span className="grid size-10 place-items-center rounded-full bg-good/10 text-good"><Check aria-hidden="true" /></span>
-              <h2 className="mt-3 text-xl font-normal">Thank you{draft.contact.firstName ? `, ${draft.contact.firstName}` : ""}. {officer} has your application.</h2>
-              <p className="mt-2 text-sm text-muted-foreground">Next, your loan officer reviews it and lists the documents they need. {token ? "We've emailed you an invitation to the LendHous portal, where you can upload them and follow the loan." : "(Preview: nothing was sent.)"}</p>
+              <h2 className="mt-3 text-xl font-normal">Thank you{draft.contact.firstName ? `, ${draft.contact.firstName}` : ""}. {portal ? "LendHous" : officer} has your application.</h2>
+              <p className="mt-2 text-sm text-muted-foreground">Next, your loan officer reviews it and lists the documents they need. {portal ? "Taking you to your loan, where you'll see them and can add photos of the property." : token ? "We've emailed you an invitation to the LendHous portal, where you can upload them and follow the loan." : "(Preview: nothing was sent.)"}</p>
             </div>
           </Arrive>
         ) : (
@@ -133,7 +155,7 @@ export function BorrowerApplication({ token, initial, startStep, savedAt, office
                   <Field label="Email">{input(draft.contact.email, (email) => put({ contact: { ...draft.contact, email } }), { type: "email", testid: "app-email", auto: "email", mode: "email" })}</Field>
                   <Field label="Phone">{input(draft.contact.phone, (phone) => put({ contact: { ...draft.contact, phone } }), { type: "tel", testid: "app-phone", auto: "tel", mode: "tel", max: 40 })}</Field>
                 </div>
-                <div><span className="label">Who you&apos;ve been working with</span><p className="desk-input flex items-center bg-muted/50 text-sm text-muted-foreground">{officer}</p><span className="mt-1 block text-[11px] text-faint">Set by your loan officer.</span></div>
+                {!portal && <div><span className="label">Who you&apos;ve been working with</span><p className="desk-input flex items-center bg-muted/50 text-sm text-muted-foreground">{officer}</p><span className="mt-1 block text-[11px] text-faint">Set by your loan officer.</span></div>}
                 <div><span className="label">What kind of loan do you need?</span><Pills value={draft.loanType} testid="app-loan" onChange={(loanType: LoanType) => put({ loanType })} options={(Object.entries(LOAN_TYPES) as [LoanType, string][]).map(([v, l]) => ({ v, l }))} /></div>
               </>)}
 
@@ -142,7 +164,7 @@ export function BorrowerApplication({ token, initial, startStep, savedAt, office
                 <AddressField testid="app-address" value={address} onChange={(next: AddressValue) => put({ property: { ...draft.property, address: next } })} />
                 <div>
                   <span className="label">Photos of the property</span>
-                  {token ? (
+                  {portal ? <p className="text-sm text-muted-foreground" data-testid="app-photos-later">Once you&apos;ve sent this, add photos of the property from your loan page.</p> : token ? (
                     <PropertyPhotoPicker testid="app-photos" initial={photos}
                       upload={async (file) => { const form = new FormData(); form.set("file", file); const response = await fetch(`/api/application-links/${token}/photos`, { method: "POST", body: form }); const body = await response.json().catch(() => ({})); return response.ok ? { id: body.photo?.id } : { error: body.error ?? "That photo didn't go through." }; }}
                       remove={async (id) => (await fetch(`/api/application-links/${token}/photos/${id}`, { method: "DELETE" })).ok}
@@ -223,7 +245,7 @@ export function BorrowerApplication({ token, initial, startStep, savedAt, office
                         ))}
                       </ul>
                       <Reveal open={g.occupy === true}><p className="rounded-[2px] bg-bad/10 p-3 text-sm text-bad" data-testid="app-owner-occ">LendHous makes business-purpose loans only. For a home you or your family will live in, please talk to a licensed consumer mortgage lender.</p></Reveal>
-                      <Reveal open={DECLARATIONS.some((item) => g.answers[item.key]) || g.occupy === true}><Field label="Explain each yes: what happened and where it stands now"><textarea className="desk-input h-auto! min-h-16 py-2" maxLength={2000} value={g.explanation} onChange={(event) => putGuarantor(index, { explanation: event.target.value })} /></Field></Reveal>
+                      <Reveal open={DECLARATIONS.some((item) => g.answers[item.key]) || g.occupy === true}><Field label="Explain each yes: what happened and where it stands now"><textarea className="desk-input h-auto! min-h-16 py-2" data-testid={`g${index}-explanation`} maxLength={2000} value={g.explanation} onChange={(event) => putGuarantor(index, { explanation: event.target.value })} /></Field></Reveal>
                     </div>
                   </Arrive>
                 ))}
@@ -234,6 +256,12 @@ export function BorrowerApplication({ token, initial, startStep, savedAt, office
                 <h2 className="text-lg font-normal">Review and sign</h2>
                 <p className="text-sm text-muted-foreground">Check what you entered. When it&apos;s right, read and agree to each section below and sign with your full legal name.</p>
                 <Review draft={draft} onEdit={(to) => go(to)} />
+                {estimate && (
+                  <div className="rounded-[2px] border border-border p-3" data-testid="needs-preview">
+                    <p className="text-[11px] font-medium tracking-wider text-link uppercase">After you sign, we&apos;ll ask for</p>
+                    <ul className="mt-2 grid gap-1 text-sm text-muted-foreground sm:grid-cols-2">{estimate.needs.map((item) => <li key={item.id}>· {item.name}</li>)}</ul>
+                  </div>
+                )}
                 {CONSENTS.map((consent) => (
                   <div key={consent.key} className="space-y-2 rounded-[2px] border border-border p-4" data-testid={`consent-${consent.key}`}>
                     <p className="text-[11px] font-medium tracking-wider text-link uppercase">{consent.title}</p>
@@ -249,6 +277,14 @@ export function BorrowerApplication({ token, initial, startStep, savedAt, office
               </>)}
             </StepSwap>
 
+            {/* While the numbers and guarantors go in. The review step has the signature to keep in view. */}
+            {estimate && step >= 2 && step < STEPS.length - 1 && (
+              <div data-testid="app-estimate">
+                <EstimatePanel e={estimate.e} product={estimate.product} />
+                <p className="mt-2 px-1 text-xs text-muted-foreground" data-testid="priced-on">{estimate.assumed ? "Assumes a 700 credit score until you add your guarantors" : `Priced on a ${estimate.fico} credit score, the lowest of your guarantors'`}, and {estimate.deals} past deal{estimate.deals === 1 ? "" : "s"}. An estimate, not an offer.</p>
+              </div>
+            )}
+
             <Reveal open={problems.length > 0}>
               <div className="rounded-[2px] border border-bad/30 bg-bad/5 p-3 text-sm" role="alert" data-testid="app-problems"><p className="font-medium text-bad">Before you go on:</p><ul className="mt-1 list-disc space-y-0.5 pl-5 text-bad">{problems.slice(0, 8).map((problem) => <li key={problem}>{problem}</li>)}</ul>{problems.length > 8 && <p className="mt-1 text-xs text-bad">and {problems.length - 8} more.</p>}</div>
             </Reveal>
@@ -262,7 +298,13 @@ export function BorrowerApplication({ token, initial, startStep, savedAt, office
             </div>
           </>
         )}
-      </main>
+      </>
+  );
+  if (portal) return <div className="max-w-3xl space-y-4" data-testid="borrower-application">{page}</div>;
+  return (
+    <div className="min-h-screen bg-background">
+      <header className="bg-primary text-primary-foreground"><div className="mx-auto flex max-w-3xl items-center justify-between gap-3 px-4 py-3"><span className="[&_*]:text-primary-foreground!"><Logo /></span><span className="flex items-center gap-1.5 text-xs opacity-80"><Lock size={12} aria-hidden="true" /> Secure borrower application</span></div></header>
+      <main className="mx-auto max-w-3xl space-y-4 px-4 py-6" data-testid="borrower-application">{page}</main>
     </div>
   );
 }

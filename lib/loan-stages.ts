@@ -4,21 +4,23 @@ import { activeWire, wireVerified } from "./closing";
 import { blockingConditions } from "./conditions";
 import type { Estimate } from "./engine";
 import { ofacBlocker } from "./ofac";
+import { partnerFundsBlocker } from "./partner-funding";
 import type { Deal, LoanStatus } from "./mockData";
 
-const NEXT: Partial<Record<LoanStatus, { to: LoanStatus; action: string }>> = {
-  submitted: { to: "initial_review", action: "Start initial review" },
-  initial_review: { to: "underwriting", action: "Send to underwriting" },
-  underwriting: { to: "term_sheet_issued", action: "Issue term sheet" },
-  term_sheet_issued: { to: "term_sheet_accepted", action: "Waiting for the borrower to accept" },
-  term_sheet_accepted: { to: "conditions", action: "Start clearing conditions" },
-  conditions: { to: "clear_to_close", action: "Mark clear to close" },
-  clear_to_close: { to: "closing", action: "Send to closing" },
-  closing: { to: "funded", action: "Mark funded" },
-  funded: { to: "servicing_current", action: "Start servicing" },
+// action is the button; next says what happens, for the line above it.
+const NEXT: Partial<Record<LoanStatus, { to: LoanStatus; action: string; next: string }>> = {
+  submitted: { to: "initial_review", action: "Start initial review", next: "start the initial review" },
+  initial_review: { to: "underwriting", action: "Send to underwriting", next: "send it to underwriting" },
+  underwriting: { to: "term_sheet_issued", action: "Issue term sheet", next: "build and send the term sheet" },
+  term_sheet_issued: { to: "term_sheet_accepted", action: "Waiting for the borrower to accept", next: "waiting for the borrower to accept the term sheet" },
+  term_sheet_accepted: { to: "conditions", action: "Start clearing conditions", next: "start clearing conditions" },
+  conditions: { to: "clear_to_close", action: "Mark clear to close", next: "clear the conditions, then mark it clear to close" },
+  clear_to_close: { to: "closing", action: "Send to closing", next: "send it to closing" },
+  closing: { to: "funded", action: "Mark funded", next: "verify the wire, get two funding approvals, and mark it funded" },
+  funded: { to: "servicing_current", action: "Start servicing", next: "start servicing" },
 };
 
-export type NextStage = { to: LoanStatus; action: string; blockers: string[]; borrowerStep: boolean };
+export type NextStage = { to: LoanStatus; action: string; next: string; blockers: string[]; borrowerStep: boolean };
 
 /**
  * The loan's next step and what stands in its way. Null once it is in servicing. With today, it also checks that the
@@ -51,6 +53,7 @@ export function nextStage(deal: Deal, e: Estimate, today?: string): NextStage | 
     if (unsigned.length) blockers.push(`${unsigned.map((doc) => doc.name).join(", ")} not accepted yet`);
   }
   if (step.to === "funded" && !wireVerified(deal)) blockers.push(activeWire(deal) ? "The wire instructions haven't been verified by a call-back (Closing tab)" : "No wire instructions yet (Closing tab)");
+  if (step.to === "funded") { const waiting = partnerFundsBlocker(deal); if (waiting) blockers.push(waiting); }
   if (step.to === "funded" && (deal.fundingApprovers?.length ?? 0) < 2) blockers.push(`Needs two people to approve funding (${deal.fundingApprovers?.length ?? 0} of 2)`);
   return { ...step, blockers, borrowerStep: deal.status === "term_sheet_issued" };
 }

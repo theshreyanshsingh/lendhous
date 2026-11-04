@@ -6,6 +6,7 @@ import { titleLinkState } from "@/lib/closing";
 import type { Deal } from "@/lib/mockData";
 import { useStore } from "@/lib/store";
 import { Badge, Section, shortDate, usd } from "@/components/ui";
+import { shortDay } from "@/lib/format";
 
 const STATE = { open: ["Open", "green"], expired: ["Expired", "amber"], off: ["Turned off", "slate"], closed: ["Closed", "slate"] } as const;
 
@@ -64,8 +65,8 @@ export function TitleLinkPanel({ deal }: { deal: Deal }) {
         )}
         {(deal.closing?.fundsReceived || deal.closing?.recording) && (
           <ul className="space-y-1 border-t border-border pt-2 text-xs" data-testid="title-confirmations">
-            {deal.closing.fundsReceived && <li className="text-good">{deal.closing.fundsReceived.by} confirmed {usd(deal.closing.fundsReceived.amount, 2)} reached escrow on {deal.closing.fundsReceived.on}.</li>}
-            {deal.closing.recording && <li className="text-good">Mortgage recorded {deal.closing.recording.on} ({deal.closing.recording.reference}), per {deal.closing.recording.by}.</li>}
+            {deal.closing.fundsReceived && <li className="text-good">{deal.closing.fundsReceived.by} confirmed {usd(deal.closing.fundsReceived.amount, 2)} reached escrow on {shortDay(deal.closing.fundsReceived.on)}.</li>}
+            {deal.closing.recording && <li className="text-good">Mortgage recorded {shortDay(deal.closing.recording.on)} ({deal.closing.recording.reference}), per {deal.closing.recording.by}.</li>}
           </ul>
         )}
       </div>

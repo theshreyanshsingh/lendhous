@@ -124,6 +124,13 @@ export function PricingEditor({ current, history, canPublish }: { current: Prici
             <label className="block min-w-0"><span className="label">Quotes use the range&apos;s</span><select className="desk-input" value={draft.estimatePricePoint} onChange={(event) => setDraft({ ...draft, estimatePricePoint: event.target.value as PricingDraft["estimatePricePoint"] })}><option value="low">Low end</option><option value="mid">Middle</option><option value="high">High end</option></select></label>
           </div>
         </Section>
+        <Section title="Repeat borrowers">
+          <div className="space-y-2" data-testid="repeat-tiers">{draft.repeatTiers.map((_, at) => (
+            <div key={at} className="grid grid-cols-3 items-end gap-3">{num(`Tier ${at + 1}: loans paid as agreed`, ["repeatTiers", at, "loans"], { step: 1 })}{num("Rate cut (%)", ["repeatTiers", at, "rateCut"])}<div className="flex items-end gap-2">{num("Points cut", ["repeatTiers", at, "pointsCut"])}{draft.repeatTiers.length > 1 && <button type="button" className="btn-ghost mb-0.5 px-2! text-xs" aria-label={`Remove tier ${at + 1}`} onClick={() => setDraft({ ...draft, repeatTiers: draft.repeatTiers.filter((_tier, index) => index !== at) })}>✕</button>}</div></div>
+          ))}</div>
+          {draft.repeatTiers.length < 6 && <button type="button" className="mt-2 text-sm text-link underline underline-offset-2" data-testid="add-repeat-tier" onClick={() => { const last = draft.repeatTiers[draft.repeatTiers.length - 1]; setDraft({ ...draft, repeatTiers: [...draft.repeatTiers, { loans: (last?.loans ?? 0) + 3, rateCut: last?.rateCut ?? 0.25, pointsCut: last?.pointsCut ?? 0 }] }); }}>Add a tier</button>}
+          <p className="mt-2 text-xs text-muted-foreground">Counts the borrower&apos;s LendHous loans funded in the last 24 months and paid as agreed; a late payment or default in that time pauses the cut. The highest tier reached applies. PLACEHOLDER numbers until GT sets them.</p>
+        </Section>
         <Section title="In the note: late payments and extensions">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             {num("Grace days", ["servicing", "graceDays"], { step: 1 })}{num("Late fee", ["servicing", "lateFeePct"], { pct: true })}

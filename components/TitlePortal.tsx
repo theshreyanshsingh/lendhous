@@ -6,6 +6,7 @@ import { Logo } from "@/components/logo";
 import { Arrive, Reveal } from "@/components/motion";
 import { wireProblem, type TitleView } from "@/lib/closing";
 import { servicingDate } from "@/lib/servicing";
+import { shortDay } from "@/lib/format";
 
 const usd = (amount: number) => `$${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const STATUS: Record<string, [string, string]> = { requested: ["Needed", "bg-warn/12 text-warn"], uploaded: ["Sent, being checked", "bg-link/10 text-link"], in_review: ["Being checked", "bg-link/10 text-link"], accepted: ["Accepted", "bg-good/10 text-good"], rejected: ["Send it again", "bg-bad/10 text-bad"], waived: ["Not needed", "bg-muted text-muted-foreground"] };
@@ -76,7 +77,7 @@ export function TitlePortal({ token, initial, expiresAt }: { token: string | nul
             <div><dt className="text-xs text-muted-foreground">Loan</dt><dd className="font-medium">{view.loanNumber}</dd></div>
             <div><dt className="text-xs text-muted-foreground">Loan amount</dt><dd className="font-medium">{usd(view.noteAmount)}</dd></div>
             <div><dt className="text-xs text-muted-foreground">Borrower (vesting)</dt><dd className="font-medium wrap-anywhere">{view.entity}</dd></div>
-            <div><dt className="text-xs text-muted-foreground">Target closing</dt><dd className="font-medium">{view.closingDate}</dd></div>
+            <div><dt className="text-xs text-muted-foreground">Target closing</dt><dd className="font-medium">{shortDay(view.closingDate)}</dd></div>
           </dl>
         </section>
 
@@ -138,7 +139,7 @@ export function TitlePortal({ token, initial, expiresAt }: { token: string | nul
           <Arrive className="glass space-y-3 p-5">
             <h2 className="eyebrow">Funding and recording</h2>
             {view.fundsReceived ? (
-              <p className="text-sm" data-testid="title-funds-done"><Check size={14} className="mr-1 inline text-good" aria-hidden="true" />You confirmed {usd(view.fundsReceived.amount)} reached escrow on {view.fundsReceived.on}.</p>
+              <p className="text-sm" data-testid="title-funds-done"><Check size={14} className="mr-1 inline text-good" aria-hidden="true" />You confirmed {usd(view.fundsReceived.amount)} reached escrow on {shortDay(view.fundsReceived.on)}.</p>
             ) : (
               <div className="flex flex-wrap items-end gap-2" data-testid="title-funds-form">
                 <label className="block min-w-0 flex-1 basis-40"><span className="label">Amount received in escrow</span><input className="desk-input" inputMode="decimal" data-testid="title-funds-amount" value={funds.amount} onChange={(event) => setFunds({ ...funds, amount: event.target.value })} /></label>
@@ -147,7 +148,7 @@ export function TitlePortal({ token, initial, expiresAt }: { token: string | nul
               </div>
             )}
             {view.funded && (view.recording ? (
-              <p className="text-sm" data-testid="title-recorded"><Check size={14} className="mr-1 inline text-good" aria-hidden="true" />Recorded {view.recording.on} ({view.recording.reference}).</p>
+              <p className="text-sm" data-testid="title-recorded"><Check size={14} className="mr-1 inline text-good" aria-hidden="true" />Recorded {shortDay(view.recording.on)} ({view.recording.reference}).</p>
             ) : (
               <div className="flex flex-wrap items-end gap-2" data-testid="title-recording-form">
                 <label className="block"><span className="label">Mortgage recorded on</span><input className="desk-input" type="date" max={today} data-testid="title-recorded-on" value={recording.on} onChange={(event) => setRecording({ ...recording, on: event.target.value })} /></label>

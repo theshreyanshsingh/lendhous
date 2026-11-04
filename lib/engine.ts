@@ -3,7 +3,7 @@
  * Pure functions only. Same code would run on server and client in the real build.
  * Money in dollars (number) in this prototype; round2() mirrors the "round half up at posting" rule.
  */
-import type { PricingConfig, Tier, Range } from "./pricing-config";
+import type { PricingConfig, RepeatTier, Tier, Range } from "./pricing-config";
 import { currentPricing, pricingFor } from "./pricing-versions";
 
 export const round2 = (x: number) => Math.round((x + Number.EPSILON) * 100) / 100;
@@ -136,6 +136,20 @@ export function capitalAvailable(s: { commitment: number; reserved: number; comm
 }
 
 /* ---------------- tiers, colors, score ---------------- */
+/** A config's repeat-borrower tiers; pricing published before them had one flat rate cut. */
+export const repeatTiersOf = (config: PricingConfig): RepeatTier[] => config.adjusters.repeatTiers ?? [{ loans: 1, rateCut: config.adjusters.repeatBorrowerRateCut ?? 0.25, pointsCut: 0 }];
+
+/**
+ * The repeat-borrower cut a loan gets: the highest tier its loans paid as agreed reach, or none while a late payment pauses
+ * it. Pricing published before the tiers existed had one flat rate cut.
+ */
+export function repeatTierOf(app: Pick<Application, "repeat" | "repeatBorrower">, cfg: PricingConfig = currentPricing()) {
+  const loans = Math.max(app.repeat?.loans ?? 0, app.repeatBorrower ? 1 : 0);
+  if (!loans || app.repeat?.pausedBy) return null;
+  const tier = [...repeatTiersOf(cfg)].sort((a, b) => b.loans - a.loans).find((item) => loans >= item.loans);
+  return tier ? { ...tier, count: loans } : null;
+}
+
 export function experienceTier(verifiedDeals: number, cfg: PricingConfig = currentPricing()): Tier {
   let t: Tier = 1;
   for (const e of cfg.experienceTiers) if (verifiedDeals >= e.min) t = e.tier;
@@ -214,7 +228,11 @@ export interface Application {
   requestedAmount?: number; termMonths?: number;
   interestReserve: "none" | "financed";
   accrual: "full_boat" | "dutch";
-  fico: number; verifiedDeals: number; foreignNational?: boolean; repeatBorrower?: boolean;
+  fico: number; verifiedDeals: number; foreignNational?: boolean;
+  /** Staff's mark for a borrower whose LendHous loans came before this system: counts as one loan paid as agreed. */
+  repeatBorrower?: boolean;
+  /** The borrower's LendHous loans paid as agreed when this was submitted (lib/repeat-borrower.ts). Set by the server, never from a browser. */
+  repeat?: { loans: number; counted: string[]; pausedBy?: string; asOf: string };
   liquidity: number; earnestMoney?: number;
   valuationSource?: "appraisal" | "bpo" | "avm" | "borrower_estimate";
   /** The pricing version this loan was quoted on (lib/pricing-versions.ts). Set when it's saved; never from a browser. */
@@ -267,7 +285,10 @@ export function evaluate(app: Application, cfg: PricingConfig = pricingFor(app.p
   if (app.propertyType === "condo") { levCut += A.condoLeverageCut; rateAdd += A.condoRateAdd; flags.push("Condo: −5% leverage, +0.25%"); }
   if (location === "expansion") { levCut += A.expansionCountyLeverageCut; flags.push("Expansion county: −5% leverage"); }
   if (app.foreignNational) { levCut += A.foreignNationalLeverageCut; rateAdd += A.foreignNationalRateAdd; flags.push("Foreign national: −10% leverage, +1.0%"); }
-  if (app.repeatBorrower) { rateAdd -= A.repeatBorrowerRateCut; flags.push("Repeat borrower: −0.25%"); }
+  const repeat = repeatTierOf(app, cfg);
+  if (repeat) { rateAdd -= repeat.rateCut; flags.push(`Repeat borrower, ${repeat.count} loan${repeat.count === 1 ? "" : "s"} paid as agreed: −${repeat.rateCut}%${repeat.pointsCut ? `, −${repeat.pointsCut} points` : ""}`); }
+  else if (app.repeat?.pausedBy) flags.push(`Repeat pricing paused: a late payment on ${app.repeat.pausedBy} in the last 24 months`);
+  const repeatPoints = (points: number) => (repeat?.pointsCut ? Math.max(0, round2(points - repeat.pointsCut)) : points);
   const heavy = app.purchasePrice > 0 && app.rehab / app.purchasePrice > A.heavyRehabRatio;
   if (heavy) flags.push("Heavy rehab (>100% of purchase): −5% LTC, extra inspection");
 
@@ -301,7 +322,7 @@ export function evaluate(app: Application, cfg: PricingConfig = pricingFor(app.p
     }
     const s = sizeFixFlip({ purchasePrice: app.purchasePrice, rehab: app.rehab, arv: app.arv, asIs: app.product === "ground_up" ? app.purchasePrice : V, costBasis: C, limits: lim, requested: app.requestedAmount, cap });
     matrixRate = pick(rateRange, pp) + rateAdd + smallLoanAdd(s.loan);
-    rate = app.termRate ?? matrixRate; pointsPct = app.termPoints ?? pick(pointsRange, pp);
+    rate = app.termRate ?? matrixRate; pointsPct = app.termPoints ?? repeatPoints(pick(pointsRange, pp));
     if (app.interestReserve === "financed") {
       // reserve is CARVED OUT of the note (Spec 5.1 ex. B), so sizing limits still hold
       financedReserve = round2(app.accrual === "full_boat" ? fullBoatReserve(s.loan, rate, termMonths) :
@@ -326,7 +347,7 @@ export function evaluate(app: Application, cfg: PricingConfig = pricingFor(app.p
     noteAmount = maxLoan;
     if (app.requestedAmount && app.requestedAmount < noteAmount) { noteAmount = app.requestedAmount; binding = "Requested amount"; }
     matrixRate = pick(rateRange, pp) + rateAdd + smallLoanAdd(noteAmount);
-    rate = app.termRate ?? matrixRate; pointsPct = app.termPoints ?? pick(pointsRange, pp);
+    rate = app.termRate ?? matrixRate; pointsPct = app.termPoints ?? repeatPoints(pick(pointsRange, pp));
     holdback = 0; initialAdvance = noteAmount;
     ratios = [{ key: "ltv", label: "LTV", actual: ltv(noteAmount, V), limit: maxL, kind: "max", color: "green" }];
     monthlyPayment = ioPayment(noteAmount, rate);
@@ -334,7 +355,7 @@ export function evaluate(app: Application, cfg: PricingConfig = pricingFor(app.p
     // DSCR
     const d = cfg.dscr; termMonths = 360;
     rateRange = d.baseRate; pointsRange = d.points; minFico = d.ficoBands[d.ficoBands.length - 1];
-    pointsPct = app.termPoints ?? pick(pointsRange, pp);
+    pointsPct = app.termPoints ?? repeatPoints(pick(pointsRange, pp));
     const row = d.ficoBands.findIndex((b) => app.fico >= b);
     const cashOutCut = app.purpose === "refi_co" ? d.cashOutLtvReduction : 0;
     let chosen: { col: number; loan: number; rate: number; matrixRate: number; dscr: number; maxLTV: number } | null = null;
@@ -396,7 +417,7 @@ export function evaluate(app: Application, cfg: PricingConfig = pricingFor(app.p
 
   // The tier's range, moved by whatever adjusted this loan's rate: the room the matrix gives around its own rate.
   const rateLimits: Range = [round2(matrixRate - (pick(rateRange!, pp) - rateRange![0])), round2(matrixRate + (rateRange![1] - pick(rateRange!, pp)))];
-  return { eligible: hardStops.length === 0, hardStops, flags, tier, location, rateRange: rateRange!, pointsRange: pointsRange!, rate, pointsPct, matrixRate, rateLimits, noteAmount, maxLoan, binding, initialAdvance, holdback, financedReserve, points, lenderFees, cashToClose: round2(cashToClose), monthlyPayment: round2(monthlyPayment), termMonths: termMonths!, ratios, allIn, flip, dscr: dscrVal, score, reserveMonths, sizingCandidates };
+  return { eligible: hardStops.length === 0, hardStops, flags, tier, location, rateRange: rateRange!, pointsRange: [repeatPoints(pointsRange![0]), repeatPoints(pointsRange![1])], rate, pointsPct, matrixRate, rateLimits, noteAmount, maxLoan, binding, initialAdvance, holdback, financedReserve, points, lenderFees, cashToClose: round2(cashToClose), monthlyPayment: round2(monthlyPayment), termMonths: termMonths!, ratios, allIn, flip, dscr: dscrVal, score, reserveMonths, sizingCandidates };
 }
 
 /** Balances on a funded loan (Spec 5.1): Dutch interest accrues on disbursed principal, full-boat on the note amount. */

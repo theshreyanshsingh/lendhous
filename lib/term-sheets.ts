@@ -3,10 +3,11 @@
 // (back to underwriting) or declines it (withdrawn), and acceptance locks the rate and points. The reducer, the access
 // rules, the screens and the PDF all ask these, so the button a screen offers and the rule the server applies can't
 // disagree.
-import { evaluate, type Application } from "./engine";
+import { evaluate, type Application, round2 } from "./engine";
 import type { Deal, PricingException, TermSheet } from "./mockData";
 import { BASE_VERSION, pricingFor } from "./pricing-versions";
 import { addDays, daysBetween, defaultRate, servicingTermsOf } from "./servicing";
+import { usuryCheck, USURY } from "./usury";
 
 /** PLACEHOLDER until GT sets it (Spec B16): the days a term sheet stays open. */
 export const TERM_SHEET_DAYS = 7;
@@ -61,6 +62,11 @@ export function exceptionReasons(app: Application, input: TermsInput) {
   if (input.points < m.points[0] - 1e-9 || input.points > m.points[1] + 1e-9) reasons.push(`${input.points} points is outside the matrix's ${m.points[0]} to ${m.points[1]}`);
   if (app.product !== "dscr" && e.allIn >= ceiling) reasons.push(`The all-in cost of ${(e.allIn * 100).toFixed(2)}% a year is at or over the ${(ceiling * 100).toFixed(0)}% ceiling`);
   if (input.rate > CIVIL_CAP.rate && e.noteAmount <= CIVIL_CAP.upTo) reasons.push(`A rate over ${CIVIL_CAP.rate}% on a loan of $500,000 or less is over Florida's usury cap (Fla. Stat. 687.02): ask the attorney first`);
+  // Points count as interest spread over the term, so a short loan with points can go over the cap with the rate under it.
+  else {
+    const usury = usuryCheck({ amount: e.noteAmount, rate: input.rate, points: input.points, termMonths: e.termMonths });
+    if (usury.overLender) reasons.push(`Rate plus points comes to ${usury.lender.toFixed(2)}% a year spread over the ${e.termMonths}-month term, over Florida's ${usury.limit}% cap (Fla. Stat. 687.03): ask the attorney first`);
+  }
   return reasons;
 }
 
@@ -99,6 +105,7 @@ export function issueProblem(deal: Deal, input: TermsInput) {
   if (hard) return hard;
   const e = evaluate(pricedApp(deal.app, input));
   if (e.hardStops.length) return e.hardStops[0];
+  if (usuryCheck({ amount: e.noteAmount, rate: input.rate, points: input.points, termMonths: e.termMonths }).criminal) return `Rate plus points spread over the term is over ${USURY.criminal}% a year: that's criminal usury in Florida (Fla. Stat. 687.071).`;
   if (!deal.creditReview) return "Sign off the credit review first (Credit review tab).";
   const reasons = exceptionReasons(deal.app, input);
   if (reasons.length && !exceptionCovers(deal.pricingException, input)) return deal.pricingException?.status === "pending" ? "Waiting for an owner to approve the exception." : `${reasons[0]}. That needs an owner's approval first.`;
@@ -114,7 +121,7 @@ export function draftSheet(deal: Deal, input: TermsInput, by: string, today: str
   return {
     version: (deal.termSheets?.length ?? 0) + 1, issuedAt: at, issuedOn: today, issuedBy: by, expiresOn: addDays(today, TERM_SHEET_DAYS), status: "sent",
     pricingVersion: deal.app.pricingVersion ?? BASE_VERSION,
-    terms: { noteAmount: e.noteAmount, initialAdvance: e.initialAdvance, holdback: e.holdback, financedReserve: e.financedReserve, rate: e.rate, pointsPct: e.pointsPct, points: e.points, lenderFees: e.lenderFees, termMonths: e.termMonths, monthlyPayment: e.monthlyPayment, cashToClose: e.cashToClose, interestReserve: app.interestReserve, accrual: app.accrual, prepay: PREPAY[input.prepay] },
+    terms: { noteAmount: e.noteAmount, initialAdvance: e.initialAdvance, holdback: e.holdback, financedReserve: e.financedReserve, rate: e.rate, pointsPct: e.pointsPct, points: e.points, lenderFees: e.lenderFees, termMonths: e.termMonths, monthlyPayment: e.monthlyPayment, cashToClose: e.cashToClose, interestReserve: app.interestReserve, accrual: app.accrual, prepay: PREPAY[input.prepay], ...(deal.brokerPoints ? { brokerPoints: deal.brokerPoints, brokerFee: round2((e.noteAmount * deal.brokerPoints) / 100) } : {}) },
     matrix: { rate: m.rate, points: m.points },
     ...(exception ? { exception } : {}),
     conditions: conditionsOf(deal),
@@ -176,6 +183,7 @@ export function sheetContent(deal: Deal, sheet: TermSheet, lender = "LendHous"):
   if (t.financedReserve > 0) terms.push(["Interest reserve", `${money(t.financedReserve)}, held from the loan to pay interest`]);
   terms.push(["Interest rate", `${percent(t.rate)} a year, ${rental ? "30-year amortizing" : t.accrual === "full_boat" ? "interest only, on the full loan amount" : "interest only, on the money advanced"}`]);
   terms.push(["Origination points", `${t.pointsPct}% (${money(t.points)})`], ["Lender fees", money(t.lenderFees)]);
+  if (t.brokerFee) terms.push(["Broker's fee", `${t.brokerPoints}% (${money(t.brokerFee)}), paid by the borrower to the broker at closing`]);
   terms.push(["Term", rental ? "30 years" : `${t.termMonths} months from closing`]);
   terms.push([rental ? "Monthly payment" : "First monthly payment (estimated)", money(t.monthlyPayment)], ["Cash to close (estimated)", money(t.cashToClose)]);
   terms.push(["Prepayment", t.prepay]);

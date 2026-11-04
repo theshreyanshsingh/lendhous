@@ -85,7 +85,7 @@ describe("the business report", () => {
   });
   it("shows capital and the portfolio as they stand, the same way the capital and servicing pages count", () => {
     const full = businessReport(demo, OCTOBER, "2026-10-31");
-    expect(full.capital).toMatchObject({ commitment: 9_000_000, available: 3_456_500 });
+    expect(full.capital).toMatchObject({ commitment: 9_000_000, available: 3_689_000 });
     expect(full.portfolio.loans).toBe(8);
     expect(full.portfolio.outstanding).toBeCloseTo(2_727_311.94, 2);
     expect(full.portfolio.averageRate).toBeGreaterThan(8);

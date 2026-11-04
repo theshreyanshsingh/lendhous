@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { DocUpload } from "@/components/loan/DocUpload";
 import { LoanMessages } from "@/components/loan/LoanMessages";
+import { TeamContacts } from "@/components/loan/LoanTeam";
 import { TermSheetCard } from "@/components/loan/TermSheetCard";
 import { BorrowerConditions } from "@/components/loan/BorrowerConditions";
 import { PropertyPhotos } from "@/components/loan/PropertyPhotos";
@@ -45,6 +46,7 @@ export default function BrokerDeal() {
               <Stat label="Target closing" value={deal.closingDate} />
             </div>
           </Section>
+          <Section title="LendHous team"><TeamContacts deal={deal} /></Section>
         </div>
       </div>
     </div>

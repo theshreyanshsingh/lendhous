@@ -39,6 +39,37 @@ export const blankDraft = (): AppDraft => ({
   guarantors: [blankGuarantor()], trackRecord: [],
 });
 
+/** A new application from a signed-in borrower's portal, starting with what their account already says. */
+export function draftForAccount(account: { name: string; email: string; phone?: string | null }) {
+  const draft = blankDraft();
+  const [firstName = "", ...rest] = account.name.trim().split(/\s+/);
+  draft.contact = { firstName, lastName: rest.join(" "), email: account.email, phone: account.phone ?? "" };
+  draft.guarantors = [{ ...blankGuarantor(), firstName, lastName: rest.join(" "), email: account.email, phone: account.phone ?? "" }];
+  return draft;
+}
+
+/**
+ * A repeat borrower's next application, from their last signed one: the same contact, entity, guarantors and past deals,
+ * with a new property and loan. Social Security numbers, birth dates, credit scores and the declarations are asked again:
+ * each application is its own certification, and a score over 90 days old is pulled again anyway.
+ */
+export function repeatDraft(signed: AppDraft): AppDraft {
+  const base = blankDraft();
+  return {
+    ...base, contact: { ...signed.contact }, loanType: signed.loanType, vesting: { ...signed.vesting, address: { ...signed.vesting.address } },
+    guarantors: signed.guarantors.map((g) => ({ ...g, ssn: "", dob: "", fico: "", answers: {}, occupy: null, explanation: "" })),
+    trackRecord: signed.trackRecord.map(({ verified: _verified, ...deal }) => deal),
+  };
+}
+
+/** The same start from a loan with no signed application on file (one the team entered): its entity, guarantors and past deals. */
+export function draftFromLoan(deal: import("./mockData").Deal, account: { name: string; email: string; phone?: string | null }): AppDraft {
+  const draft = repeatDraft(draftFromDeal(deal, account.email));
+  const mine = draftForAccount(account);
+  const formed = !/\(LLC to be formed\)$/.test(deal.entityName);
+  return { ...draft, contact: mine.contact, vesting: formed ? draft.vesting : { ...draft.vesting, hasLlc: false, entityName: "" }, guarantors: deal.sponsor?.guarantors.length ? draft.guarantors.map((g, at) => (at === 0 ? { ...g, phone: account.phone || g.phone } : g)) : mine.guarantors };
+}
+
 /** A saved draft with any part missing filled from a blank one, so an older draft opens in a newer form. */
 export function completeDraft(saved: unknown): AppDraft {
   const base = blankDraft();
@@ -134,6 +165,20 @@ export function signProblems(draft: AppDraft, today: string) {
 
 /** The consents signed with the application. PLACEHOLDER wording until the attorney approves it; the version is kept with each signature. */
 export const CONSENT_VERSION = "2026-11-03-placeholder";
+
+/** How long a portal application keeps after it was last saved. */
+export const PORTAL_DAYS = 90;
+
+/** Why an application can't be signed as it stands: something missing, a consent unchecked, or a name that isn't on it. */
+export function signatureProblem(draft: AppDraft, consents: Record<ConsentKey, boolean>, signatureName: string, today: string) {
+  const problems = signProblems(draft, today);
+  if (problems.length) return problems[0];
+  if (!CONSENTS.every((item) => consents[item.key] === true)) return "Check each of the four boxes to agree.";
+  const signer = signatureName.replace(/\s+/g, " ").trim();
+  const names = [draft.contact, ...draft.guarantors].map((person) => `${person.firstName} ${person.lastName}`.replace(/\s+/g, " ").trim().toLowerCase());
+  if (!names.includes(signer.toLowerCase())) return "Type your full legal name exactly as you entered it in the application.";
+  return null;
+}
 export const CONSENTS = [
   { key: "application", title: "Loan application acknowledgement and agreement", agree: "I've read and agree to the acknowledgement above, and everything in this application is true and complete as far as I know.", text: [
     "Each person signing, as borrower or guarantor, tells LendHous and anyone it works with on this loan (its lenders, servicers, investors, brokers, attorneys and their successors) that:",
@@ -190,6 +235,7 @@ export function toLoan(draft: AppDraft) {
     address: draft.property.address.street.trim(), city: draft.property.address.city.trim(), zip: draft.property.address.zip.trim(),
     entityName: draft.vesting.hasLlc ? draft.vesting.entityName.trim() : `${borrower} (LLC to be formed)`,
     exitStrategy: { sell: "Sell", refinance: "Refi", hold: "Hold", cash: "Pay off in cash", "": "Sell" }[l.exit],
+    closingDate: /^\d{4}-\d{2}-\d{2}$/.test(l.closeDate) ? l.closeDate : undefined,
   };
 }
 

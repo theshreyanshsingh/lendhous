@@ -2,6 +2,7 @@
 // Only names the loan number and what happened: details stay behind sign-in.
 import { serviceDay, type Book, type BookAction } from "@/lib/book";
 import { notify, notifyTeam } from "@/lib/email";
+import { TEAM_ROLE_LABEL, teamEmails } from "@/lib/loan-team";
 import { evaluate } from "@/lib/engine";
 import type { Deal } from "@/lib/mockData";
 import { currentPricing } from "@/lib/pricing-versions";
@@ -68,6 +69,12 @@ function actionAlerts(before: Book, after: Book, action: BookAction): Alert[] {
   const loan = (dealId?: string) => after.deals.find((deal) => deal.id === dealId);
   const number = (dealId?: string) => loan(dealId)?.loanNumber ?? "your loan";
   switch (action.t) {
+    case "assignLoanTeam": {
+      const deal = after.deals.find((item) => item.id === action.dealId);
+      const label = TEAM_ROLE_LABEL[action.role].toLowerCase();
+      // Nobody needs an email about taking a loan themselves.
+      return deal && action.member && action.member.name !== action.by ? [{ to: "email", email: action.member.email, subject: `You're the ${label} on ${deal.loanNumber}`, body: `${action.by} made you the ${label} on ${deal.loanNumber}: ${deal.borrowerName}, ${deal.address}, ${deal.city}. It's under "Mine" in the pipeline.`, event: "loan.assigned" }] : [];
+    }
     case "submitApp": {
       const deal = after.deals.find((item) => !before.deals.some((old) => old.id === item.id));
       return deal ? [{ to: "team", subject: `New application: ${deal.loanNumber}`, body: `${deal.borrowerName} applied for a loan on ${deal.address}, ${deal.city}.`, event: "loan.submitted" }] : [];
@@ -378,6 +385,16 @@ function actionAlerts(before: Book, after: Book, action: BookAction): Alert[] {
       return action.partnerIds.map((firmId) => ({ to: "partner" as const, firmId, subject: "A new deal fits your buy box", body: "LendHous sent you a new deal. Sign in to review it.", event: "teaser.sent" }));
     case "bid":
       return [{ to: "team", subject: `New bid: ${number(action.bid.dealId)}`, body: "A partner lender responded to a teaser.", event: "bid.received" }];
+    case "partnerFundsSent": {
+      const deal = after.deals.find((item) => item.id === action.dealId);
+      const funding = deal?.partnerFunding;
+      return deal && funding ? [{ to: "team", dealId: deal.id, subject: `Partner funds sent: ${deal.loanNumber}`, body: `${action.by} says the partner's share of ${dollars(funding.amount)} was wired on ${longDate(action.sentOn)} (reference ${action.reference || "not given"}). Confirm it arrived in escrow on the loan's Closing tab; the loan can't fund until it has.`, event: "partner_funds.sent" }] : [];
+    }
+    case "partnerFundsReceived": {
+      const deal = after.deals.find((item) => item.id === action.dealId);
+      const funding = deal?.partnerFunding;
+      return deal && funding ? [{ to: "partner", firmId: funding.partnerId, subject: `Your funds arrived: ${deal.loanNumber}`, body: `LendHous confirmed your share of ${dollars(funding.amount)} arrived in escrow on ${longDate(action.on)}. You'll hear when the loan funds.`, event: "partner_funds.received" }] : [];
+    }
     case "acceptBid": {
       const bid = after.bids.find((item) => item.id === action.bidId);
       return bid ? [{ to: "partner", firmId: bid.partnerId, subject: "Your bid was accepted", body: "LendHous accepted your bid. Sign in to see the full deal room.", event: "bid.accepted" }] : [];
@@ -399,7 +416,9 @@ export async function sendAlerts(before: Book, after: Book, action: BookAction) 
     try {
       const link = `\n\nSign in: ${origin()}/login`;
       if (alert.to === "team") {
-        await notifyTeam(alert.subject, alert.body + link, alert.event);
+        // The owners hear about everything; a loan's own officer and processor hear about theirs too.
+        const dealId = alert.dealId ?? ("dealId" in action ? action.dealId : undefined);
+        await notifyTeam(alert.subject, alert.body + link, alert.event, undefined, teamEmails(after.deals.find((item) => item.id === dealId)));
         continue;
       }
       if (alert.to === "email") {

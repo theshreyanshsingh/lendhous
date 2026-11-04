@@ -48,6 +48,7 @@ const makePhoto = async (p) => Buffer.from(await p.evaluate(() => {
   context.fillStyle = "#202B28"; context.beginPath(); context.moveTo(160, 270); context.lineTo(400, 110); context.lineTo(640, 270); context.fill();
   return canvas.toDataURL("image/jpeg", 0.9).split(",")[1];
 }), "base64");
+const seen = (locator) => locator.waitFor({ timeout: 5000 }).then(() => true, () => false);
 const shot = async (p, name, full = true) => { await p.waitForTimeout(350); await p.screenshot({ path: `${OUT}/${name}`, fullPage: full }); };
 
 // Sessions are kept per seat and swapped in later, so the run signs in once per seat (sign-in is rate limited).
@@ -196,63 +197,90 @@ ok("the borrower seat can't open the website leads", new URL(page.url()).pathnam
 await page.goto(BASE + "/admin/reports");
 ok("nor the business reports", new URL(page.url()).pathname === "/admin/borrower");
 
+// The portal application: the same five steps, saving and signature as the secure link, with a live estimate.
+const CLOSE_ON = new Date(Date.now() + 40 * 86_400_000).toISOString().slice(0, 10);
+const fillAddress = async (p, testid, place) => { for (const [key, value] of Object.entries(place)) await p.getByTestId(`${testid}-${key}`).fill(value); };
+const PLACE = { street: "200 Portal Ave (FAKE)", city: "Hollywood", state: "FL", zip: "33020", county: "Broward" };
+const fillGuarantor = async (p, index, person) => {
+  const g = `g${index}`;
+  for (const [key, value] of Object.entries({ first: person.first, last: person.last, email: person.email, phone: "(954) 555-0110", dob: "1980-04-12", fico: person.fico, ssn: "123456789", own: person.own })) await p.getByTestId(`${g}-${key}`).fill(value);
+  await fillAddress(p, `${g}-home`, { street: "5 Home St (FAKE)", city: "Hollywood", state: "FL", zip: "33020" });
+  await p.getByTestId(`${g}-citizen`).selectOption("us");
+  for (const id of [`${g}-two-true`, `${g}-mail-true`, `${g}-marital-unmarried`]) await p.getByTestId(id).click();
+  for (const key of [...QUESTIONS, "occupy"]) await p.getByTestId(`${g}-decl-${key}-false`).click();
+};
 await page.goto(BASE + "/admin/apply");
-await page.getByTestId("next").click(); // -> property
-await page.getByTestId("next").click(); // -> deal numbers
+await page.getByTestId("borrower-application").waitFor();
+ok("the portal application starts from the account", (await page.getByTestId("app-email").inputValue()) === SEATS.borrower && (await page.getByTestId("app-first").inputValue()) === "Alex");
+ok("a repeat borrower's application starts from their funded loan", (await page.getByTestId("app-started-from").innerText()).includes("LH-DEMO-1002"));
+await page.getByTestId("app-next").click();
+ok("and checks each step before moving on", (await page.getByTestId("app-problems").innerText()).includes("phone number"));
+await page.getByTestId("app-phone").fill("(954) 555-0110");
+await page.getByTestId("app-next").click();
+await fillAddress(page, "app-address", PLACE);
+await page.getByTestId("app-flood-no").click();
+await page.getByTestId("app-type").selectOption("sfr");
+await page.getByTestId("app-occupancy").selectOption("vacant");
+ok("photos wait for the loan page", await page.getByTestId("app-photos-later").isVisible());
+await page.getByTestId("app-next").click();
+await page.getByTestId("app-purchasePrice").fill("300000");
+await page.getByTestId("app-rehab").fill("100000");
+await page.getByTestId("app-arv").fill("550000");
 const before = await page.getByTestId("est-loan").innerText();
-await page.getByTestId("rehab").fill("60000");
+await page.getByTestId("app-rehab").fill("60000");
 await page.waitForTimeout(200);
 const after = await page.getByTestId("est-loan").innerText();
-ok(`until past deals are listed, the estimate prices a first-time investor (got ${before}; expect $320,000)`, before.includes("320,000") && (await page.getByTestId("priced-on").innerText()).includes("Priced on 0 past deals"));
+ok(`until past deals are listed, the estimate prices a first-time investor (got ${before}; expect $320,000)`, before.includes("320,000") && (await page.getByTestId("priced-on").innerText()).includes("0 past deals"));
 ok(`estimate updates live when rehab changes (${before} → ${after}; expect $288,000 = 80% LTC of $360k)`, after.includes("288,000"));
-await page.getByTestId("rehab").fill("100000");
+ok("the estimate takes the repeat cut for the loan paid as agreed", (await page.getByTestId("app-estimate").innerText()).includes("Repeat borrower, 1 loan paid as agreed: −0.25%"));
+await page.getByTestId("app-rehab").fill("100000");
+await page.getByTestId("app-liquidity").fill("150000");
+await page.getByTestId("app-plan").fill("Cosmetic rehab and resale (FAKE).");
+await page.getByTestId("app-exit-sell").click();
+await page.getByTestId("app-close").fill(CLOSE_ON);
 await shot(page, "01-borrower-application-live-estimate.png");
-
-// owner-occupied hard stop
-await page.goto(BASE + "/admin/apply");
-await page.getByTestId("next").click();
-await page.getByText("I or a family member will live here").click();
-ok("owner-occupied shows hard stop", await page.getByTestId("owner-occ-stop").isVisible());
-ok("owner-occupied blocks Continue", await page.getByTestId("next").isDisabled());
-
-// complete + submit an application: guarantors, a past deal and every credit question
-await page.goto(BASE + "/admin/apply");
-for (let i = 0; i < 4; i++) await page.getByTestId("next").click();
-await page.getByTestId("guarantor-name-0").fill("Alex Sample (FAKE)");
-await page.getByTestId("add-guarantor").click();
-await page.getByTestId("guarantor-name-1").fill("Pat Partner (FAKE)");
-await page.getByTestId("guarantor-own-0").fill("70");
-await page.getByTestId("guarantor-own-1").fill("30");
-await page.getByTestId("guarantor-fico-1").fill("690");
-ok("the loan is priced on the lowest guarantor's score", await page.getByTestId("est-loan").isVisible());
+await page.getByTestId("app-next").click();
+await page.getByTestId("app-llc-true").click();
+await page.getByTestId("app-llc-name").fill("Sample Flips LLC (FAKE)");
+await fillAddress(page, "app-llc-address", { street: "1 Company Ct (FAKE)", city: "Hollywood", state: "FL", zip: "33020" });
+await page.getByTestId("app-guarantors-2").click();
+await page.getByTestId("g0-decl-occupy-true").click();
+ok("someone planning to live there sees the business-purpose stop", await page.getByTestId("app-owner-occ").waitFor({ timeout: 5000 }).then(() => true, () => false));
+await fillGuarantor(page, 0, { first: "Alex", last: "Sample (FAKE)", email: SEATS.borrower, fico: "720", own: "70" });
+await fillGuarantor(page, 1, { first: "Pat", last: "Partner (FAKE)", email: "pat.partner@example.org", fico: "690", own: "30" });
+ok("the loan is priced on the lowest guarantor's score", (await page.getByTestId("priced-on").innerText()).includes("690 credit score"));
 await shot(page, "01b-application-guarantors.png");
-await page.getByTestId("next").click();
 await page.getByTestId("add-deal").click();
 await page.getByTestId("deal-address-0").fill("9 Past Flip Ln (FAKE)");
 await page.getByTestId("deal-completed-0").fill("2026-01");
 await page.getByTestId("deal-price-0").fill("200000");
 await page.getByTestId("deal-sale-0").fill("310000");
-await page.getByTestId("next").click();
-await answerAll(page);
+ok("the past deal counts toward the price", (await page.getByTestId("priced-on").innerText()).includes("1 past deal"));
 await shot(page, "01c-application-credit-questions.png");
-await page.getByTestId("next").click();
+await page.getByTestId("app-next").click();
+await page.getByTestId("app-review").waitFor();
 ok("the review says what will be asked for", (await page.getByTestId("needs-preview").innerText()).includes("Settlement statements for your past deals"));
-ok("and prices on the lowest of the guarantors' scores", (await page.getByTestId("review-summary").innerText()).includes("qualifying score 690"));
-for (const c of ["bp", "noo", "consent", "true"]) await page.getByTestId(`cert-${c}`).check();
+for (const key of ["application", "credit", "release", "esign"]) await page.getByTestId(`agree-${key}`).check();
+await page.getByTestId("app-signature").fill("Alex Sample (FAKE)");
 await shot(page, "01d-application-review.png");
-await page.getByTestId("submit").click();
+await page.getByTestId("app-sign").click();
 await page.waitForURL("**/borrower");
 ok("submitted application appears on borrower dashboard", (await page.getByTestId("borrower-loan-card").count()) >= 3);
 const newLoan = (await page.getByTestId("borrower-loan-card").first().innerText()).match(/LH-DEMO-\d+/)?.[0];
 
 // 2. Borrower dashboard + doc upload
 await shot(page, "02-borrower-dashboard.png");
+await page.getByTestId("borrower-loan-card").filter({ hasText: newLoan }).click();
+ok("the entity's papers accepted on the funded loan carry over to the new one", (await seen(page.getByTestId("doc-entity").getByTestId("doc-carried"))) && (await page.getByTestId("doc-ein").getByTestId("doc-carried").count()) === 1 && (await page.getByTestId("doc-bank").getByTestId("doc-carried").count()) === 0);
 await page.goto(BASE + "/admin/borrower/d1");
 const fileInput = page.getByTestId("file-input");
 await page.getByTestId("doc-bank").getByRole("button", { name: "Upload" }).click().catch(() => {});
 await fileInput.setInputFiles({ name: "FAKE-bank-statement-sep-2026.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 fake") });
 await page.waitForTimeout(250);
 ok("document upload changes status to Uploaded", (await page.getByTestId("doc-bank").innerText()).includes("Uploaded"));
+ok("the borrower's loan starts with what's needed from them", (await page.getByTestId("need-item").count()) >= 1 && (await page.getByTestId("needs-progress").innerText()).includes("documents in"));
+ok("and there's one way to apply, in plain words", (await page.getByRole("link", { name: "Apply for a loan" }).count()) >= 1 && (await page.getByRole("link", { name: "New application" }).count()) === 0);
+ok("the borrower sees who's on their loan and how to reach them", (await page.getByTestId("your-team").innerText()).includes("Uma Underwriter (FAKE)") && (await page.getByTestId("your-team").getByRole("link", { name: /^Call/ }).count()) === 2);
 await shot(page, "03-borrower-loan-document-center.png");
 await page.getByTestId("property-photo-input").setInputFiles({ name: "back-yard.jpg", mimeType: "image/jpeg", buffer: PHOTO });
 ok("the borrower adds photos of the property to their loan", await page.getByTestId("property-photos").getByTestId("property-photo").first().waitFor({ timeout: 5000 }).then(() => true, () => false));
@@ -284,7 +312,8 @@ await page.getByTestId("reports").waitFor();
 ok("the reports count the last 90 days' applications, fundings and term sheets", (await page.getByTestId("kpi-applications").innerText()).includes("12") && (await page.getByTestId("kpi-funded").innerText()).includes("2") && (await page.getByTestId("range-dates").innerText()).includes("90 days"));
 ok("they follow the applications through and time each step", (await page.getByTestId("pull-through-row").count()) === 5 && (await page.getByTestId("cycle-times").innerText()).includes("10 days"));
 ok("they list the loan stuck in underwriting", (await page.getByTestId("stuck-row").count()) === 1 && (await page.getByTestId("stuck").innerText()).includes("LH-DEMO-1005"));
-ok("they show capital and the portfolio as of today", (await page.getByTestId("kpi-available").innerText()).includes("$3.46M") && (await page.getByTestId("kpi-outstanding").innerText()).includes("$2.73M") && (await page.getByTestId("delinquency-row").count()) === 5);
+ok("they show capital and the portfolio as of today", (await page.getByTestId("kpi-available").innerText()).includes("$3.69M") && (await page.getByTestId("kpi-outstanding").innerText()).includes("$2.73M") && (await page.getByTestId("delinquency-row").count()) === 5);
+ok("they break the period down by loan officer", (await page.getByTestId("by-officer").innerText()).includes("Uma Underwriter (FAKE)"));
 await shot(page, "24-admin-reports.png");
 await page.getByTestId("range-month").click();
 ok("a different range recounts", (await page.getByTestId("range-dates").innerText()).startsWith("Oct 1, 2026 to Oct 31, 2026"));
@@ -298,9 +327,55 @@ const loansCsv = fs.readFileSync(await loansFile.path(), "utf8");
 ok("every loan downloads as a spreadsheet with its steps", loansFile.suggestedFilename().startsWith("lendhous-loans-") && loansCsv.startsWith("Loan,Borrower,Source") && loansCsv.includes("LH-DEMO-1005"));
 const [summaryFile] = await Promise.all([page.waitForEvent("download"), page.getByTestId("export-summary").click()]);
 ok("and so does the summary", fs.readFileSync(await summaryFile.path(), "utf8").includes("Loans funded (count)"));
+await page.goto(BASE + "/admin/letters");
+ok("the team's letters page shows a sample on demo seats", await seen(page.getByTestId("letters-demo")));
+const sampleLetter = await page.request.get(BASE + "/api/letters/demo");
+ok("the sample pre-approval letter is a PDF", sampleLetter.headers()["content-type"] === "application/pdf" && (await sampleLetter.body()).subarray(0, 5).toString() === "%PDF-");
+await page.goto(BASE + "/verify/demo");
+ok("its QR code opens a page saying it's genuine, whom it's for and the limits", (await seen(page.getByTestId("verify-valid"))) && (await page.getByTestId("verify-letter").innerText()).includes("$340,000"));
+await shot(page, "25-verify-letter.png");
+await page.goto(BASE + "/admin/tax");
+ok("the owners' tax page lists the year's forms and who has no W-9", (await seen(page.getByTestId("tax-summary"))) && (await page.getByTestId("tax-summary").innerText()).startsWith("3 forms due for 2026") && (await page.getByTestId("tax-1099-INT").getByTestId("tax-line").count()) === 2 && (await page.getByTestId("tax-deadlines").innerText()).includes("Feb 1, 2027"));
+await page.getByTestId("tax-export").click();
+ok("a demo seat has no taxpayer IDs to export", await seen(page.getByTestId("tax-board-error")));
+await shot(page, "26-admin-tax-forms.png");
+await page.goto(BASE + "/admin/errors");
+ok("owners have the server's errors page", await seen(page.getByTestId("errors-summary")));
+ok("and demo seats don't get the nightly-job warning", (await page.getByTestId("stale-jobs").count()) === 0);
+// Who works each loan: the pipeline filters by it, and Needs attention points at the applications nobody has.
+await page.goto(BASE + "/admin");
+await page.getByTestId("attention").waitFor();
+ok("needs attention leads with the payoff letters and their deadline", (await page.getByTestId("attention").locator("a").first().getAttribute("data-testid")) === "attention-payoffs" && /left|late|today/.test(await page.getByTestId("attention-payoffs").getByTestId("attention-due").innerText()));
+ok("the pipeline starts with loans not yet funded", (await page.getByTestId("pipeline-table").getByText("LH-DEMO-1002").count()) === 0 && (await page.getByTestId("pipeline-table").getByText("LH-DEMO-1005").count()) === 1);
+await page.getByTestId("pipeline-ended").selectOption("funded");
+ok("and shows the funded ones when asked", await seen(page.getByTestId("pipeline-table").getByText("LH-DEMO-1002")));
+await page.getByTestId("pipeline-ended").selectOption("pipeline");
+const rehabRow = page.getByTestId("pipeline-table").locator("tr", { hasText: "LH-DEMO-1001" });
+ok("a rehab loan shows no total-loan-to-as-is LTV, and one status", (await rehabRow.locator("td").nth(3).innerText()).trim() === "—" && !(await page.getByTestId("pipeline-table").innerText()).includes("Not Started"));
+await page.getByTestId("staff-search-input").fill("1005");
+ok("the staff search finds a loan by number", await seen(page.getByTestId("search-result").filter({ hasText: "LH-DEMO-1005" })));
+await page.getByTestId("staff-search-input").fill("Smoke Test");
+ok("and a website lead by name", await seen(page.getByTestId("search-result").filter({ hasText: LEAD_NAME })));
+await page.getByTestId("staff-search-input").fill("1005");
+await page.getByTestId("search-result").filter({ hasText: "LH-DEMO-1005" }).click();
+ok("a result opens the loan", await page.waitForURL("**/admin/deals/d5").then(() => true, () => false));
+await page.goto(BASE + "/admin");
+ok("needs attention counts the applications with no loan officer", (await page.getByTestId("attention-unassigned").innerText()).includes("no loan officer"));
+await page.getByTestId("pipeline-team").selectOption("unassigned");
+const officers = page.getByTestId("pipeline-table").getByTestId("officer");
+ok("the pipeline shows the applications nobody has taken", (await officers.count()) > 0 && (await officers.allInnerTexts()).every((text) => text === "No loan officer"));
+await page.getByTestId("pipeline-team").selectOption("mine");
+ok("and the owner's own loans", (await officers.count()) > 0 && (await officers.locator("[title]").evaluateAll((els) => els.length > 0 && els.every((el) => el.getAttribute("title") === "Loan officer: Olivia Owner (FAKE)"))));
+await page.getByTestId("pipeline-team").selectOption("all");
 // 4. Deal workspace numbers & ratios
 await page.goto(BASE + "/admin/deals/d1");
 ok("deal d1 LTC pill shows 85.0%", (await page.getByTestId("ratio-LTC").innerText()).includes("85.0%"));
+ok("the loan page says what happens next in words, and when it closes", (await page.getByTestId("next-step").innerText()).includes("build and send the term sheet") && (await page.getByTestId("loan-facts").innerText()).startsWith("Target closing Nov 13, 2026") && (await page.getByTestId("stage-blockers").innerText()).startsWith("Before that:"));
+const chosen = (role) => page.getByTestId(`assign-${role}`).evaluate((select) => select.selectedOptions[0]?.text ?? "");
+ok("the loan shows its officer and processor", (await chosen("officer")) === "Uma Underwriter (FAKE)" && (await chosen("processor")) === "Pat Processor (FAKE)");
+await page.getByTestId("assign-processor").selectOption({ label: "Olivia Owner (FAKE)" });
+ok("an owner hands it to someone else", (await chosen("processor")) === "Olivia Owner (FAKE)");
+await page.getByTestId("assign-processor").selectOption({ label: "Pat Processor (FAKE)" });
 await shot(page, "05-admin-deal-ratios.png");
 // 5. Capital routing: send a teaser to the demo partner seat's organization, partner bids, staff accepts
 await page.getByTestId("tab-Capital Routing").click();
@@ -317,6 +392,18 @@ ok("the partner sees the teaser", (await page.getByTestId("teaser-card").count()
 const feedText = await page.locator("main").innerText();
 ok("teaser hides street address and borrower name", !feedText.includes("123 Example St") && !feedText.includes("Alex Sample"));
 await shot(page, "07-partner-deal-feed.png");
+// The partner's funded loans: its half of LH-DEMO-1011, what it's been paid, and last month's statement.
+await page.goto(BASE + "/admin/partner/portfolio");
+ok("the partner's portfolio lists the loan it funded half of", (await seen(page.getByTestId("portfolio-loan"))) && (await page.getByTestId("portfolio-loan").count()) === 1 && (await page.getByTestId("portfolio-loan").innerText()).includes("LH-DEMO-1011"));
+ok("with what's been paid to it after servicing", (await page.getByTestId("portfolio-received").innerText()).includes("$3,584.38"));
+ok("and October's statement: its interest at its own rate", (await page.getByTestId("statement-net").innerText()) === "$1,792.19");
+const samplePdfReply = await page.request.get(BASE + (await page.getByTestId("statement-sample-pdf").getAttribute("href")));
+ok("the sample statement downloads as a PDF", samplePdfReply.headers()["content-type"] === "application/pdf" && (await samplePdfReply.body()).subarray(0, 5).toString() === "%PDF-");
+await shot(page, "07b-partner-portfolio.png");
+await page.goto(BASE + "/admin/account/tax");
+ok("a partner has a tax form page (a sample on demo seats)", await seen(page.getByTestId("tax-demo")));
+await page.goto(BASE + "/admin/partner/teasers/d11");
+ok("on the loan, the partner sees its funds arrived for closing", (await seen(page.getByTestId("partner-funding"))) && (await page.getByTestId("partner-funding").innerText()).includes("arrived in escrow on Jun 30, 2026"));
 await page.goto(BASE + "/admin/partner/teasers/d1");
 await page.getByTestId("place-bid").click();
 ok("bid recorded", await page.getByTestId("my-bid").isVisible());
@@ -327,6 +414,9 @@ await page.getByTestId("tab-Capital Routing").click();
 await page.getByTestId("accept-bid").first().click();
 await page.waitForTimeout(200);
 ok("bid accepted", (await page.locator("main").innerText()).includes("accepted"));
+await page.goto(BASE + "/admin/deals/d11");
+await page.getByTestId("tab-Closing").click();
+ok("the team sees the partner's share and when it arrived", (await seen(page.getByTestId("team-partner-funding"))) && (await page.getByTestId("team-partner-funding").innerText()).includes("Confirmed in escrow on Jun 30, 2026"));
 
 await actAs(SEATS.partner);
 await page.goto(BASE + "/admin/partner/teasers/d1");
@@ -372,6 +462,7 @@ ok("the offer is recorded", await page.getByTestId("my-offer").waitFor({ timeout
 await page.goto(BASE + "/admin/buyer/portfolio");
 await page.getByTestId("my-offer-row").first().waitFor({ timeout: 5000 });
 ok("the buyer's page shows the loan they own and their offers", (await page.getByTestId("owned-loan").count()) === 1 && (await page.getByTestId("my-offer-row").count()) === 2);
+ok("the buyer sees what it's been paid since it bought, and last month's statement", !(await page.getByTestId("buyer-received").innerText()).includes("$0.00") && (await seen(page.getByTestId("statement-preview"))));
 await shot(page, "12-buyer-portfolio.png");
 await page.goto(BASE + "/admin/buyer/loans/s-d14");
 ok("a loan the buyer owns shows its address and file", await page.getByTestId("file-open").waitFor({ timeout: 5000 }).then(() => true, () => false) && (await page.getByTestId("loan-heading").innerText()).includes("250 Sample Shore Dr"));
@@ -468,13 +559,12 @@ await outsider.close();
 ok("the owner can't remove their own account", await page.getByTestId("member-row").filter({ hasText: SEATS.staff }).getByTestId("remove-member").isDisabled());
 
 // 8. The loan from the borrower's side: accept the terms, budget the work, ask for a draw, get a payoff, send a message
-const seen = (locator) => locator.waitFor({ timeout: 5000 }).then(() => true, () => false);
 await signIn(page, SEATS.borrower);
 await page.goto(BASE + "/admin/borrower/d18");
 await seen(page.getByTestId("term-sheet"));
 ok("the borrower sees the term sheet's numbers", (await page.getByTestId("term-sheet").innerText()).includes("Cash to close"));
 ok("a term sheet can't be accepted without a name and agreement", await page.getByTestId("accept-term-sheet").isDisabled());
-ok("the borrower sees how long the term sheet is open", (await page.getByTestId("term-sheet-expires").innerText()).includes("2026-11-04"));
+ok("the borrower sees how long the term sheet is open", (await page.getByTestId("term-sheet-expires").innerText()).includes("Nov 4, 2026"));
 const sampleSheet = await page.request.get(BASE + (await page.getByTestId("term-sheet-download").getAttribute("href")));
 ok("the term sheet downloads as a PDF", sampleSheet.headers()["content-type"] === "application/pdf" && (await sampleSheet.body()).subarray(0, 5).toString() === "%PDF-");
 await page.getByTestId("term-sheet-name").fill("Alex Sample");
@@ -497,6 +587,8 @@ ok("the borrower can message the team", await seen(page.getByTestId("loan-messag
 
 await page.goto(BASE + "/admin/borrower/d2");
 await seen(page.getByTestId("request-draw"));
+ok("a funded loan offers the next one, with what paying as agreed earns", (await page.getByTestId("repeat-status").innerText()).includes("loan paid as agreed takes 0.25% off the rate") && (await page.getByTestId("repeat-status").innerText()).includes("more take it to 0.5% off"));
+await shot(page, "02e-next-loan.png", false);
 ok("the borrower sees the draw in progress", (await page.getByTestId("my-draw").count()) === 1);
 await page.getByTestId("request-draw").click();
 await page.getByTestId("draw-plumbing").fill("3000");
@@ -617,7 +709,7 @@ ok("the payment form starts at what brings the loan current", (await page.getByT
 // One month's payment only: it should pay the oldest late one and leave the other.
 await page.getByTestId("payment-amount").fill((await lateLoan.locator('td[data-label="Payment"]').innerText()).replace(/[^0-9]/g, ""));
 await page.getByTestId("payment-reference").fill("DEMO-WIRE-1");
-ok("the preview says which payment it pays", (await page.getByTestId("payment-preview").innerText()).includes("Pays the 2026-09-01 payment"));
+ok("the preview says which payment it pays", (await page.getByTestId("payment-preview").innerText()).includes("Pays the Sep 1, 2026 payment"));
 await shot(page, "19b-admin-record-payment.png");
 await page.getByTestId("save-payment").click();
 ok("recording a payment clears the oldest late one", await seen(lateLoan.getByText("1 past due")));
@@ -663,14 +755,14 @@ ok("an extension can't be recorded before it's signed", await page.getByTestId("
 await page.getByTestId("extension-signed").check();
 await page.getByTestId("extension-fee-reference").fill("EXT-FEE-1 (FAKE)");
 await page.getByTestId("execute-extension").click();
-ok("a signed extension moves the maturity", (await seen(page.getByTestId("ledger-maturity").getByText("2027-04-15"))) && (await page.getByTestId("extensions-used").innerText()).startsWith("1 of 2"));
+ok("a signed extension moves the maturity", (await seen(page.getByTestId("ledger-maturity").getByText("Apr 15, 2027"))) && (await page.getByTestId("extensions-used").innerText()).startsWith("1 of 2"));
 await actAs(SEATS.staff);
 
 // Payoff letters: Florida's deadline shows, a title company's authorization is checked before its letter goes out, and
 // a letter whose figures move is flagged and corrected.
 await page.goto(BASE + "/admin/servicing");
 const payoffRow = page.getByTestId("payoff-row").filter({ hasText: "LH-DEMO-1011" });
-ok("a payoff request shows Florida's 10-day deadline", (await payoffRow.getByTestId("payoff-due").innerText()).includes("2026-11-02"));
+ok("a payoff request shows Florida's 10-day deadline", (await payoffRow.getByTestId("payoff-due").innerText()).includes("Nov 2, 2026"));
 await page.getByTestId("payoff-row").filter({ hasText: "LH-DEMO-1010" }).getByTestId("open-payoff").click();
 const payoffCard = page.getByTestId("payoff-card");
 ok("a title company's request waits for its authorization to be checked", (await seen(payoffCard.getByTestId("payoff-check"))) && (await payoffCard.getByTestId("issue-payoff-letter").count()) === 0);
@@ -802,7 +894,7 @@ ok("a declined application can be reopened where it was", (await seen(page.getBy
 
 await page.goto(BASE + "/admin/deals/d18");
 await seen(page.getByTestId("advance-loan"));
-ok("the accepted term sheet moves the loan on", (await page.getByTestId("stage-panel").innerText()).includes("Conditions"));
+ok("the accepted term sheet moves the loan on", (await page.getByTestId("next-step").innerText()).includes("start clearing conditions"));
 await page.getByTestId("advance-loan").click();
 ok("staff move a loan to its next stage", await seen(page.getByTestId("stage-blockers")));
 ok("a loan with open documents can't clear to close", (await page.getByTestId("stage-blockers").innerText()).includes("still open") && (await page.getByTestId("advance-loan").isDisabled()));
@@ -908,7 +1000,7 @@ await page.getByTestId("sheet-rate").fill(exceptionRate);
 ok("the approved rate can go out", (await seen(page.getByTestId("sheet-exception").getByText(/approved by Olivia Owner/))) && !(await page.getByTestId("issue-term-sheet").isDisabled()));
 await shot(page, "05c-admin-term-sheet.png");
 await page.getByTestId("issue-term-sheet").click();
-ok("the term sheet goes out as version 1", (await seen(page.getByTestId("term-sheet-version").getByText("Version 1"))) && (await page.getByTestId("stage-panel").innerText()).includes("Waiting for the borrower"));
+ok("the term sheet goes out as version 1", (await seen(page.getByTestId("term-sheet-version").getByText("Version 1"))) && (await page.getByTestId("next-step").innerText()).includes("waiting for the borrower"));
 await page.goto(BASE + "/admin/deals/d6");
 await page.getByTestId("tab-Credit review").click();
 ok("a yes answer shows with its explanation", (await page.getByTestId("declaration-answers").innerText()).includes("Party to a lawsuit") && (await page.getByTestId("declaration-answers").innerText()).includes("Settled in August"));
@@ -952,12 +1044,15 @@ ok("the broker seat lands on its deals", pathOf(page) === "/admin/broker");
 await seen(page.getByTestId("broker-deal").first());
 ok("the broker sees only their own deals", (await page.getByTestId("broker-deal").count()) === 3 && !(await page.locator("main").innerText()).includes("LH-DEMO-1001"));
 ok("funding a loan earns the broker's fee", (await page.getByTestId("fees-earned").innerText()) !== "$0");
+ok("a fee on a funded loan shows as not paid yet until the team records it", (await page.getByTestId("fees-unpaid").innerText()).includes("not paid yet"));
+ok("the approved brokerage has a referral link", (await page.getByTestId("referral-url").innerText()).endsWith("/start?ref=demobrkr"));
 await shot(page, "20-broker-deals.png");
 await page.goto(BASE + "/admin");
 ok("the broker seat can't open the staff pipeline", pathOf(page) === "/admin/broker");
 await page.goto(BASE + "/admin/broker/deals/d3");
 await seen(page.getByTestId("loan-message").first());
 ok("the broker sees the loan's conversation", (await page.getByTestId("loan-message").count()) === 2);
+ok("and the LendHous team on it", (await page.getByTestId("your-team").innerText()).includes("Pat Processor (FAKE)"));
 await page.goto(BASE + "/admin/broker/deals/d1");
 ok("the broker can't open someone else's deal", (await page.locator("main").innerText()).includes("isn't one of yours"));
 await page.goto(BASE + "/admin/broker/new");
@@ -968,6 +1063,8 @@ await page.getByTestId("guarantor-name-0").fill("Casey Client (FAKE)");
 for (let i = 0; i < 2; i++) await page.getByTestId("next").click();
 await answerAll(page);
 await page.getByTestId("next").click();
+const [quotePdf] = await Promise.all([page.waitForEvent("download"), page.getByTestId("broker-quote-pdf").click()]);
+ok("the broker downloads a quote for the client with the brokerage's name", quotePdf.suggestedFilename() === "lendhous-quote.pdf" && (await page.getByTestId("broker-quote-note").innerText()).includes("not a commitment"));
 for (const c of ["bp", "noo", "consent", "true"]) await page.getByTestId(`cert-${c}`).check();
 await page.getByTestId("submit").click();
 await page.waitForURL("**/admin/broker");
@@ -975,6 +1072,14 @@ ok("a broker submits a deal for a client", await seen(page.getByTestId("broker-d
 await actAs(SEATS.staff);
 await page.goto(BASE + "/admin");
 ok("the broker's deal reaches the pipeline", await seen(page.getByTestId("pipeline-table").getByText("Casey Client (FAKE)")));
+await page.goto(BASE + "/admin/brokers");
+ok("the owners see each brokerage with its loans and fees", (await seen(page.getByTestId("broker-row").first())) && (await page.getByTestId("broker-fees").first().innerText()).includes("LH-DEMO-1010"));
+await shot(page, "20b-brokers.png");
+await page.goto(BASE + "/admin/deals/d10");
+await page.getByTestId("tab-Capital Routing").click();
+ok("a funded loan's broker fee waits to be recorded paid", (await page.getByTestId("broker-fee").innerText()).includes("Demo Brokerage (FAKE)") && (await page.getByTestId("broker-paid-save").isEnabled()));
+await page.getByTestId("broker-paid-save").click();
+ok("the team records the broker's fee paid", await seen(page.getByTestId("broker-fee-paid")));
 
 // 11. Real records: the audit log, notifications, and a forgotten password
 await page.goto(BASE + "/admin/audit");
@@ -1051,7 +1156,17 @@ await mp.getByTestId("site-menu").click();
 await mp.getByTestId("mobile-portal-login").click();
 ok("the phone menu reaches Portal login, then the panel", await mp.waitForURL("**/admin/borrower").then(() => true, () => false));
 await mp.goto(BASE + "/admin/apply");
-await mp.getByTestId("next").click(); await mp.getByTestId("next").click();
+await mp.getByTestId("app-phone").fill("(954) 555-0110");
+await mp.getByTestId("app-next").click();
+await fillAddress(mp, "app-address", PLACE);
+await mp.getByTestId("app-flood-no").click();
+await mp.getByTestId("app-type").selectOption("sfr");
+await mp.getByTestId("app-occupancy").selectOption("vacant");
+await mp.getByTestId("app-next").click();
+await mp.getByTestId("app-purchasePrice").fill("300000");
+await mp.getByTestId("app-rehab").fill("100000");
+await mp.getByTestId("app-arv").fill("550000");
+await mp.getByTestId("app-estimate").scrollIntoViewIfNeeded();
 await mp.waitForTimeout(300);
 await shot(mp, "09-mobile-application.png", false);
 await m.close();
@@ -1074,7 +1189,7 @@ await phone.close();
 
 // cold load of every route in a fresh browser, as the seat that owns it: catches hydration mismatches that
 // client-side navigation hides
-const routes = [["/", null], ["/calculators", null], ["/start", null], ["/resources", null], ["/admin/apply", SEATS.borrower], ["/admin/borrower", SEATS.borrower], ["/admin/borrower/d2", SEATS.borrower], ["/admin", SEATS.staff], ["/admin/deals/d1", SEATS.staff], ["/admin/reports", SEATS.staff], ["/login/forgot", null], ["/login/signup", null], ["/admin/capital", SEATS.staff], ["/admin/loan-sales", SEATS.staff], ["/admin/draws", SEATS.staff], ["/admin/servicing", SEATS.staff], ["/admin/audit", SEATS.staff], ["/admin/account/notifications", SEATS.staff], ["/admin/borrower/d18", SEATS.borrower], ["/admin/broker", SEATS.broker], ["/admin/broker/new", SEATS.broker], ["/admin/broker/deals/d3", SEATS.broker], ["/admin/members", SEATS.staff], ["/admin/buyer", SEATS.buyer], ["/admin/buyer/loans/s-d10", SEATS.buyer], ["/admin/buyer/portfolio", SEATS.buyer], ["/admin/partner", SEATS.partner], ["/admin/partner/teasers/d3", SEATS.partner]];
+const routes = [["/", null], ["/calculators", null], ["/start", null], ["/resources", null], ["/admin/apply", SEATS.borrower], ["/admin/borrower", SEATS.borrower], ["/admin/borrower/d2", SEATS.borrower], ["/admin", SEATS.staff], ["/admin/deals/d1", SEATS.staff], ["/admin/reports", SEATS.staff], ["/admin/errors", SEATS.staff], ["/admin/letters", SEATS.staff], ["/admin/brokers", SEATS.staff], ["/admin/tax", SEATS.staff], ["/verify/demo", null], ["/login/forgot", null], ["/login/signup", null], ["/admin/capital", SEATS.staff], ["/admin/loan-sales", SEATS.staff], ["/admin/draws", SEATS.staff], ["/admin/servicing", SEATS.staff], ["/admin/audit", SEATS.staff], ["/admin/account/notifications", SEATS.staff], ["/admin/borrower/d18", SEATS.borrower], ["/admin/broker", SEATS.broker], ["/admin/broker/new", SEATS.broker], ["/admin/broker/deals/d3", SEATS.broker], ["/admin/members", SEATS.staff], ["/admin/buyer", SEATS.buyer], ["/admin/buyer/loans/s-d10", SEATS.buyer], ["/admin/buyer/portfolio", SEATS.buyer], ["/admin/partner", SEATS.partner], ["/admin/partner/teasers/d3", SEATS.partner]];
 for (const [r, seat] of routes) {
   const c = await browser.newContext(); if (seat) await c.addCookies(sessions[seat]); const p = await c.newPage(); const errs = [];
   p.on("pageerror", (e) => errs.push(e.message)); p.on("console", (msg) => { if (msg.type() === "error") errs.push(msg.text()); });

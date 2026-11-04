@@ -6,6 +6,7 @@ import { METHODS } from "@/lib/servicing";
 import { useStore } from "@/lib/store";
 import { Badge, Section, usd } from "@/components/ui";
 import { useServiceDay } from "./use-service-day";
+import { shortDay } from "@/lib/format";
 
 /** A paid-off loan: the money that paid it, and the satisfaction of mortgage from being sent to being recorded. */
 export function PaidOff({ deal, side }: { deal: Deal; side: "team" | "borrower" }) {
@@ -27,7 +28,7 @@ export function PaidOff({ deal, side }: { deal: Deal; side: "team" | "borrower" 
   return (
     <Section title="Paid off" right={<Badge tone="green">Paid in full</Badge>}>
       <div className="space-y-1 text-sm" data-testid="paid-off">
-        <p>{usd(paid.amount, 2)} received {paid.receivedOn} by {METHODS[paid.method].toLowerCase()}{paid.reference ? ` (${paid.reference})` : ""}.</p>
+        <p>{usd(paid.amount, 2)} received {shortDay(paid.receivedOn)} by {METHODS[paid.method].toLowerCase()}{paid.reference ? ` (${paid.reference})` : ""}.</p>
         {side === "team" && <p className="text-xs text-muted-foreground">The payoff that day was {usd(paid.owed, 2)}.{over >= 0.01 ? ` ${usd(over, 2)} is owed back to the borrower.` : ""}{paid.by ? ` Recorded by ${paid.by}.` : ""}</p>}
       </div>
       <div className="mt-3 border-t border-border pt-3 text-sm" data-testid="lien-release">

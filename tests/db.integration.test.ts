@@ -1153,3 +1153,205 @@ describe("the owners' morning email", () => {
     vi.restoreAllMocks();
   });
 });
+
+describe("a borrower's application in the portal", () => {
+  it("starts on the first save, picks up where it was, lapses after 90 days unsaved, and is kept with the loan once signed", async () => {
+    const links = await import("@/lib/application-links");
+    const { blankGuarantor, draftForAccount } = await import("@/lib/borrower-application");
+    const user = await prisma.user.create({ data: { email: "pam.portal@example.com", name: "Pam Portal", passwordHash: "x", accountStatus: "APPROVED", roles: { create: [{ role: "BORROWER" }] } } });
+    const other = await prisma.user.create({ data: { email: "oli.other@example.com", name: "Oli Other", passwordHash: "x", accountStatus: "APPROVED", roles: { create: [{ role: "BORROWER" }] } } });
+    expect(await links.openPortalDraft(user.id)).toBeNull();
+    const draft = draftForAccount(user);
+    draft.guarantors = [{ ...blankGuarantor(), firstName: "Pam", lastName: "Portal", ssn: "111223333", dob: "1975-01-02" }];
+    const now = new Date("2026-11-04T15:00:00Z");
+    const id = await links.savePortalDraft(user, draft, 1, now);
+    expect(await links.savePortalDraft(user, { ...draft, loanType: "bridge" }, 2, new Date(now.getTime() + 60_000))).toBe(id);
+    const open = await links.openPortalDraft(user.id, now);
+    expect(open).toMatchObject({ row: { id, step: 2, userId: user.id, leadId: null, dealId: null }, draft: { loanType: "bridge", contact: { email: "pam.portal@example.com" } } });
+    expect(await links.openPortalDraft(other.id, now)).toBeNull();
+    const raw = JSON.stringify(((await prisma.$runCommandRaw({ find: "ApplicationLink", filter: { _id: id } })) as { cursor: { firstBatch: unknown[] } }).cursor.firstBatch);
+    expect(raw).not.toMatch(/111223333|1975-01-02|pam\.portal/);
+    // Nobody can open it as a link: its token was never kept or shown.
+    expect(await prisma.applicationLink.count({ where: { userId: user.id } })).toBe(1);
+    expect(await links.openPortalDraft(user.id, new Date(now.getTime() + 91 * 86_400_000))).toBeNull();
+    await links.markSigned(id, draft, { name: "Pam Portal", at: now.toISOString(), ip: "1.2.3.4", userAgent: "", consents: { application: true, credit: true, release: true, esign: true }, version: "v", digest: links.digestOf(draft) }, "portal-loan", now);
+    expect(await links.openPortalDraft(user.id, now)).toBeNull();
+    const signed = await links.signedApplication("portal-loan");
+    expect(signed).toMatchObject({ id, signature: { name: "Pam Portal", ip: "1.2.3.4" }, officer: "Borrower's portal" });
+    expect(signed?.draft.guarantors[0].ssn).toBe("111223333");
+    // The next application starts fresh, and a repeat borrower's can start from the last one signed, SSNs left out.
+    expect(await links.savePortalDraft(user, draftForAccount(user), 0, now)).not.toBe(id);
+    const { repeatDraft } = await import("@/lib/borrower-application");
+    const last = await links.lastSignedDraft(["portal-loan", "someone-elses-loan"]);
+    expect(last).toMatchObject({ dealId: "portal-loan", draft: { guarantors: [{ firstName: "Pam", ssn: "111223333" }] } });
+    expect(repeatDraft(last!.draft).guarantors[0]).toMatchObject({ firstName: "Pam", ssn: "", dob: "" });
+    expect(await links.lastSignedDraft(["someone-elses-loan"])).toBeNull();
+    expect(await links.lastSignedDraft([])).toBeNull();
+  });
+});
+
+describe("who works each loan, on the server", () => {
+  it("offers only active staff who can see the pipeline, and a borrower's message reaches the loan's own officer", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const { teamCandidates, memberById } = await import("@/lib/loan-team-store");
+    const { demoBook } = await import("@/lib/book");
+    const store = await import("@/lib/book-store");
+    const { sendAlerts } = await import("@/lib/book-alerts");
+    const make = (email: string, name: string, role: import("@prisma/client").RoleCode, extra: Record<string, unknown> = {}) => prisma.user.create({ data: { email, name, passwordHash: "x", accountStatus: "APPROVED", roles: { create: [{ role }] }, ...extra } });
+    const pete = await make("pete.processor@example.com", "Pete Processor", "PROCESSOR", { phone: "(305) 555-0144", title: "Processor" });
+    await make("dora.draws@example.com", "Dora Draws", "DRAW_ADMIN");
+    await make("gone.underwriter@example.com", "Gone Underwriter", "UNDERWRITER", { deletedAt: new Date() });
+    await make("pending.underwriter@example.com", "Pending Underwriter", "UNDERWRITER", { accountStatus: "PENDING" });
+    const bo = await make("bo.borrower@example.com", "Bo Borrower", "BORROWER");
+    const emails = (await teamCandidates()).map((member) => member.email);
+    expect(emails).toContain("pete.processor@example.com");
+    for (const email of ["dora.draws@example.com", "gone.underwriter@example.com", "pending.underwriter@example.com", "bo.borrower@example.com"]) expect(emails).not.toContain(email);
+    const member = await memberById(pete.id);
+    expect(member).toEqual({ id: pete.id, name: "Pete Processor", email: "pete.processor@example.com", phone: "(305) 555-0144", title: "Processor" });
+
+    const base = demoBook().deals.find((deal) => deal.id === "d1")!;
+    const deal = { ...base, id: "team-loan", loanNumber: "LH-6001", borrowerId: bo.id, borrowerName: "Bo Borrower", team: { officer: member! } };
+    await prisma.bookRecord.create({ data: { id: "deals:team-loan", kind: "deals", data: JSON.parse(JSON.stringify(deal)) } });
+    const result = await store.runAction({ id: bo.id, name: "Bo Borrower", roleCodes: ["BORROWER"] }, { t: "sendMessage", dealId: "team-loan", from: "Bo Borrower", side: "borrower", text: "Is the appraisal booked?" });
+    if ("error" in result) throw new Error(result.error);
+    await sendAlerts(result.before, result.after, result.action);
+    expect(await prisma.notification.count({ where: { toEmail: "pete.processor@example.com", eventCode: "message.client" } })).toBe(1);
+    vi.restoreAllMocks();
+  });
+});
+
+describe("reliability", () => {
+  it("groups the same error, keeps no personal data, and reopens one marked fixed when it happens again", async () => {
+    const { recordError, recentErrors } = await import("@/lib/errors");
+    const boom = () => { const error = new Error("Can't find loan for pat.payoff@example.com (954) 555-0100"); error.stack = "Error: x\n    at readBook (lib/book-store.ts:25:3)"; return error; };
+    await recordError(boom(), "/admin/deals/[id]", "render");
+    await recordError(boom(), "/admin/deals/[id]", "render");
+    await recordError(Object.assign(new Error("NEXT_REDIRECT"), { digest: "NEXT_REDIRECT;replace;/login;307;" }), "/admin", "render");
+    const rows = await prisma.errorEvent.findMany({ where: { route: "/admin/deals/[id]" } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ count: 2, kind: "render" });
+    expect(rows[0].message).not.toMatch(/pat\.payoff|555-0100/);
+    expect(await prisma.errorEvent.count({ where: { route: "/admin" } })).toBe(0);
+    await prisma.errorEvent.update({ where: { id: rows[0].id }, data: { resolvedAt: new Date() } });
+    const before = await recentErrors(new Date(Date.now() - 60_000));
+    await recordError(boom(), "/admin/deals/[id]", "render");
+    expect(await prisma.errorEvent.findUniqueOrThrow({ where: { id: rows[0].id } })).toMatchObject({ count: 3, resolvedAt: null });
+    expect(await recentErrors(new Date(Date.now() - 60_000))).toBe(before + 1);
+  });
+
+  it("the health check stays 200 for a live database, and with ?watch=jobs says 503 until the servicing and sanctions jobs have run", async () => {
+    const { GET } = await import("@/app/api/health/route");
+    const watch = () => GET(new Request("http://x/api/health?watch=jobs"));
+    await prisma.jobRun.deleteMany({ where: { job: { in: ["servicing", "sanctions"] } } });
+    const plain = await GET(new Request("http://x/api/health"));
+    expect(plain.status).toBe(200);
+    expect(await plain.json()).toMatchObject({ ok: true, db: "ok", staleJobs: ["servicing", "sanctions"] });
+    const stale = await watch();
+    expect(stale.status).toBe(503);
+    const now = new Date();
+    await prisma.jobRun.createMany({ data: [{ job: "servicing", runKey: "health-test-servicing", ok: true, finishedAt: now }, { job: "sanctions", runKey: "health-test-sanctions", ok: true, finishedAt: now }] });
+    const healthy = await watch();
+    expect(healthy.status).toBe(200);
+    const body = await healthy.json();
+    expect(body).toMatchObject({ ok: true, db: "ok", staleJobs: [], servicingCheckedAt: now.toISOString(), staleAfterHours: 48 });
+    expect(JSON.stringify(body)).not.toMatch(/secret|password|mongodb|@/i);
+  });
+
+  it("the restore check opens a copy's records, and says which won't open", async () => {
+    const { checkRestore } = await import("@/lib/restore-check");
+    const { encryptField, parseFieldKeys } = await import("@/lib/crypto");
+    await prisma.user.create({ data: { email: "rhea.restore@example.com", name: "Rhea Restore", passwordHash: "x" } });
+    const healthy = await checkRestore(prisma);
+    expect(healthy.problems).toEqual([]);
+    expect(healthy.counts.accounts).toBeGreaterThan(0);
+    // A name sealed with a key this server doesn't have, as a copy restored with the wrong keys would look.
+    const otherKey = parseFieldKeys(`other:${Buffer.alloc(32, 7).toString("base64")}`);
+    await prisma.document.create({ data: { id: "restore-bad-doc", ownerType: "LOAN", ownerId: "x", documentType: "bank", originalName: encryptField("statement.pdf", "Document.originalName:restore-bad-doc", otherKey), storageKey: "x", mime: "application/pdf", size: 1, sha256: "x" } });
+    const broken = await checkRestore(prisma);
+    expect(broken.problems).toEqual([expect.stringMatching(/document names wouldn't open with these keys/)]);
+    await prisma.document.delete({ where: { id: "restore-bad-doc" } });
+  });
+});
+
+describe("investor statements", () => {
+  it("are made once a month for each partner that held a loan, kept sealed, emailed to its people, and open as a PDF", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const { demoBook } = await import("@/lib/book");
+    const { makeStatements, openStatement, statementsOf } = await import("@/lib/statement-store");
+    const { statementPdf } = await import("@/lib/statement-pdf");
+    const firm = await prisma.organization.create({ data: { name: "Statement Capital", type: "PARTNER_LENDER" } });
+    await prisma.user.create({ data: { email: "sam.statement@example.com", name: "Sam Statement", passwordHash: "x", accountStatus: "APPROVED", organizationId: firm.id, roles: { create: [{ role: "PARTNER_LENDER" }] } } });
+    const demo = demoBook();
+    const d11 = demo.deals.find((deal) => deal.id === "d11")!;
+    const deal = { ...d11, id: "stmt-loan", loanNumber: "LH-7001", teaserSentTo: [firm.id], partnerFunding: { ...d11.partnerFunding!, partnerId: firm.id } };
+    const bid = { id: "stmt-bid", dealId: "stmt-loan", partnerId: firm.id, pct: 50, lenderRate: 9.25, lenderPoints: 0.5, conditions: "", status: "accepted", type: "bid", at: "2026-06-20T14:00:00Z" };
+    await prisma.bookRecord.createMany({ data: [
+      { id: "deals:stmt-loan", kind: "deals", data: JSON.parse(JSON.stringify(deal)) },
+      { id: "bids:stmt-bid", kind: "bids", data: bid },
+      { id: `partners:${firm.id}`, kind: "partners", data: { id: firm.id, name: "Statement Capital", ndaSigned: true, buyBox: demo.partners[0].buyBox } },
+    ] });
+    expect(await makeStatements("2026-10")).toBeGreaterThanOrEqual(1);
+    expect(await makeStatements("2026-10")).toBe(0);
+    const [row] = await statementsOf({ type: "partner", id: firm.id });
+    expect(row).toMatchObject({ month: "2026-10", loans: 1, balance: 232_500 });
+    expect(row.net).toBeCloseTo((232_500 * 0.0925) / 12, 1);
+    const raw = JSON.stringify(((await prisma.$runCommandRaw({ find: "InvestorStatement", filter: { _id: row.id } })) as { cursor: { firstBatch: unknown[] } }).cursor.firstBatch);
+    expect(raw).not.toContain("LH-7001");
+    expect(await prisma.notification.count({ where: { toEmail: "sam.statement@example.com", eventCode: "statement.ready" } })).toBe(1);
+    const opened = (await openStatement(row.id))!;
+    expect(opened.statement.lines[0]).toMatchObject({ loanNumber: "LH-7001", share: 0.5 });
+    expect((await statementPdf(opened.statement, "LendHous")).subarray(0, 5).toString()).toBe("%PDF-");
+    vi.restoreAllMocks();
+  });
+});
+
+describe("pre-approval letters", () => {
+  it("are numbered by kind and year, sealed, found by their verify code only, withdrawn, and print with a QR code", async () => {
+    const { issueLetter, letterByCode, openLetter, revokeLetter, verifyUrl } = await import("@/lib/letter-store");
+    const { letterPdf } = await import("@/lib/letter-pdf");
+    const { DEFAULT_CONDITIONS } = await import("@/lib/letters");
+    const details = { kind: "pre_approval" as const, name: "Lola Letter", email: "lola@example.com", entityName: "Lola Flips LLC", product: "fix_flip" as const, maxPurchasePrice: 400_000, maxLoan: 340_000, propertyAddress: "", conditions: DEFAULT_CONDITIONS, validDays: 30 };
+    const now = new Date("2026-11-04T15:00:00Z");
+    const first = await issueLetter(details, { id: "u-uma", name: "Uma Underwriter" }, null, now);
+    const second = await issueLetter({ ...details, kind: "proof_of_funds" }, { id: "u-uma", name: "Uma Underwriter" }, null, now);
+    const third = await issueLetter(details, { id: "u-uma", name: "Uma Underwriter" }, null, now);
+    expect([first.number, second.number, third.number]).toEqual(["PA-2026-0001", "PF-2026-0001", "PA-2026-0002"]);
+    expect(first.expiresOn).toBe("2026-12-04");
+    const raw = JSON.stringify(((await prisma.$runCommandRaw({ find: "ApprovalLetter", filter: { _id: first.id } })) as { cursor: { firstBatch: unknown[] } }).cursor.firstBatch);
+    expect(raw).not.toMatch(/Lola|340000|lola@example/);
+    expect(raw).not.toContain(first.code);
+    expect((await letterByCode(first.code))?.row.number).toBe("PA-2026-0001");
+    expect(await letterByCode("PA-2026-0001")).toBeNull();
+    expect(await letterByCode("not-a-code")).toBeNull();
+    expect((await letterByCode(first.code))?.state).toBe("valid");
+    expect(await revokeLetter(first.id, "u-owner")).toBe(true);
+    expect(await revokeLetter(first.id, "u-owner")).toBe(false);
+    expect((await letterByCode(first.code))?.state).toBe("revoked");
+    const letter = (await openLetter(second.id))!;
+    const pdf = await letterPdf({ number: letter.row.number, issuedOn: "2026-11-04", expiresOn: letter.row.expiresOn, details: letter.details, issuedBy: letter.details.issuedBy, verifyUrl: verifyUrl(letter.details.code), lender: "LendHous", phone: "(954) 555-0100" });
+    expect(pdf.subarray(0, 5).toString()).toBe("%PDF-");
+    expect(pdf.length).toBeGreaterThan(3000);
+  });
+});
+
+describe("tax forms on file", () => {
+  it("keep the W-9 sealed, count the newest one, and drop a W-8 once it expires", async () => {
+    const { allTaxForms, currentTaxForm, saveTaxForm } = await import("@/lib/tax-form-store");
+    const payee = { type: "partner" as const, id: "tax-firm" };
+    const w9 = { legalName: "Tess Taxpayer", businessName: "", classification: "individual" as const, tinType: "ssn" as const, tin: "987654321", exemptPayeeCode: "", address: { street: "1 Main St", city: "Miami", state: "FL", zip: "33130" } };
+    expect(await currentTaxForm(payee)).toBeNull();
+    const id = await saveTaxForm(payee, { kind: "w9", data: w9 }, "Tess Taxpayer", "1.2.3.4", new Date("2026-03-01T12:00:00Z"));
+    const raw = JSON.stringify(((await prisma.$runCommandRaw({ find: "TaxForm", filter: { _id: id } })) as { cursor: { firstBatch: unknown[] } }).cursor.firstBatch);
+    expect(raw).not.toMatch(/987654321|Tess/);
+    expect(await currentTaxForm(payee)).toMatchObject({ kind: "w9", form: { tin: "987654321" } });
+    await saveTaxForm(payee, { kind: "w9", data: { ...w9, legalName: "Tess T. Taxpayer" } }, "Tess", "1.2.3.4", new Date("2026-06-01T12:00:00Z"));
+    expect(await currentTaxForm(payee)).toMatchObject({ form: { legalName: "Tess T. Taxpayer" } });
+    const foreign = { type: "buyer" as const, id: "tax-foreign" };
+    await saveTaxForm(foreign, { kind: "w8", data: { name: "Maple Fund", entity: true, country: "Canada", foreignTin: "", address: "1 Bay St, Toronto" } }, "Mo", "1.2.3.4", new Date("2026-01-05T12:00:00Z"));
+    expect(await currentTaxForm(foreign, "2029-12-31")).toMatchObject({ kind: "w8", expiresOn: "2029-12-31" });
+    expect(await currentTaxForm(foreign, "2030-01-01")).toBeNull();
+    const all = await allTaxForms("2026-11-04");
+    expect(all.get("partner:tax-firm")).toMatchObject({ form: { legalName: "Tess T. Taxpayer" } });
+    expect(all.has("buyer:tax-foreign")).toBe(true);
+  });
+});

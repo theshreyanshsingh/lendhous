@@ -105,13 +105,13 @@ export function sendLetterMail(toEmail: string, subject: string, body: string, p
   return sendSecret(toEmail, subject, body, [pdf]);
 }
 
-/** Team alerts go to every approved owner-admin, and to TEAM_EMAIL when it is set. */
-export async function notifyTeam(subject: string, body: string, eventCode = "", replyTo?: string) {
+/** Team alerts go to every approved owner-admin, to TEAM_EMAIL when it is set, and to anyone else named (a loan's team). */
+export async function notifyTeam(subject: string, body: string, eventCode = "", replyTo?: string, also: string[] = []) {
   const owners = await prisma.user.findMany({
     where: { accountStatus: "APPROVED", ...notDeleted, roles: { some: { role: "ADMIN_OWNER" } } },
     select: { email: true },
   });
-  const recipients = deskRecipients(owners.map((owner) => owner.email), process.env.TEAM_EMAIL);
+  const recipients = deskRecipients([...owners.map((owner) => owner.email), ...also], process.env.TEAM_EMAIL);
   if (!recipients.length) console.warn(`[lendhous-mail] no team recipient for ${subject}`);
   for (const email of recipients) await notify(email, subject, body, { eventCode, replyTo });
 }

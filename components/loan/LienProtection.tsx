@@ -7,6 +7,7 @@ import type { Deal, NoticeToOwner } from "@/lib/mockData";
 import { addDays } from "@/lib/servicing";
 import { useStore } from "@/lib/store";
 import { useServiceDay } from "./use-service-day";
+import { shortDay } from "@/lib/format";
 
 const small = "h-9! px-3! text-xs!";
 
@@ -43,7 +44,7 @@ export function LienProtection({ deal }: { deal: Deal }) {
           {!editing && noc ? (
             <div className="space-y-0.5 text-xs" data-testid="noc-summary">
               <p>Contractor: {lien?.contractor}</p>
-              <p>Recorded {noc.recordedOn} ({noc.reference || "no reference"}) · ends {noc.expiresOn} · work started {noc.commencedOn ?? "not recorded yet"} · {noc.lenderNamed ? "names LendHous" : "doesn't name LendHous"}</p>
+              <p>Recorded {noc.recordedOn} ({noc.reference || "no reference"}) · ends {shortDay(noc.expiresOn)} · work started {noc.commencedOn ?? "not recorded yet"} · {noc.lenderNamed ? "names LendHous" : "doesn't name LendHous"}</p>
               <p className="text-muted-foreground">Mortgage recorded {mortgageRecordedOn(deal) ?? "date not on file"}{fromTitle ? " (from the title company)" : ""}.</p>
               <button type="button" className={`btn-ghost ${small} mt-1`} data-testid="edit-noc" onClick={() => setEditing(true)}>Change it</button>
             </div>
@@ -87,7 +88,7 @@ export function LienProtection({ deal }: { deal: Deal }) {
           <p className="font-medium">Insurance</p>
           {policy && !coverOpen ? (
             <div className="space-y-0.5 text-xs" data-testid="insurance-summary">
-              <p>{INSURANCE_KINDS[policy.kind]} · {policy.carrier}{policy.policy ? ` · policy ${policy.policy}` : ""} · ends {policy.expiresOn}</p>
+              <p>{INSURANCE_KINDS[policy.kind]} · {policy.carrier}{policy.policy ? ` · policy ${policy.policy}` : ""} · ends {shortDay(policy.expiresOn)}</p>
               <p className={insurance ? "text-bad" : daysLeft !== null && daysLeft <= 30 ? "text-warn" : "text-muted-foreground"}>{insurance ?? (daysLeft !== null ? `${daysLeft} days left. Draws stop if it lapses.` : "")}</p>
               <button type="button" className={`btn-ghost ${small} mt-1`} data-testid="edit-insurance" onClick={() => setCoverOpen(true)}>Update it</button>
             </div>

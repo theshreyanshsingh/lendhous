@@ -339,6 +339,8 @@ model Lead {
   contactedAt        DateTime?
   // The loan started from this brief, once staff start one.
   loanId             String?
+  // The approved broker whose referral link the visitor came from (lib/brokers.ts). Their loan is attributed to it.
+  brokerId           String?
   // A short-lived key the visitor's browser uses to send photos of the property after the request goes in. Only its
   // hash is kept.
   photoKeyHash       String?   @unique
@@ -391,6 +393,8 @@ model ApplicationLink {
   // What it fills in: a loan already started, or a website lead to start one from.
   dealId    String?
   leadId    String?
+  // A borrower's own application in their portal: whose it is. Its token is never shown, so only their account opens it.
+  userId    String?
   recipient String
   officer   String
   sentById  String
@@ -405,6 +409,7 @@ model ApplicationLink {
 
   @@index([dealId])
   @@index([leadId])
+  @@index([userId])
 }
 
 // The title company's secure link to one loan's closing (Spec T1–T3). Like a photo link, only the token's hash is kept,
@@ -428,4 +433,69 @@ model PayoffLink {
   createdAt DateTime @default(now())
 
   @@index([payoffId])
+}
+
+// A server error, grouped by where it happened and what it was, so a page that fails a thousand times is one row
+// (lib/errors.ts). The message has emails, long numbers and tokens taken out; no request bodies are kept.
+model ErrorEvent {
+  id         String    @id @default(uuid()) @map("_id")
+  hash       String    @unique
+  message    String
+  route      String
+  kind       String
+  count      Int       @default(1)
+  firstAt    DateTime  @default(now())
+  lastAt     DateTime  @default(now())
+  resolvedAt DateTime?
+
+  @@index([lastAt])
+}
+
+// A capital partner's or loan buyer's statement for one month (lib/investor-statements.ts), kept as it was made on the
+// 1st so it never changes after the fact. The figures are sealed like the loan book.
+model InvestorStatement {
+  id           String    @id @default(uuid()) @map("_id")
+  investorType String
+  investorId   String
+  month        String
+  data         Json
+  createdAt    DateTime  @default(now())
+  emailedAt    DateTime?
+
+  @@unique([investorType, investorId, month])
+  @@index([investorId])
+}
+
+// A pre-approval or proof-of-funds letter (lib/letters.ts). Who it's for, its figures and its verify code are sealed;
+// the public verify page finds it by a hash of the code in its QR, never by the printed number.
+model ApprovalLetter {
+  id           String    @id @default(uuid()) @map("_id")
+  number       String    @unique
+  codeHash     String    @unique
+  kind         String
+  borrowerId   String?
+  details      String
+  issuedById   String
+  issuedAt     DateTime  @default(now())
+  expiresOn    String
+  revokedAt    DateTime?
+  revokedById  String?
+
+  @@index([borrowerId])
+}
+
+// A payee's W-9, or a foreign person's W-8BEN or W-8BEN-E (lib/tax-forms.ts), e-signed in the portal by a partner,
+// buyer or broker. The form and its TIN are sealed; the newest one counts.
+model TaxForm {
+  id         String   @id @default(uuid()) @map("_id")
+  ownerType  String
+  ownerId    String
+  kind       String
+  data       String
+  signedName String
+  signedAt   DateTime @default(now())
+  ip         String   @default("")
+  expiresOn  String?
+
+  @@index([ownerType, ownerId])
 }

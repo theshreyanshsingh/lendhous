@@ -7,6 +7,7 @@ import { CHANNELS, dueOf, goodThroughProblem, issueProblem, latestLetter, letter
 import { addDays, daysBetween, SERVICED } from "@/lib/servicing";
 import { useStore } from "@/lib/store";
 import { useServiceDay } from "./use-service-day";
+import { shortDay } from "@/lib/format";
 
 const small = "h-9! px-3! text-xs!";
 
@@ -23,9 +24,9 @@ function deliveryLine(letter: PayoffLetter, local: boolean) {
 /** The days left to send the letter, in words and a color. */
 export function dueLine(request: PayoffRequest, today: string) {
   const due = dueOf(request);
-  if (!today) return { text: `Letter due by ${due}`, tone: "text-warn" };
+  if (!today) return { text: `Letter due by ${shortDay(due)}`, tone: "text-warn" };
   const left = daysBetween(today, due);
-  return { text: `Letter due by ${due} (${left < 0 ? `${-left} day${left === -1 ? "" : "s"} late` : left === 0 ? "today" : `${left} day${left === 1 ? "" : "s"} left`})`, tone: left <= 2 ? "text-bad" : "text-warn" };
+  return { text: `Letter due by ${shortDay(due)} (${left < 0 ? `${-left} day${left === -1 ? "" : "s"} late` : left === 0 ? "today" : `${left} day${left === 1 ? "" : "s"} left`})`, tone: left <= 2 ? "text-bad" : "text-warn" };
 }
 
 /**
@@ -61,7 +62,7 @@ export function PayoffRequestCard({ request, deal }: { request: PayoffRequest; d
         <div className="min-w-0">
           <p className="font-medium wrap-anywhere">{requesterLine(request)}</p>
           <p className="text-xs text-muted-foreground wrap-anywhere">{[request.requester?.email, request.requester?.phone, request.requester?.fileNumber && `file ${request.requester.fileNumber}`].filter(Boolean).join(" · ") || "From the borrower's portal"}</p>
-          <p className="text-xs text-muted-foreground">{CHANNELS[request.channel ?? "portal"]} · received {receivedOf(request)}{request.loggedBy ? ` · logged by ${request.loggedBy}` : ""} · good through {request.goodThrough} asked</p>
+          <p className="text-xs text-muted-foreground">{CHANNELS[request.channel ?? "portal"]} · received {shortDay(receivedOf(request))}{request.loggedBy ? ` · logged by ${request.loggedBy}` : ""} · good through {shortDay(request.goodThrough)} asked</p>
         </div>
         <Badge tone={state.tone}>{state.label}</Badge>
       </div>
@@ -85,7 +86,7 @@ export function PayoffRequestCard({ request, deal }: { request: PayoffRequest; d
 
       {stale && (
         <div className="rounded-md bg-bad/10 p-3 text-xs text-bad" data-testid="payoff-stale">
-          <p className="font-medium">Letter {stale.letter.number} is out of date: it says {usd(stale.letter.total, 2)}, and the payoff through {stale.letter.goodThrough} is now {usd(stale.now.total, 2)}.</p>
+          <p className="font-medium">Letter {stale.letter.number} is out of date: it says {usd(stale.letter.total, 2)}, and the payoff through {shortDay(stale.letter.goodThrough)} is now {usd(stale.now.total, 2)}.</p>
           <p className="mt-1">{letterChanges(stale.letter, stale.now).join(" · ")}</p>
           <p className="mt-1">We&apos;re held to a letter we sent. A correction only replaces it if they get it by 3 p.m. their time at least one business day before they pay, so send it now.</p>
         </div>
@@ -97,8 +98,8 @@ export function PayoffRequestCard({ request, deal }: { request: PayoffRequest; d
             const delivery = deliveryLine(letter, local);
             return (
               <li key={letter.number} className="space-y-0.5 p-2" data-testid="letter-row">
-                <div className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium">Letter {letter.number}{letter.replaces ? " (corrected)" : ""}: {usd(letter.total, 2)} through {letter.goodThrough}</span><a className="text-xs text-link underline" href={pdf(letter)} target="_blank" rel="noreferrer" data-testid="letter-pdf-link">PDF</a></div>
-                <p className="text-xs text-muted-foreground">Issued {letter.issuedOn}{letter.issuedBy ? ` by ${letter.issuedBy}` : ""} · {usd(letter.perDiem, 2)} a day after{letter.reason ? ` · ${letter.reason}` : ""}</p>
+                <div className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium">Letter {letter.number}{letter.replaces ? " (corrected)" : ""}: {usd(letter.total, 2)} through {shortDay(letter.goodThrough)}</span><a className="text-xs text-link underline" href={pdf(letter)} target="_blank" rel="noreferrer" data-testid="letter-pdf-link">PDF</a></div>
+                <p className="text-xs text-muted-foreground">Issued {shortDay(letter.issuedOn)}{letter.issuedBy ? ` by ${letter.issuedBy}` : ""} · {usd(letter.perDiem, 2)} a day after{letter.reason ? ` · ${letter.reason}` : ""}</p>
                 <p className={`text-xs ${delivery.tone}`} data-testid="letter-delivery">{delivery.text}</p>
               </li>
             );
@@ -187,7 +188,7 @@ function LogPayoffRequest({ deal, onDone }: { deal: Deal; onDone: () => void }) 
         <label className="block min-w-0"><span className="label">{SENT_LABEL[draft.channel]}</span><input className="desk-input" type="date" data-testid="log-payoff-sent-on" max={today || undefined} value={sentOn} onChange={(event) => put({ sentOn: event.target.value })} /></label>
         <label className="block min-w-0"><span className="label">Good through (asked for)</span><input className="desk-input" type="date" data-testid="log-payoff-good-through" min={today || undefined} max={today ? addDays(today, MAX_GOOD_THROUGH_DAYS) : undefined} value={draft.goodThrough} onChange={(event) => put({ goodThrough: event.target.value })} /></label>
       </div>
-      {received && <p className="text-xs text-muted-foreground" data-testid="log-payoff-received">Counts as received {received}{draft.channel === "mail" ? " (five business days after the postmark)" : received !== sentOn ? " (the next business day)" : ""}; the letter is due by {letterDueBy(received)}.</p>}
+      {received && <p className="text-xs text-muted-foreground" data-testid="log-payoff-received">Counts as received {shortDay(received)}{draft.channel === "mail" ? " (five business days after the postmark)" : received !== sentOn ? " (the next business day)" : ""}; the letter is due by {letterDueBy(received)}.</p>}
       {third && <label className="flex items-start gap-2 text-xs"><input type="checkbox" className="mt-0.5" data-testid="log-payoff-authorized" checked={draft.authorized} onChange={(event) => put({ authorized: event.target.checked })} /><span>The borrower&apos;s signed authorization came with it. Upload it to the loan&apos;s Documents tab.</span></label>}
       <label className="block"><span className="label">Note (optional)</span><input className="desk-input" maxLength={1000} value={draft.note} onChange={(event) => put({ note: event.target.value })} /></label>
       {problem && draft.name && <p className="text-xs text-warn">{problem}</p>}

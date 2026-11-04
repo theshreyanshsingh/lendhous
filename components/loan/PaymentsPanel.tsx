@@ -7,6 +7,7 @@ import { dueOf, goodThroughProblem, latestLetter, LETTER_DAYS, MAX_GOOD_THROUGH_
 import { addDays } from "@/lib/servicing";
 import { useServiceDay } from "./use-service-day";
 import { Badge, Section, Stat, usd } from "@/components/ui";
+import { shortDay } from "@/lib/format";
 
 /** The borrower's servicing view: what's due, what's been paid, and what it takes to pay the loan off. */
 export function PaymentsPanel({ deal }: { deal: Deal }) {
@@ -28,14 +29,14 @@ export function PaymentsPanel({ deal }: { deal: Deal }) {
       {openDefault(deal) ? (
         <p className="mb-3 rounded-md bg-bad/10 p-2 text-sm text-bad" data-testid="default-notice">Your loan is in default since {openDefault(deal)!.effectiveOn}. Interest runs at the default rate of {defaultRateOf(deal).toFixed(2)}% from {defaultInterestFrom(deal)}. Call your LendHous servicing team to talk about bringing it current.</p>
       ) : l.matured ? (
-        <p className="mb-3 rounded-md bg-bad/10 p-2 text-sm text-bad" data-testid="matured-notice">Your loan matured on {l.maturity}, so the full balance is due. Interest now runs at the default rate of {defaultRateOf(deal).toFixed(2)}%. Ask for a payoff statement below.</p>
+        <p className="mb-3 rounded-md bg-bad/10 p-2 text-sm text-bad" data-testid="matured-notice">Your loan matured on {shortDay(l.maturity)}, so the full balance is due. Interest now runs at the default rate of {defaultRateOf(deal).toFixed(2)}%. Ask for a payoff statement below.</p>
       ) : l.amountDue > 0 && l.paymentsLate ? (
         <p className="mb-3 rounded-md bg-bad/10 p-2 text-sm text-bad" data-testid="late-notice">Your loan is {usd(l.amountDue, 2)} past due{l.feesOwed ? `, including ${usd(l.feesOwed, 2)} in late fees` : ""}. Please pay it as soon as you can.</p>
       ) : l.daysToMaturity <= Math.max(...maturityNoticeDays) ? (
-        <p className="mb-3 rounded-md bg-warn/10 p-2 text-sm" data-testid="maturity-notice">Your loan matures in {l.daysToMaturity} days, on {l.maturity}. Plan your payoff, or talk to us before then if you need more time.</p>
+        <p className="mb-3 rounded-md bg-warn/10 p-2 text-sm" data-testid="maturity-notice">Your loan matures in {l.daysToMaturity} days, on {shortDay(l.maturity)}. Plan your payoff, or talk to us before then if you need more time.</p>
       ) : null}
       <div className="grid grid-cols-2 gap-3">
-        <Stat label={l.amountDue ? "Due now" : "Next payment"} value={<span data-testid="next-due">{l.amountDue ? usd(l.amountDue, 2) : l.nextDue ?? "—"}</span>} sub={l.amountDue ? `oldest due ${l.nextDue}` : next ? usd(next.amount, 2) : undefined} />
+        <Stat label={l.amountDue ? "Due now" : "Next payment"} value={<span data-testid="next-due">{l.amountDue ? usd(l.amountDue, 2) : l.nextDue ?? "—"}</span>} sub={l.amountDue ? `oldest due ${shortDay(l.nextDue)}` : next ? usd(next.amount, 2) : undefined} />
         <Stat label="Maturity" value={l.maturity} />
         <Stat label="Balance" value={usd(balanceOf(deal))} />
         <Stat label="Payments made" value={l.paymentsMade} sub={l.credit ? `${usd(l.credit, 2)} credit held` : undefined} />
@@ -46,7 +47,7 @@ export function PaymentsPanel({ deal }: { deal: Deal }) {
           <ul className="mt-2 divide-y divide-border">
             {[...shownRows(l)].reverse().map((row) => (
               <li key={row.due} className="py-1.5">
-                <div className="flex items-center justify-between gap-2"><span>{row.due}</span><span className="flex items-center gap-2">{usd(row.amount, 2)}<Badge tone={billTone(row.status)}>{BILL_LABEL[row.status]}</Badge></span></div>
+                <div className="flex items-center justify-between gap-2"><span>{shortDay(row.due)}</span><span className="flex items-center gap-2">{usd(row.amount, 2)}<Badge tone={billTone(row.status)}>{BILL_LABEL[row.status]}</Badge></span></div>
                 {row.late && <div className="text-xs text-muted-foreground">{row.waived ? "Late fee waived" : `Late fee ${usd(row.fee, 2)}${row.feePaid >= row.fee ? ", paid" : ""}`}</div>}
               </li>
             ))}
@@ -54,7 +55,7 @@ export function PaymentsPanel({ deal }: { deal: Deal }) {
           {received.length > 0 && (
             <>
               <p className="mt-3 font-medium">Money received</p>
-              <ul className="mt-1 divide-y divide-border" data-testid="payments-received">{received.map((payment) => <li key={payment.id} className="flex flex-wrap items-center justify-between gap-2 py-1.5"><span className={payment.reversed ? "text-muted-foreground line-through" : ""}>{payment.receivedOn} · {METHODS[payment.method]}</span><span>{usd(payment.amount, 2)}{payment.reversed ? <span className="ml-2 text-xs text-bad">Reversed{payment.reversed.reason ? `: ${payment.reversed.reason}` : ""}</span> : null}</span></li>)}</ul>
+              <ul className="mt-1 divide-y divide-border" data-testid="payments-received">{received.map((payment) => <li key={payment.id} className="flex flex-wrap items-center justify-between gap-2 py-1.5"><span className={payment.reversed ? "text-muted-foreground line-through" : ""}>{shortDay(payment.receivedOn)} · {METHODS[payment.method]}</span><span>{usd(payment.amount, 2)}{payment.reversed ? <span className="ml-2 text-xs text-bad">Reversed{payment.reversed.reason ? `: ${payment.reversed.reason}` : ""}</span> : null}</span></li>)}</ul>
             </>
           )}
         </details>
@@ -84,10 +85,10 @@ export function PaymentsPanel({ deal }: { deal: Deal }) {
               const letter = latestLetter(payoff);
               return (
                 <li key={payoff.id} className="rounded-[2px] border border-border p-2">
-                  <div className="flex flex-wrap justify-between gap-2"><span className="font-medium">{payoff.requester && payoff.requester.kind !== "borrower" ? requesterLine(payoff) : "You"} asked, good through {payoff.goodThrough}</span><Badge tone={requestState(payoff).tone}>{payoff.status === "requested" ? "Being prepared" : requestState(payoff).label}</Badge></div>
+                  <div className="flex flex-wrap justify-between gap-2"><span className="font-medium">{payoff.requester && payoff.requester.kind !== "borrower" ? requesterLine(payoff) : "You"} asked, good through {shortDay(payoff.goodThrough)}</span><Badge tone={requestState(payoff).tone}>{payoff.status === "requested" ? "Being prepared" : requestState(payoff).label}</Badge></div>
                   {payoff.status === "requested" && <p className="mt-1 text-muted-foreground">We&apos;ll send it by {dueOf(payoff)}.</p>}
                   {payoff.refused && <p className="mt-1 text-muted-foreground">We couldn&apos;t send this one: {payoff.refused.reason}</p>}
-                  {letter && <p className="mt-1">Letter {letter.number}{letter.replaces ? " (corrected)" : ""}: {usd(letter.total, 2)} if received by {letter.goodThrough}, then {usd(letter.perDiem, 2)} a day. <a className="text-link underline" data-testid="my-letter-pdf" href={local ? "/payoff-letter/demo" : `/api/payoffs/${payoff.id}/letter?n=${letter.number}`} target="_blank" rel="noreferrer">Open the letter</a></p>}
+                  {letter && <p className="mt-1">Letter {letter.number}{letter.replaces ? " (corrected)" : ""}: {usd(letter.total, 2)} if received by {shortDay(letter.goodThrough)}, then {usd(letter.perDiem, 2)} a day. <a className="text-link underline" data-testid="my-letter-pdf" href={local ? "/payoff-letter/demo" : `/api/payoffs/${payoff.id}/letter?n=${letter.number}`} target="_blank" rel="noreferrer">Open the letter</a></p>}
                 </li>
               );
             })}

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { authorize, type Viewer } from "@/lib/book-access";
 import { demoBook, emptyBook, reducer, type Book, type BookAction } from "@/lib/book";
-import { blankDraft, blankGuarantor, completeDraft, draftFromDeal, draftFromQuote, signProblems, stepProblems, toLoan, withoutSsn, type AppDraft } from "@/lib/borrower-application";
+import { blankDraft, blankGuarantor, completeDraft, draftForAccount, draftFromDeal, draftFromQuote, signatureProblem, signProblems, stepProblems, toLoan, withoutSsn, type AppDraft } from "@/lib/borrower-application";
 import { readAddress, readSuggestions } from "@/lib/places";
 import { pricingConfig } from "@/lib/pricing-config";
 import { comparePrograms } from "@/lib/program-compare";
@@ -108,6 +108,24 @@ describe("the borrower application", () => {
     const draft = draftFromDeal(deal, "riley@example.com");
     expect(draft.guarantors.map((g) => `${g.firstName} ${g.lastName}`)).toEqual(["Riley Placeholder (FAKE)", "Sky Sample (FAKE)"]);
     expect(draft.loanType).toBe("ground_up");
+  });
+});
+
+describe("signing, from the link or the portal", () => {
+  const all = { application: true, credit: true, release: true, esign: true };
+  it("needs the application complete, all four consents, and a name that's on it", () => {
+    expect(signatureProblem(complete(), all, "Kai Investor", TODAY)).toBeNull();
+    expect(signatureProblem(complete(), all, "  kai   investor ", TODAY)).toBeNull();
+    expect(signatureProblem(complete(), { ...all, release: false }, "Kai Investor", TODAY)).toMatch(/four boxes/);
+    expect(signatureProblem(complete(), all, "Someone Else", TODAY)).toMatch(/exactly as you entered/);
+    expect(signatureProblem({ ...complete(), loan: { ...complete().loan, plan: "" } }, all, "Kai Investor", TODAY)).toMatch(/plan/);
+  });
+  it("a portal application starts with what the account says", () => {
+    const draft = draftForAccount({ name: "Bonnie  Ann Borrower", email: "bonnie@example.com", phone: "(555) 010-0500" });
+    expect(draft.contact).toEqual({ firstName: "Bonnie", lastName: "Ann Borrower", email: "bonnie@example.com", phone: "(555) 010-0500" });
+    expect(draft.guarantors[0]).toMatchObject({ firstName: "Bonnie", lastName: "Ann Borrower", email: "bonnie@example.com", ssn: "" });
+    expect(stepProblems(draft, 0, TODAY)).toEqual([]);
+    expect(draftForAccount({ name: "Cher", email: "cher@example.com", phone: null }).contact).toMatchObject({ firstName: "Cher", lastName: "", phone: "" });
   });
 });
 

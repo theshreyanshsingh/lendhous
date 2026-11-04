@@ -18,6 +18,7 @@ const book = (): Book => {
   return {
     ...base,
     deals: base.deals.map((deal) => ({ ...deal, borrowerId: deal.borrowerId === "b-alex" ? "borrower-1" : deal.borrowerId, brokerId: deal.brokerId ? "broker-firm" : undefined })),
+    brokers: [{ id: "broker-firm", name: "Broker Firm", status: "approved" }],
     partners: base.partners.map((partner) => (partner.id === "p-a" ? { ...partner, id: "partner-firm" } : partner)),
     bids: base.bids.map((bid) => (bid.partnerId === "p-a" ? { ...bid, partnerId: "partner-firm" } : bid)),
     messages: [...base.messages, { id: "note-1", dealId: "d1", from: "Uma", side: "internal", text: "Borrower is slow to respond", at: "2026-10-20T00:00:00Z" }, { id: "note-2", dealId: "d3", from: "Uma", side: "internal", text: "Partner is pushy", at: "2026-10-20T00:00:00Z" }],
@@ -65,10 +66,11 @@ describe("what each account receives", () => {
   });
   it("a partner sees blind teasers, with no borrower, address or other firm's bid", () => {
     const scoped = scopeBook(live(), partner);
-    expect(scoped.deals.map((deal) => deal.id).sort()).toEqual(["d3", "d5"]);
-    const text = JSON.stringify(scoped);
+    // d11 is a loan the demo partner already funded half of, so it sees that one in full.
+    expect(scoped.deals.map((deal) => deal.id).sort()).toEqual(["d11", "d3", "d5"]);
+    const text = JSON.stringify({ ...scoped, deals: scoped.deals.filter((deal) => deal.id !== "d11") });
     for (const secret of ["Jordan Demo", "Demo Holdings", "789 Mockingbird", "Miami\"", "Sample Bridge Fund", "Riley Placeholder", "Partner is pushy"]) expect(text).not.toContain(secret);
-    expect(scoped.bids.map((bid) => bid.partnerId)).toEqual(["partner-firm"]);
+    expect([...new Set(scoped.bids.map((bid) => bid.partnerId))]).toEqual(["partner-firm"]);
     expect(scoped.partners.map((item) => item.id)).toEqual(["partner-firm"]);
   });
   it("a partner sees nothing before signing, and the whole file only after winning", () => {
@@ -186,6 +188,15 @@ describe("what each account may do", () => {
     expect(check(b, borrower, { ...full, client: { name: "Forged", borrowerId: "someone-else" } })).toMatchObject({ action: { client: { name: "borrower-1 name", borrowerId: "borrower-1" } } });
     expect(check(b, broker, { ...full, client: { name: "Client", brokerId: "other-firm", brokerPoints: 99 } })).toMatchObject({ action: { client: { name: "Client", brokerId: "broker-firm", brokerPoints: 5 } } });
     expect(check(b, broker, full)).toEqual({ error: expect.stringMatching(/client's name/) });
+    // A brokerage sends deals only once an owner approves it.
+    for (const brokers of [[], [{ id: "broker-firm", name: "Broker Firm", status: "applied" as const }], [{ id: "broker-firm", name: "Broker Firm", status: "suspended" as const }]]) {
+      expect(check({ ...b, brokers }, broker, { ...full, client: { name: "Client" } })).toEqual({ error: expect.stringMatching(/approves a brokerage/) });
+    }
+    // Staff's repeat-borrower mark isn't something a borrower or broker can set on their own application.
+    const marked = { ...full, app: { ...app, repeatBorrower: true } };
+    expect((check(b, borrower, marked) as { action: { app: { repeatBorrower?: boolean } } }).action.app.repeatBorrower).toBeUndefined();
+    expect((check(b, broker, { ...marked, client: { name: "Client" } }) as { action: { app: { repeatBorrower?: boolean } } }).action.app.repeatBorrower).toBeUndefined();
+    expect((check(b, owner, { ...marked, client: { name: "Client" } }) as { action: { app: { repeatBorrower?: boolean } } }).action.app.repeatBorrower).toBe(true);
     expect(check(b, owner, { ...full, client: { name: "Client" } })).toHaveProperty("action");
     expect(check(b, partner, full)).toHaveProperty("error");
   });

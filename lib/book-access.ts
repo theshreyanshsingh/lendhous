@@ -5,6 +5,8 @@ import type { RoleCode } from "@prisma/client";
 import { emptyBook, serviceDay, type Book, type BookAction } from "./book";
 import { verifyProblem, wireProblem, wireVerified } from "./closing";
 import { latestScreening, ofacBlocker } from "./ofac";
+import { assignProblem } from "./loan-team";
+import { receivedProblem, sendToFor, sentProblem } from "./partner-funding";
 import { sponsorProblem, withSponsor } from "./credit";
 import { scopeError } from "./draws";
 import { cureError, defaultError, DECLINE_REASONS, executeError, extensionRequestError, isClosedApplication, payoffError, PRE_FUNDING, WITHDRAW_REASONS } from "./loan-exits";
@@ -15,15 +17,24 @@ import { reasonsProblem, requestProblem, revenueProblem } from "./adverse-action
 import { exceptionDecisionProblem, exceptionRequestProblem, issueProblem as sheetProblem, latestSheet, pricedApp, respondProblem } from "./term-sheets";
 import { MAX_PHOTOS_PER_LINK, photoRequestState, photosClosed } from "./photo-requests";
 import { evaluate } from "./engine";
-import type { Deal, Doc, LoanPayment, LoanSale, PayoffRequest } from "./mockData";
+import type { Broker, Deal, Doc, LoanPayment, LoanSale, PayoffRequest } from "./mockData";
 import { currentPricing, pricingPayload } from "./pricing-versions";
 import { ledger, servicingDate } from "./servicing";
 import { viewFor, type MemberAccess, type Permission } from "./permissions";
+import { approveProblem, canSendDeals, feePaidProblem } from "./brokers";
 
 export type Viewer = MemberAccess & { id: string; name: string; roleCodes: RoleCode[]; organizationId?: string | null };
 
 /** The firm a partner, buyer or broker acts for: their organization, or themselves when they have none. */
 export const firmOf = (viewer: Viewer) => viewer.organizationId ?? viewer.id;
+
+/** A broker's own firm as it sees it: where it stands and what it signed, not the sanctions check or who approved it. */
+const ownFirm = (book: Book, firm: string, name: string): Broker => {
+  const broker = book.brokers.find((item) => item.id === firm);
+  if (!broker) return { id: firm, name };
+  const { screening: _screening, approved: _approved, ...rest } = broker;
+  return rest;
+};
 
 const FUNDED = ["funded", "servicing_current", "servicing_delinquent", "matured", "default"];
 const BEFORE_CLOSING = ["submitted", "initial_review", "underwriting", "term_sheet_issued", "term_sheet_accepted", "conditions"];
@@ -59,7 +70,7 @@ const quietPayoff = (payoff: PayoffRequest): PayoffRequest => ({
 
 /** Removes what identifies the borrower, for a partner or buyer who hasn't closed on the loan. */
 function blind(deal: Deal): Deal {
-  return { ...deal, borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined, closure: undefined, defaults: undefined, extensions: undefined, paidOff: undefined, closing: undefined, wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, termSheets: undefined, pricingException: undefined, conditions: undefined, lienFile: undefined, completed: undefined, revenue: undefined, adverseAction: undefined, legalHold: undefined, propertyPhotos: undefined, ...quietPayments(deal, false) };
+  return { ...deal, borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined, closure: undefined, defaults: undefined, extensions: undefined, paidOff: undefined, closing: undefined, wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, termSheets: undefined, pricingException: undefined, conditions: undefined, lienFile: undefined, completed: undefined, revenue: undefined, adverseAction: undefined, legalHold: undefined, propertyPhotos: undefined, partnerFunding: undefined, ...quietPayments(deal, false) };
 }
 
 /** The conditions that are the borrower's to meet (Spec B17), without who on the team handled them or why one was waived. */
@@ -83,7 +94,7 @@ const latestForClient = (deal: Deal): Partial<Deal> => {
 
 /** What only the team sees on a loan it shares with a client. Wire instructions never leave the team: a client who sees them is a client who can be sent fake ones. */
 function forClient(deal: Deal): Deal {
-  return { ...deal, ...latestForClient(deal), ...clientConditions(deal), ...clientRecords(deal), allocations: [], teaserSentTo: [], route: undefined, capitalStatus: "not_started", contractorIsGtAffiliate: undefined, source: "", fundingApprovers: undefined, creditReview: undefined, ...quietPayments(deal, true), ...quietExits(deal), wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined };
+  return { ...deal, ...latestForClient(deal), ...clientConditions(deal), ...clientRecords(deal), partnerFunding: undefined, allocations: [], teaserSentTo: [], route: undefined, capitalStatus: "not_started", contractorIsGtAffiliate: undefined, source: "", fundingApprovers: undefined, creditReview: undefined, ...quietPayments(deal, true), ...quietExits(deal), wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined };
 }
 
 /** The part of the book this account may see. Nothing else leaves the server. */
@@ -108,7 +119,7 @@ function scopeRecords(book: Book, viewer: Viewer): Book {
   if (view === "broker") {
     const firm = firmOf(viewer);
     const mine = book.deals.filter((deal) => deal.brokerId === firm);
-    return { ...empty, brokerId: firm, brokers: [{ id: firm, name: viewer.name }], deals: mine.map(forClient), messages: shared(new Set(mine.map((deal) => deal.id))) };
+    return { ...empty, brokerId: firm, brokers: [ownFirm(book, firm, viewer.name)], deals: mine.map(forClient), messages: shared(new Set(mine.map((deal) => deal.id))) };
   }
 
   if (view === "partner") {
@@ -120,7 +131,7 @@ function scopeRecords(book: Book, viewer: Viewer): Book {
     const deals = book.deals.filter((deal) => deal.teaserSentTo.includes(me.id));
     // Someone else's accepted bid only says the deal is gone: no firm, no price.
     const taken = book.bids.filter((bid) => bid.partnerId !== me.id && bid.status === "accepted" && deals.some((deal) => deal.id === bid.dealId)).map((bid) => ({ ...bid, partnerId: "", pct: 0, lenderRate: 0, lenderPoints: 0, conditions: "" }));
-    return { ...empty, partnerId: me.id, partners: [me], bids: [...mine, ...taken], deals: deals.map((deal) => (won.has(deal.id) ? { ...forClient(deal), teaserSentTo: [me.id], contractorIsGtAffiliate: deal.contractorIsGtAffiliate } : { ...blind(deal), teaserSentTo: [me.id] })) };
+    return { ...empty, partnerId: me.id, partners: [me], bids: [...mine, ...taken], deals: deals.map((deal) => (won.has(deal.id) ? { ...forClient(deal), teaserSentTo: [me.id], contractorIsGtAffiliate: deal.contractorIsGtAffiliate, partnerFunding: deal.partnerFunding?.partnerId === me.id ? { ...deal.partnerFunding, sendTo: sendToFor(deal) } : undefined } : { ...blind(deal), teaserSentTo: [me.id] })) };
   }
 
   if (view === "buyer") {
@@ -201,8 +212,11 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
         if (problem) return no(problem);
       } else if (view === "borrower" || view === "broker") return no("Add the guarantors, past deals and declarations.");
       if (!evaluate(action.sponsor ? withSponsor(action.app, action.sponsor, new Date()) : action.app).eligible) return no("This loan isn't eligible as entered.");
-      if (view === "borrower") return ok({ ...action, client: { name: viewer.name, borrowerId: viewer.id }, source: "web_quote" });
-      if (view === "broker") return action.client?.name?.trim() ? ok({ ...action, client: { name: action.client.name.trim(), brokerId: firm, brokerPoints: Math.min(5, Math.max(0, action.client.brokerPoints ?? 0)) }, source: "broker" }) : no("Enter your client's name.");
+      // Staff's repeat-borrower mark is for loans from before this system; borrowers' and brokers' loans are counted instead.
+      const { repeatBorrower: _mark, ...counted } = action.app;
+      if (view === "borrower") return ok({ ...action, app: counted, client: { name: viewer.name, borrowerId: viewer.id }, source: "web_quote" });
+      if (view === "broker" && !canSendDeals(book.brokers.find((item) => item.id === firm))) return no("LendHous approves a brokerage before it sends deals. Sign the broker agreement on your Broker page; you'll hear when it's approved.");
+      if (view === "broker") return action.client?.name?.trim() ? ok({ ...action, app: counted, client: { name: action.client.name.trim(), brokerId: firm, brokerPoints: Math.min(5, Math.max(0, action.client.brokerPoints ?? 0)) }, source: "broker" }) : no("Enter your client's name.");
       if (staff && allowed("view_pipeline")) return action.client?.name?.trim() ? ok({ ...action, client: { name: action.client.name.trim(), borrowerId: action.client.borrowerId }, source: action.source ?? "staff" }) : no("Enter the borrower's name.");
       return no(NOT_ALLOWED);
     }
@@ -328,6 +342,57 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
     case "linkBorrower":
       // Only the server's own invite step does this, after it has looked the account up.
       return trusted ? ok() : no(NOT_ALLOWED);
+    case "partnerFundsSent": {
+      const deal = dealOf(action.dealId);
+      if (!deal || view !== "partner") return no(NOT_ALLOWED);
+      const problem = sentProblem(deal, firm);
+      return problem ? no(problem) : ok();
+    }
+    case "partnerFundsReceived": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      const problem = receivedProblem(deal);
+      return problem ? no(problem) : staffOnly("route_capital", "manage_capital");
+    }
+    case "brokerApplied":
+      // The broker's own page does this on the server, after screening the firm and storing its files.
+      return trusted ? ok() : no(NOT_ALLOWED);
+    case "brokerScreened":
+      if (!trusted) return no(NOT_ALLOWED);
+      return book.brokers.some((item) => item.id === action.brokerId) ? ok() : no(GONE);
+    case "approveBroker": {
+      const problem = approveProblem(book.brokers.find((item) => item.id === action.brokerId), action.reason);
+      return problem ? no(problem) : staffOnlyAllowed("manage_brokers") ? ok({ ...action, by: viewer.name }) : no(NOT_ALLOWED);
+    }
+    case "suspendBroker": {
+      const broker = book.brokers.find((item) => item.id === action.brokerId);
+      if (!broker || broker.status === "suspended") return no("That brokerage isn't active.");
+      if (!action.reason.trim()) return no("Say why it's being suspended.");
+      return staffOnlyAllowed("manage_brokers") ? ok({ ...action, by: viewer.name }) : no(NOT_ALLOWED);
+    }
+    case "referLoan":
+      // Starting a loan from a lead does this, after reading which broker's link the lead came from.
+      if (!trusted) return no(NOT_ALLOWED);
+      return dealOf(action.dealId) ? ok() : no(GONE);
+    case "setBrokerPoints": {
+      const deal = dealOf(action.dealId);
+      if (!deal?.brokerId) return no("This loan has no broker.");
+      if (!IN_REVIEW.includes(deal.status)) return no("The broker's fee is set before the term sheet goes out.");
+      if (!Number.isFinite(action.points) || action.points < 0 || action.points > 5) return no("A broker's fee is 0 to 5 points.");
+      return staffOnly("issue_term_sheet", "manage_brokers");
+    }
+    case "brokerFeePaid": {
+      const problem = feePaidProblem(dealOf(action.dealId), action.amount, action.on, serviceDay(book));
+      return problem ? no(problem) : staffOnlyAllowed("manage_brokers", "manage_capital") ? ok({ ...action, by: viewer.name }) : no(NOT_ALLOWED);
+    }
+    case "assignLoanTeam": {
+      // The server looks the person up and checks assign_loans (or someone taking an open seat) before it gets here.
+      if (!trusted) return no(NOT_ALLOWED);
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      const problem = assignProblem(deal, action.role, action.member);
+      return problem ? no(problem) : ok();
+    }
     case "uploadDoc":
       // Only the upload route does this, after the file is safely stored.
       return trusted ? ok() : no("Upload the file itself to mark this document as received.");

@@ -6,6 +6,7 @@ import { ledgerOf, maturityOf, METHODS } from "@/lib/servicing";
 import { useStore } from "@/lib/store";
 import { Badge, Section, shortDate, usd } from "@/components/ui";
 import { useServiceDay } from "./use-service-day";
+import { shortDay } from "@/lib/format";
 
 const statusTone = { requested: "amber", approved: "blue", declined: "slate", executed: "green" } as const;
 const statusText = { requested: "Waiting for approval", approved: "Approved, not signed", declined: "Declined", executed: "Signed" } as const;
@@ -52,7 +53,7 @@ export function Extensions({ deal, side }: { deal: Deal; side: "team" | "borrowe
         : form}
       {history.length > 0 && (
         <ul className="mt-3 space-y-1 border-t border-border pt-2 text-xs text-muted-foreground" data-testid="extension-history">
-          {history.map((item) => <li key={item.id}>{item.months} month{item.months === 1 ? "" : "s"}, asked {shortDate(item.requestedAt)}: {item.status === "executed" ? `signed ${item.executed!.on}, ${usd(item.fee, 2)} fee received` : item.status === "declined" ? `declined${item.declined?.reason ? `: ${item.declined.reason}` : ""}` : statusText[item.status]}</li>)}
+          {history.map((item) => <li key={item.id}>{item.months} month{item.months === 1 ? "" : "s"}, asked {shortDate(item.requestedAt)}: {item.status === "executed" ? `signed ${shortDay(item.executed!.on)}, ${usd(item.fee, 2)} fee received` : item.status === "declined" ? `declined${item.declined?.reason ? `: ${item.declined.reason}` : ""}` : statusText[item.status]}</li>)}
         </ul>
       )}
     </Section>
@@ -90,7 +91,7 @@ function OpenExtension({ deal, extension, today }: { deal: Deal; extension: Loan
       <p className="text-muted-foreground">Asked by {extension.requestedBy} on {shortDate(extension.requestedAt)}: {extension.reason}</p>
       <ul className="space-y-0.5 text-xs" data-testid="extension-checks">
         {extensionChecks(deal, today).map((check) => <li key={check.label} className={check.ok ? "text-good" : "text-warn"}>{check.ok ? "✓" : "•"} {check.label}</li>)}
-        {l.matured && <li className="text-warn">• Past maturity: the default interest since {l.maturity} stops counting once this is signed</li>}
+        {l.matured && <li className="text-warn">• Past maturity: the default interest since {shortDay(l.maturity)} stops counting once this is signed</li>}
       </ul>
       {extension.status === "requested" ? (
         <>

@@ -2,7 +2,7 @@
 // screening reads it once and keeps it in memory until a newer one is saved.
 import { createHash } from "node:crypto";
 import type { Prisma } from "@prisma/client";
-import type { Deal, Screening } from "./mockData";
+import type { Deal, Screening, ScreeningRole } from "./mockData";
 import { parseAliases, parseSdn, prepareList, screeningOf, screeningSubjects, type ListEntry, type PreparedList } from "./ofac";
 import { prisma } from "./prisma";
 
@@ -50,8 +50,11 @@ export async function sanctionsList() {
 export const sanctionsListDate = async () => (await prisma.sanctionsList.findUnique({ where: { id: LIST_ID }, select: { fetchedAt: true, names: true } })) ?? null;
 
 /** Screens everyone on a loan. Errors if the list has never been downloaded: a screening against nothing proves nothing. */
-export async function screenDeal(deal: Deal, by: string, now = new Date()): Promise<Screening | { error: string }> {
+export const screenDeal = (deal: Deal, by: string, now = new Date()) => screenNames(screeningSubjects(deal), by, now);
+
+/** Screens any list of names the same way: a brokerage and its owners, say. */
+export async function screenNames(subjects: { name: string; role: ScreeningRole }[], by: string, now = new Date()): Promise<Screening | { error: string }> {
   const loaded = await sanctionsList();
   if (!loaded) return { error: "The OFAC list hasn't been downloaded yet. The nightly sanctions job does it; run it once to start." };
-  return screeningOf(screeningSubjects(deal), loaded.list, { id: `ofac${now.getTime().toString(36)}${Math.random().toString(36).slice(2, 6)}`, at: now.toISOString(), by, fetchedAt: loaded.fetchedAt.toISOString() });
+  return screeningOf(subjects, loaded.list, { id: `ofac${now.getTime().toString(36)}${Math.random().toString(36).slice(2, 6)}`, at: now.toISOString(), by, fetchedAt: loaded.fetchedAt.toISOString() });
 }

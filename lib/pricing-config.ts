@@ -5,6 +5,8 @@
  * Percentages are decimals (0.85 = 85%). Rates are annual percentages (11 = 11%). Points are % of note amount.
  */
 export type Tier = 1 | 2 | 3 | 4;
+/** A repeat borrower's cut once they have this many LendHous loans paid as agreed in the last 24 months. */
+export interface RepeatTier { loans: number; rateCut: number; pointsCut: number }
 export type Range = [number, number];
 
 export interface FlipTier { rate: Range; points: Range; maxLTC: number; maxLTARV: number; maxInitialLTV: number; rehabFinanced: number; minFico: number }
@@ -75,7 +77,16 @@ export const pricingConfig = {
     expansionCountyLeverageCut: 0.05,
     heavyRehabRatio: 1.0, heavyRehabLtcCut: 0.05,
     foreignNationalLeverageCut: 0.1, foreignNationalRateAdd: 1.0,
-    repeatBorrowerRateCut: 0.25,
+    /** Pricing published before the tiers existed: one flat cut for any repeat borrower. */
+    repeatBorrowerRateCut: 0.25 as number | undefined,
+    // PLACEHOLDER tiers until GT sets them (research: New Silver cuts 0.50/0.75/1.00% rate and 0.25/0.50/0.75 points at
+    // 3/6/10 loans). By loans paid as agreed in the last 24 months; a late payment pauses it (lib/repeat-borrower.ts).
+    repeatTiers: [
+      { loans: 1, rateCut: 0.25, pointsCut: 0 },
+      { loans: 3, rateCut: 0.5, pointsCut: 0.25 },
+      { loans: 6, rateCut: 0.75, pointsCut: 0.5 },
+      { loans: 10, rateCut: 1.0, pointsCut: 0.75 },
+    ] as RepeatTier[] | undefined,
   },
 
   geography: {

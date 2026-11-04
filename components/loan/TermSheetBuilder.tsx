@@ -7,6 +7,8 @@ import { addDays } from "@/lib/servicing";
 import { useStore } from "@/lib/store";
 import { exceptionCovers, exceptionReasons, issueProblem, latestSheet, matrixOf, PREPAY, pricedApp, SHEET_STATUS, startingTerms, TERM_SHEET_DAYS, termsProblem, type Prepay, type TermsInput } from "@/lib/term-sheets";
 import { useServiceDay } from "./use-service-day";
+import { shortDay } from "@/lib/format";
+import { usuryCheck, usuryWarning } from "@/lib/usury";
 
 const small = "h-9! px-3! text-xs!";
 const TONE = { sent: "amber", accepted: "green", changes_requested: "blue", declined: "rose", expired: "slate", superseded: "slate" } as const;
@@ -56,6 +58,10 @@ export function TermSheetBuilder({ deal }: { deal: Deal }) {
   const covered = exceptionCovers(deal.pricingException, draft);
   const pendingSame = deal.pricingException?.status === "pending";
   const problem = building ? issueProblem(deal, draft) : null;
+  // The broker's points are counted the attorney's other way: whether an independent broker's fee is interest.
+  const broker = (deal.brokerPoints ?? 0) > 0;
+  const usuryFor = e ? usuryCheck({ amount: e.noteAmount, rate: draft.rate, points: draft.points, brokerPoints: deal.brokerPoints, termMonths: e.termMonths }) : null;
+  const usury = usuryFor && !usuryFor.overLender ? usuryWarning(usuryFor, e!.termMonths, deal.brokerPoints) : null;
   const version = (deal.termSheets?.length ?? 0) + 1;
   const set = (key: "rate" | "points" | "termMonths", value: string) => { setText({ ...text, [key]: value }); setDraft({ ...draft, [key]: Number(value) }); };
   const run = async (action: Parameters<typeof dispatch>[0]) => { setBusy(true); const done = await dispatch(action); setBusy(false); return done; };
@@ -83,6 +89,8 @@ export function TermSheetBuilder({ deal }: { deal: Deal }) {
                 <Stat label="Cash to close" value={usd(e.cashToClose)} sub={rental ? undefined : `all-in ${(e.allIn * 100).toFixed(2)}% a year`} />
               </div>
             )}
+            {broker && e && <p className="text-xs text-muted-foreground" data-testid="sheet-broker-fee">The broker&apos;s fee of {deal.brokerPoints} points ({usd((e.noteAmount * (deal.brokerPoints ?? 0)) / 100)}) is shown on the term sheet as a cost the borrower pays.</p>}
+            {usury && <p className="rounded-md bg-warn/10 p-3 text-xs text-warn" role="alert" data-testid="sheet-usury">{usury}</p>}
             {reasons.length > 0 && (
               <div className={`rounded-md p-3 text-xs ${covered ? "bg-good/10 text-good" : "bg-warn/10"}`} data-testid="sheet-exception">
                 <p className="font-medium">{covered ? `Outside the matrix, approved by ${deal.pricingException!.decidedBy}:` : "Outside the matrix:"}</p>
@@ -110,7 +118,7 @@ export function TermSheetBuilder({ deal }: { deal: Deal }) {
             {sheets.map((sheet) => (
               <li key={sheet.version} className="space-y-0.5 py-2.5" data-testid="term-sheet-version">
                 <div className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium">Version {sheet.version}: {usd(sheet.terms.noteAmount)} at {pct(sheet.terms.rate)}, {sheet.terms.pointsPct} points{rental ? "" : `, ${sheet.terms.termMonths} months`}</span><span className="flex items-center gap-2"><Badge tone={TONE[sheet.status]}>{SHEET_STATUS[sheet.status]}</Badge><a className="text-xs text-link underline" href={pdf(sheet.version)} target="_blank" rel="noreferrer" data-testid="term-sheet-pdf">PDF</a></span></div>
-                <p className="text-xs text-muted-foreground">Sent {sheet.issuedOn}{sheet.issuedBy ? ` by ${sheet.issuedBy}` : ""} · open until {sheet.expiresOn} · pricing {sheet.pricingVersion}{sheet.exception ? ` · exception approved by ${sheet.exception.decidedBy}` : ""}</p>
+                <p className="text-xs text-muted-foreground">Sent {shortDay(sheet.issuedOn)}{sheet.issuedBy ? ` by ${sheet.issuedBy}` : ""} · open until {shortDay(sheet.expiresOn)} · pricing {sheet.pricingVersion}{sheet.exception ? ` · exception approved by ${sheet.exception.decidedBy}` : ""}</p>
                 {sheet.response && <p className="text-xs" data-testid="term-sheet-response">{sheet.status === "accepted" ? `Accepted by ${sheet.response.signedName} on ${shortDate(sheet.response.at)}.` : sheet.status === "changes_requested" ? `${sheet.response.by} asked for changes: “${sheet.response.note}”` : `Declined by ${sheet.response.by}${sheet.response.note ? `: “${sheet.response.note}”` : "."}`}</p>}
               </li>
             ))}

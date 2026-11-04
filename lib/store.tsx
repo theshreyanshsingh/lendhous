@@ -28,6 +28,8 @@ type Store = {
   local: boolean;
   demo: boolean;
   viewerName: string;
+  /** Who's signed in, to tell their own loans apart. */
+  viewer: { id: string; email: string };
   error: string;
   clearError: () => void;
 };
@@ -41,7 +43,7 @@ function outer(s: Book, a: Outer): Book {
   return a.state;
 }
 
-export function StoreProvider({ demo, accountId, viewerName, initialBook, pricing, newLeads = 0, children }: { demo: boolean; accountId: string; viewerName: string; initialBook?: Book; pricing?: PricingPayload; newLeads?: number; children: React.ReactNode }) {
+export function StoreProvider({ demo, accountId, viewerName, viewerEmail = "", initialBook, pricing, newLeads = 0, children }: { demo: boolean; accountId: string; viewerName: string; viewerEmail?: string; initialBook?: Book; pricing?: PricingPayload; newLeads?: number; children: React.ReactNode }) {
   const [s, local] = useReducer(outer, demo, (isDemo: boolean) => { adoptPricing(pricing); adoptPricing(initialBook?.pricing); return isDemo ? demoBook() : initialBook ?? emptyBook(); });
   const [hydrated, setHydrated] = useState(false);
   const [error, setError] = useState("");
@@ -148,7 +150,8 @@ export function StoreProvider({ demo, accountId, viewerName, initialBook, pricin
     setError(reply.error ?? "");
   }, []);
 
-  const value = useMemo(() => ({ s, dispatch, uploadDoc, uploadCondition, uploadLienFile, uploadPropertyPhoto, uploadPhoto, applyReply, newLeads, local: isLocal, demo, viewerName, error, clearError: () => setError("") }), [s, dispatch, uploadDoc, uploadCondition, uploadLienFile, uploadPropertyPhoto, uploadPhoto, applyReply, newLeads, isLocal, demo, viewerName, error]);
+  const viewer = useMemo(() => ({ id: accountId, email: viewerEmail }), [accountId, viewerEmail]);
+  const value = useMemo(() => ({ s, dispatch, uploadDoc, uploadCondition, uploadLienFile, uploadPropertyPhoto, uploadPhoto, applyReply, newLeads, local: isLocal, demo, viewerName, viewer, error, clearError: () => setError("") }), [s, dispatch, uploadDoc, uploadCondition, uploadLienFile, uploadPropertyPhoto, uploadPhoto, applyReply, newLeads, isLocal, demo, viewerName, viewer, error]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 export function useStore() { const c = useContext(Ctx); if (!c) throw new Error("no store"); return c; }

@@ -136,6 +136,26 @@ export function ReportsBoard() {
           )}
         </div>
 
+        <div className="mt-6">
+          <h3 className="mb-2 text-sm font-medium">By loan officer</h3>
+          {pipeline.byOfficer.length === 0 ? <p className="text-sm text-muted-foreground">Nothing in this period.</p> : (
+            <table className="stack-table w-full text-sm" data-testid="by-officer">
+              <thead><tr><th>Loan officer</th><th className="text-right">Applications</th><th className="text-right">Term sheets</th><th className="text-right">Funded</th><th className="text-right">Funded amount</th></tr></thead>
+              <tbody className="divide-y divide-border">{pipeline.byOfficer.map((row) => <tr key={row.name}><td className="font-medium">{row.name}</td><td data-label="Applications" className="text-right tabular-nums">{row.applications}</td><td data-label="Term sheets" className="text-right tabular-nums">{row.termSheets}</td><td data-label="Funded" className="text-right tabular-nums">{row.funded}</td><td data-label="Funded amount" className="text-right tabular-nums">{usd(row.fundedAmount)}</td></tr>)}</tbody>
+            </table>
+          )}
+        </div>
+
+        {pipeline.byBroker.length > 0 && (
+          <div className="mt-6">
+            <h3 className="mb-2 text-sm font-medium">By broker</h3>
+            <table className="stack-table w-full text-sm" data-testid="by-broker">
+              <thead><tr><th>Brokerage</th><th className="text-right">Applications</th><th className="text-right">By referral link</th><th className="text-right">Funded</th><th className="text-right">Funded amount</th><th className="text-right">Their fees</th></tr></thead>
+              <tbody className="divide-y divide-border">{pipeline.byBroker.map((row) => <tr key={row.name}><td className="font-medium">{row.name}</td><td data-label="Applications" className="text-right tabular-nums">{row.applications}</td><td data-label="By referral link" className="text-right tabular-nums">{row.referred}</td><td data-label="Funded" className="text-right tabular-nums">{row.funded}</td><td data-label="Funded amount" className="text-right tabular-nums">{usd(row.fundedAmount)}</td><td data-label="Their fees" className="text-right tabular-nums">{usd(row.fees)}</td></tr>)}</tbody>
+            </table>
+          </div>
+        )}
+
         <div className="mt-6 grid gap-6 lg:grid-cols-2">
           <div>
             <h3 className="text-sm font-medium">In one stage for over {STUCK_DAYS} days</h3>

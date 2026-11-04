@@ -1,4 +1,5 @@
 import type { LetterContent } from "@/lib/payoffs";
+import { shortDay } from "@/lib/format";
 
 const money = (amount: number) => `${amount < 0 ? "−" : ""}$${Math.abs(amount).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -12,7 +13,7 @@ export function PayoffLetterView({ content }: { content: LetterContent }) {
       </header>
       {content.sample && <p className="rounded-md bg-bad/10 p-2 text-sm text-bad">Sample only. These are made-up figures, not a real payoff letter.</p>}
       <div className="text-sm">
-        <p>Issued {content.issuedOn}</p>
+        <p>Issued {shortDay(content.issuedOn)}</p>
         <p className="wrap-anywhere text-muted-foreground">Reference {content.reference}</p>
         {content.corrected && <p className="mt-2 font-medium" data-testid="letter-corrected">Corrected letter. {content.corrected}</p>}
       </div>

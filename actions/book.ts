@@ -7,18 +7,22 @@ import { canUploadFile, docOf, scopeBook, type Viewer } from "@/lib/book-access"
 import { parseAction } from "@/lib/book-actions";
 import { sendAlerts } from "@/lib/book-alerts";
 import { permissionCheck, readBook, runAction } from "@/lib/book-store";
-import { requirePermission, requireUser } from "@/lib/auth";
+import { hasPermission, requirePermission, requireUser } from "@/lib/auth";
 import { encryptField } from "@/lib/crypto";
 import type { Book, BookAction } from "@/lib/book";
 import { isDemoEmail } from "@/lib/deploy";
 import { prisma } from "@/lib/prisma";
 import { borrowerFor, screenAutomatically } from "@/lib/loan-intake";
+import { TEAM_ROLES, type TeamRole } from "@/lib/loan-team";
+import { memberById, memberOf, teamCandidates } from "@/lib/loan-team-store";
+import { DEMO_TEAM, type TeamMember } from "@/lib/mockData";
 import { deliverPayoffLetter } from "@/lib/payoff-delivery";
 import { fileProblem } from "@/lib/conditions";
 import { isFinalDraw, partiesFor } from "@/lib/lien-law";
 import { moveLeadPhotos, storePropertyPhoto } from "@/lib/property-photos";
 import { viewFor } from "@/lib/permissions";
 import { screenDeal } from "@/lib/sanctions-store";
+import { servicingDate } from "@/lib/servicing";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import { extensionOf, mimeFor, putBytes, safeBasename } from "@/lib/storage";
 import { attachmentName, documentNameContext, uploadProblem } from "@/lib/uploads";
@@ -51,6 +55,27 @@ async function perform(viewer: Viewer, action: BookAction, options: { trusted?: 
   // A payoff letter goes out the moment it's issued: the 10 days are about sending it, not writing it.
   const delivered = result.action.t === "issuePayoffLetter" ? await deliverPayoffLetter(result.action.payoffId) : null;
   return { book: scopeBook(screened ?? delivered ?? result.after, viewer) };
+}
+
+/** Who a loan can be given to, and whether the viewer can give it (anyone can take an empty seat themselves). */
+export async function loanTeamOptions(): Promise<{ members: TeamMember[]; canAssign: boolean; me: string }> {
+  const viewer = await requirePermission("view_pipeline");
+  const demo = isDemoEmail(viewer.email);
+  return { members: demo ? DEMO_TEAM : await teamCandidates(), canAssign: await hasPermission(viewer, "assign_loans"), me: demo ? DEMO_TEAM.find((member) => member.email === viewer.email)?.id ?? "" : viewer.id };
+}
+
+/** Puts someone on a loan as its officer or processor, or takes them off. The person is looked up here, never sent. */
+export async function assignLoan(dealId: string, role: TeamRole, userId: string | null): Promise<BookReply> {
+  const viewer = await requirePermission("view_pipeline");
+  if (isDemoEmail(viewer.email)) return { error: "Demo accounts keep their records in the browser." };
+  if (!TEAM_ROLES.includes(role)) return { error: "That request wasn't valid." };
+  const deal = (await readBook()).book.deals.find((item) => item.id === dealId);
+  if (!deal) return { error: "That loan no longer exists." };
+  const takingOpenSeat = userId === viewer.id && !deal.team?.[role];
+  if (!takingOpenSeat && !(await hasPermission(viewer, "assign_loans"))) return { error: "Your account can't assign loans. Ask an owner." };
+  const member = userId ? (await teamCandidates()).find((item) => item.id === userId) : null;
+  if (userId && !member) return { error: "That person can't work loans." };
+  return perform(viewer, { t: "assignLoanTeam", dealId, role, member: member ?? null, by: viewer.name }, { trusted: true });
 }
 
 /** Screens a loan against the OFAC list now, as the person asking. */
@@ -153,10 +178,19 @@ export async function startLoan(input: NewLoan): Promise<BookReply & { dealId?: 
   const screened = await screenAutomatically(deal.id);
   await audit({ actorId: actor.id, action: "book.startLoan", entityType: "LoanBook", entityId: deal.id, after: { loanNumber: deal.loanNumber, leadId: input.leadId } });
   let latest = screened ?? result.after;
+  // Whoever starts the loan is its loan officer until someone reassigns it.
+  const officer = await runAction(actor, { t: "assignLoanTeam", dealId: deal.id, role: "officer", member: memberOf(actor), by: actor.name }, { trusted: true });
+  if (!("error" in officer)) latest = officer.after;
   if (input.leadId) {
     const photos = await moveLeadPhotos(String(input.leadId), deal.id);
     const withPhotos = photos.length ? await runAction(actor, { t: "addPropertyPhotos", dealId: deal.id, photos, by: "Quote request" }, { trusted: true }) : null;
     if (withPhotos && !("error" in withPhotos)) latest = withPhotos.after;
+    // A lead from a broker's referral link makes the loan the broker's, from the day the request came in.
+    const lead = await prisma.lead.findFirst({ where: { id: String(input.leadId) }, select: { brokerId: true, createdAt: true } });
+    if (lead?.brokerId) {
+      const referred = await runAction(actor, { t: "referLoan", dealId: deal.id, brokerId: lead.brokerId, on: servicingDate(lead.createdAt) }, { trusted: true });
+      if (!("error" in referred)) latest = referred.after;
+    }
     const updated = await prisma.lead.updateMany({ where: { id: String(input.leadId) }, data: { loanId: deal.id, contactedAt: new Date() } });
     if (updated.count) revalidatePath("/admin/leads");
   }

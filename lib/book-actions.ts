@@ -67,7 +67,7 @@ const buyBox = z.object({
 });
 
 const schema = z.discriminatedUnion("t", [
-  z.object({ t: z.literal("submitApp"), app: application, address: text(200), city: text(100), zip: text(10), entityName: text(200), exitStrategy: text(40), client: z.object({ name: text(120), borrowerId: id.optional(), brokerId: id.optional(), brokerPoints: z.number().min(0).max(5).optional() }).optional(), source: text(40).optional(), sponsor: sponsor.optional() }),
+  z.object({ t: z.literal("submitApp"), app: application, address: text(200), city: text(100), zip: text(10), entityName: text(200), exitStrategy: text(40), closingDate: date.optional(), client: z.object({ name: text(120), borrowerId: id.optional(), brokerId: id.optional(), brokerPoints: z.number().min(0).max(5).optional() }).optional(), source: text(40).optional(), sponsor: sponsor.optional() }),
   z.object({ t: z.literal("saveSponsor"), dealId: id, sponsor }),
   z.object({ t: z.literal("verifyTrackDeal"), dealId: id, trackId: id, verified: z.boolean() }),
   z.object({ t: z.literal("signOffCredit"), dealId: id, by: z.string().max(120), note: text(2000) }),
@@ -92,6 +92,12 @@ const schema = z.discriminatedUnion("t", [
   z.object({ t: z.literal("bid"), bid: z.object({ dealId: id, partnerId: z.string().max(120), pct: z.number().min(1).max(100), lenderRate: z.number().min(0).max(100), lenderPoints: z.number().min(0).max(20), conditions: text(500), type: z.enum(["bid", "accept_as_offered"]) }) }),
   z.object({ t: z.literal("acceptBid"), bidId: id }),
   z.object({ t: z.literal("commit"), dealId: id }),
+  z.object({ t: z.literal("partnerFundsSent"), dealId: id, sentOn: date, reference: text(80), by: text(120) }),
+  z.object({ t: z.literal("partnerFundsReceived"), dealId: id, on: date, by: text(120) }),
+  z.object({ t: z.literal("approveBroker"), brokerId: id, reason: text(1000), by: z.string().max(120) }),
+  z.object({ t: z.literal("suspendBroker"), brokerId: id, reason: text(1000), by: z.string().max(120) }),
+  z.object({ t: z.literal("setBrokerPoints"), dealId: id, points: z.number().finite().min(0).max(5) }),
+  z.object({ t: z.literal("brokerFeePaid"), dealId: id, amount: money, on: date, reference: text(160), by: z.string().max(120) }),
   z.object({ t: z.literal("signNda"), partnerId: z.string().max(120) }),
   z.object({ t: z.literal("signBuyerNda"), buyerId: z.string().max(120) }),
   z.object({ t: z.literal("listLoan"), dealId: id, askPct: z.number().min(50).max(120) }),
@@ -152,7 +158,7 @@ const schema = z.discriminatedUnion("t", [
 ]);
 
 /**
- * The action if it is well formed, or null. uploadDoc, conditionFile, addPropertyPhotos, lienWaiverReceived, affidavitReceived, recordAdverseNotice, linkBorrower,
+ * The action if it is well formed, or null. assignLoanTeam, brokerApplied, referLoan, uploadDoc, conditionFile, addPropertyPhotos, lienWaiverReceived, affidavitReceived, recordAdverseNotice, linkBorrower,
  * settleLoans, checkTermSheets, checkInsurance, submitPayoffRequest and payoffLetterDelivered aren't here: only the server
  * starts those.
  */

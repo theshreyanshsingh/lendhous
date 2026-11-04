@@ -6,6 +6,9 @@ import { loadPricing } from "@/lib/pricing-store";
 import { pricingPayload } from "@/lib/pricing-versions";
 import { isDemoEmail } from "@/lib/deploy";
 import { unansweredLeads } from "@/lib/lead-store";
+import { recentErrors } from "@/lib/errors";
+import { JOB_LABEL, staleJobs } from "@/lib/health";
+import { lastJobRuns } from "@/lib/health-store";
 import { unreadCount } from "@/lib/notifications";
 import { ROLE_LABEL, viewFor } from "@/lib/permissions";
 import { getSettings } from "@/lib/settings";
@@ -19,7 +22,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (!user) redirect("/login");
   const demo = isDemoEmail(user.email);
   const view = viewFor(user.roleCodes);
-  const [canManageMembers, canViewAudit, canManageSettings, canRouteCapital, canManageCapital, canManagePricing, canViewReports, unread, newLeads, settings] = await Promise.all([
+  const [canManageMembers, canViewAudit, canManageSettings, canRouteCapital, canManageCapital, canManagePricing, canViewReports, canIssueLetters, canManageBrokers, unread, newLeads, settings] = await Promise.all([
     hasPermission(user, "manage_users"),
     hasPermission(user, "view_audit"),
     hasPermission(user, "manage_roles"),
@@ -27,14 +30,19 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     hasPermission(user, "manage_capital"),
     hasPermission(user, "manage_pricing"),
     hasPermission(user, "view_reports"),
+    hasPermission(user, "issue_term_sheet"),
+    hasPermission(user, "manage_brokers"),
     unreadCount(user),
     view === "admin" ? unansweredLeads() : 0,
     getSettings(),
   ]);
-  const account = { name: user.name, email: user.email, roles: user.roleCodes.map((role) => ROLE_LABEL[role]), demo, canManageMembers, canViewAudit, canManageSettings, canManageFirms: canRouteCapital || canManageCapital, canManagePricing, canViewReports, unread, offerSample: settings.offerSampleData !== false };
+  // Owners on a real account hear when the nightly jobs stop, and see how many errors are open.
+  const watch = canManageSettings && !demo;
+  const [stale, openErrors] = watch ? await Promise.all([lastJobRuns().then((runs) => staleJobs(runs, new Date())), recentErrors(new Date(Date.now() - 7 * 86_400_000))]) : [[], 0];
+  const account = { name: user.name, email: user.email, roles: user.roleCodes.map((role) => ROLE_LABEL[role]), demo, canManageMembers, canViewAudit, canManageSettings, canManageFirms: canRouteCapital || canManageCapital, canManagePricing, canViewReports, canIssueLetters, canManageBrokers, staleJobs: stale.map((job) => JOB_LABEL[job]), openErrors, unread, offerSample: settings.offerSampleData !== false };
   return (
     // Every page, demo seats too, prices new quotes on the version the server does, so the two render the same.
-    <StoreProvider demo={demo} accountId={user.id} viewerName={user.name} initialBook={demo ? undefined : await scopedBook(user)} pricing={(await loadPricing(), pricingPayload([]))} newLeads={newLeads}>
+    <StoreProvider demo={demo} accountId={user.id} viewerName={user.name} viewerEmail={user.email} initialBook={demo ? undefined : await scopedBook(user)} pricing={(await loadPricing(), pricingPayload([]))} newLeads={newLeads}>
       <Shell account={account} view={view}>{children}</Shell>
     </StoreProvider>
   );

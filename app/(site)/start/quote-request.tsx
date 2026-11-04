@@ -36,7 +36,7 @@ function toQuote(draft: Draft): unknown {
  * The loan quote request: a borrower or a broker sends the deal, the team gets everything a first call needs, and the
  * visitor sees indicative terms from today's pricing straight away.
  */
-export function QuoteRequest({ pricing, signupOpen = false }: { pricing: PricingConfig; signupOpen?: boolean }) {
+export function QuoteRequest({ pricing, signupOpen = false, referral }: { pricing: PricingConfig; signupOpen?: boolean; referral?: { code: string; name: string } }) {
   const [draft, setDraft] = useState<Draft>(blank);
   const [error, setError] = useState("");
   const [sending, setSending] = useState<false | "quote" | string>(false);
@@ -54,7 +54,7 @@ export function QuoteRequest({ pricing, signupOpen = false }: { pricing: Pricing
     const checked = quoteProblem(toQuote(draft));
     if ("error" in checked) return setError(checked.error);
     setSending("quote");
-    const reply: { sent: boolean; error: string; photoKey?: string } = await sendQuote(checked.quote, honeypot).catch(() => ({ sent: false, error: "We couldn't send this just now. Please try again in a few minutes." }));
+    const reply: { sent: boolean; error: string; photoKey?: string } = await sendQuote(checked.quote, honeypot, referral?.code).catch(() => ({ sent: false, error: "We couldn't send this just now. Please try again in a few minutes." }));
     if (!reply.sent) { setSending(false); return setError(reply.error); }
     // The photos follow the request, one at a time, with the key it came back with.
     let done = 0; let failed = 0;
@@ -86,6 +86,7 @@ export function QuoteRequest({ pricing, signupOpen = false }: { pricing: Pricing
 
   return (
     <form className="quote-form" onSubmit={submit} data-testid="quote-form" noValidate>
+      {referral && <p className="panel quote-small" data-testid="quote-referral">Referred by <b>{referral.name}</b>. They&apos;ll be kept up to date on this request.</p>}
       <section className="panel">
         <div className="quote-step-title">Who&apos;s sending this?</div>
         <div className="quote-choices" role="radiogroup">

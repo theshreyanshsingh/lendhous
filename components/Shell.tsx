@@ -2,12 +2,13 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { BarChart3, Bell, Briefcase, Percent, Building2, ClipboardList, FilePlus, Hammer, Inbox, Landmark, LayoutDashboard, ListChecks, BookOpen, Lock, LogOut, Menu, ReceiptText, RotateCcw, ScrollText, Settings, Store, Tag, Users, type LucideIcon } from "lucide-react";
+import { BarChart3, Bell, Briefcase, FileCheck, FileText, TriangleAlert, Percent, Building2, ClipboardList, FilePlus, Hammer, Inbox, Landmark, LayoutDashboard, ListChecks, BookOpen, Lock, LogOut, Menu, ReceiptText, RotateCcw, ScrollText, Settings, Store, Tag, Users, type LucideIcon } from "lucide-react";
 import { logout } from "@/actions/auth";
 import { attentionCounts } from "@/lib/attention";
 import { useStore } from "@/lib/store";
 import { VIEW_HOME, type View } from "@/lib/permissions";
 import { Logo } from "@/components/logo";
+import { StaffSearch } from "@/components/StaffSearch";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
@@ -17,9 +18,9 @@ type NavItem = { href: string; label: string; icon: LucideIcon; section?: string
 // Layout follows UPB Capital's AppShell: fixed left sidebar on desktop, a sheet on mobile. The signed-in
 // account's role picks the workspace; there is no switching between them.
 const nav: Record<View, NavItem[]> = {
-  borrower: [{ href: "/admin/borrower", label: "My loans", icon: LayoutDashboard }, { href: "/admin/apply", label: "New application", icon: FilePlus }],
+  borrower: [{ href: "/admin/borrower", label: "My loans", icon: LayoutDashboard }, { href: "/admin/apply", label: "Apply for a loan", icon: FilePlus }],
   admin: [{ href: "/admin", label: "Pipeline", icon: ClipboardList }, { href: "/admin/leads", label: "Website leads", icon: Inbox }, { href: "/admin/capital", label: "Capital", icon: Landmark, section: "Money" }, { href: "/admin/loan-sales", label: "Loan sales", icon: Tag, section: "Money" }, { href: "/admin/draws", label: "Draws", icon: Hammer, section: "Servicing" }, { href: "/admin/servicing", label: "Loan servicing", icon: ReceiptText, section: "Servicing" }],
-  partner: [{ href: "/admin/partner", label: "Deal feed", icon: BookOpen }],
+  partner: [{ href: "/admin/partner", label: "Deal feed", icon: BookOpen }, { href: "/admin/partner/portfolio", label: "My portfolio", icon: Briefcase }],
   buyer: [{ href: "/admin/buyer", label: "Loans for sale", icon: Store }, { href: "/admin/buyer/portfolio", label: "My loans & offers", icon: Briefcase }],
   broker: [{ href: "/admin/broker", label: "My deals", icon: LayoutDashboard }, { href: "/admin/broker/new", label: "Submit a deal", icon: FilePlus }],
 };
@@ -31,7 +32,7 @@ function active(path: string, href: string) {
   return path === href || path.startsWith(`${href}/`);
 }
 
-export type ShellAccount = { name: string; email: string; roles: string[]; demo: boolean; canManageMembers: boolean; canViewAudit: boolean; canManageSettings: boolean; canManageFirms: boolean; canManagePricing: boolean; canViewReports: boolean; unread: number; offerSample: boolean };
+export type ShellAccount = { name: string; email: string; roles: string[]; demo: boolean; canManageMembers: boolean; canViewAudit: boolean; canManageSettings: boolean; canManageFirms: boolean; canManagePricing: boolean; canViewReports: boolean; canIssueLetters: boolean; canManageBrokers?: boolean; staleJobs: string[]; openErrors: number; unread: number; offerSample: boolean };
 
 export default function Shell({ children, account, view }: { children: React.ReactNode; account: ShellAccount; view: View | null }) {
   const path = usePathname();
@@ -43,12 +44,15 @@ export default function Shell({ children, account, view }: { children: React.Rea
   const items: NavItem[] = [
     ...(view ? nav[view] : []).map((item) => ({ ...item, count: counted[item.href] })),
     ...(account.canViewReports && view === "admin" ? [{ href: "/admin/reports", label: "Reports", icon: BarChart3 }] : []),
+    ...(account.canIssueLetters && view === "admin" ? [{ href: "/admin/letters", label: "Letters", icon: FileCheck }] : []),
     ...(account.canManageFirms ? [{ href: "/admin/partners", label: "Partners & buyers", icon: Building2, section: "Money" }] : []),
+    ...(account.canManageBrokers && view === "admin" ? [{ href: "/admin/brokers", label: "Brokers", icon: Briefcase, section: "Money", count: s.brokers.filter((broker) => broker.status === "applied").length || undefined }] : []),
     ...(account.canManagePricing && view === "admin" ? [{ href: "/admin/pricing", label: "Pricing", icon: Percent, section: "Money" }] : []),
     { href: "/admin/account/notifications", label: "Notifications", icon: Bell, section: "Account", count: account.unread },
     ...(account.canManageMembers ? [{ href: "/admin/members", label: "Members", icon: Users, section: "Account" }] : []),
     ...(account.canViewAudit ? [{ href: "/admin/audit", label: "Audit log", icon: ScrollText, section: "Account" }] : []),
-    ...(account.canManageSettings ? [{ href: "/admin/conditions", label: "Conditions library", icon: ListChecks, section: "Account" }, { href: "/admin/settings", label: "Settings", icon: Settings, section: "Account" }] : []),
+    ...(account.canManageSettings ? [{ href: "/admin/conditions", label: "Conditions library", icon: ListChecks, section: "Account" }, { href: "/admin/settings", label: "Settings", icon: Settings, section: "Account" }, { href: "/admin/errors", label: "Errors", icon: TriangleAlert, section: "Account", count: account.openErrors }, { href: "/admin/tax", label: "Tax forms", icon: FileText, section: "Account" }] : []),
+    ...(view === "partner" || view === "buyer" || view === "broker" ? [{ href: "/admin/account/tax", label: "Tax form", icon: FileText, section: "Account" }] : []),
     { href: "/admin/account/security", label: "Security", icon: Lock, section: "Account" },
   ];
   const logoHref = view ? VIEW_HOME[view] : "/admin/account/security";
@@ -56,6 +60,7 @@ export default function Shell({ children, account, view }: { children: React.Rea
     <div className="min-h-screen">
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-72 flex-col border-r border-sidebar-border bg-sidebar px-3 pt-3.5 pb-3 lg:flex">
         <div className="px-2 pt-2 pb-5"><Logo href={logoHref} /></div>
+        {view === "admin" && <StaffSearch />}
         <SideNav items={items} path={path} />
         <Controls account={account} />
       </aside>
@@ -67,12 +72,13 @@ export default function Shell({ children, account, view }: { children: React.Rea
               <Menu className="size-4" />
             </SheetTrigger>
             <SheetContent side="left" className="flex flex-col bg-sidebar px-3 pt-10 pb-3">
+              {view === "admin" && <StaffSearch />}
               <SideNav items={items} path={path} />
               <Controls account={account} />
             </SheetContent>
           </Sheet>
         </div>
-        <main id="desk" className="mx-auto min-w-0 max-w-7xl px-4 pt-5 pb-10 md:px-[22px] md:pt-7 md:pb-12">{error && <div role="alert" className="mb-4 flex items-start justify-between gap-3 rounded-[2px] border border-bad/40 bg-bad/10 px-4 py-3 text-sm text-bad" data-testid="book-error"><span className="min-w-0">{error}</span><button type="button" className="shrink-0 underline" onClick={clearError}>Dismiss</button></div>}<SampleDataBar path={path} demo={account.demo} offer={account.offerSample} />{children}</main>
+        <main id="desk" className="mx-auto min-w-0 max-w-7xl px-4 pt-5 pb-10 md:px-[22px] md:pt-7 md:pb-12">{account.staleJobs.length > 0 && <div role="alert" className="mb-4 rounded-[2px] border border-bad/40 bg-bad/10 px-4 py-3 text-sm text-bad" data-testid="stale-jobs">The nightly {account.staleJobs.join(" and the ")} {account.staleJobs.length === 1 ? "hasn't" : "haven't"} run in over two days. Check that the jobs process is running on the server (<code>pm2 ls</code> shows <code>lendhous-jobs</code>), or run <code>npm run jobs</code>.</div>}{error && <div role="alert" className="mb-4 flex items-start justify-between gap-3 rounded-[2px] border border-bad/40 bg-bad/10 px-4 py-3 text-sm text-bad" data-testid="book-error"><span className="min-w-0">{error}</span><button type="button" className="shrink-0 underline" onClick={clearError}>Dismiss</button></div>}<SampleDataBar path={path} demo={account.demo} offer={account.offerSample} />{children}</main>
       </div>
     </div>
   );

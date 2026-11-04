@@ -2,6 +2,7 @@
 // loan terms, and the servicing and extension terms that go into the note. Everything else in the config (score weights,
 // geography, adjusters, the DSCR grid) carries over unchanged. Pure, so the editor and the server check it the same way.
 import { z } from "zod";
+import { repeatTiersOf } from "./engine";
 import type { PricingConfig, Range, Tier } from "./pricing-config";
 
 const TIERS = [1, 2, 3, 4] as const;
@@ -27,6 +28,7 @@ export const draftSchema = z.object({
   loanSize: z.object({ min: z.number().int().min(0).max(100_000_000), maxInHouse: z.number().int().min(0).max(100_000_000), maxOverall: z.number().int().min(0).max(100_000_000) }),
   lenderFees: z.number().finite().min(0).max(100_000),
   servicing: z.object({ graceDays: z.number().int().min(0).max(30), lateFeePct: z.number().finite().min(0).max(0.2), delinquentDays: z.number().int().min(1).max(120), defaultRateAdd: z.number().finite().min(0).max(25), defaultRateMax: z.number().finite().min(0).max(36) }),
+  repeatTiers: z.array(z.object({ loans: z.number().int().min(1).max(100), rateCut: z.number().finite().min(0).max(3), pointsCut: points })).min(1).max(6),
   extensions: z.object({ maxCount: z.number().int().min(0).max(6), monthsEach: z.number().int().min(1).max(12), feePoints: points, requestWindowDays: z.number().int().min(0).max(180) }),
 });
 export type PricingDraft = z.infer<typeof draftSchema>;
@@ -47,6 +49,7 @@ export function draftOf(config: PricingConfig): PricingDraft {
     lenderFees: config.assumptions.lenderFees,
     servicing: { graceDays, lateFeePct, delinquentDays, defaultRateAdd, defaultRateMax },
     extensions: { ...config.extensions },
+    repeatTiers: repeatTiersOf(config).map((tier) => ({ ...tier })),
   };
 }
 
@@ -64,6 +67,7 @@ export function applyDraft(base: PricingConfig, draft: PricingDraft, version: st
     assumptions: { ...base.assumptions, lenderFees: draft.lenderFees },
     servicing: { ...base.servicing, ...draft.servicing },
     extensions: draft.extensions,
+    adjusters: { ...base.adjusters, repeatTiers: draft.repeatTiers },
   };
 }
 
@@ -79,6 +83,7 @@ export function draftProblems(draft: PricingDraft): string[] {
   const { min, maxInHouse, maxOverall } = draft.loanSize;
   if (min > maxInHouse || maxInHouse > maxOverall) problems.push("Loan sizes must go minimum ≤ largest in-house ≤ largest overall.");
   if (draft.servicing.defaultRateMax < draft.servicing.defaultRateAdd) problems.push("The default rate cap is below the default margin.");
+  if (draft.repeatTiers.some((tier, at) => at > 0 && tier.loans <= draft.repeatTiers[at - 1].loans)) problems.push("Each repeat-borrower tier needs more loans than the one before it.");
   if (draft.extensions.maxCount > 0 && draft.extensions.monthsEach < 1) problems.push("An extension needs at least one month.");
   // Above 25% a year is criminal usury in Florida whatever the loan size (Fla. Stat. 687.071), so it can't be published.
   if (highestRate(draft) > 25) problems.push(`No rate can go above 25% a year: that's criminal usury in Florida (Fla. Stat. 687.071). The highest here is ${highestRate(draft)}%.`);
@@ -102,7 +107,13 @@ export function draftWarnings(draft: PricingDraft): string[] {
 export function draftChanges(before: PricingDraft, after: PricingDraft): string[] {
   const changes: string[] = [];
   const walk = (a: unknown, b: unknown, path: string) => {
-    if (Array.isArray(a) && Array.isArray(b)) { if (a.join() !== b.join()) changes.push(`${path}: ${a.join("–")} → ${b.join("–")}`); return; }
+    // A range compares as one value; a list of tiers is walked tier by tier, after saying if tiers were added or taken out.
+    if (Array.isArray(a) && Array.isArray(b) && a.length !== b.length && [...a, ...b].some((item) => typeof item === "object")) {
+      changes.push(`${path}: ${a.length} → ${b.length} tiers`);
+      for (let at = 0; at < Math.min(a.length, b.length); at++) walk(a[at], b[at], `${path}.${at}`);
+      return;
+    }
+    if (Array.isArray(a) && Array.isArray(b) && [...a, ...b].every((item) => typeof item !== "object")) { if (a.join() !== b.join()) changes.push(`${path}: ${a.join("–")} → ${b.join("–")}`); return; }
     if (a && b && typeof a === "object" && typeof b === "object") { for (const key of Object.keys(b)) walk((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key], path ? `${path}.${key}` : key); return; }
     if (a !== b) changes.push(`${path}: ${String(a)} → ${String(b)}`);
   };
