@@ -4,7 +4,7 @@ import bcrypt from "bcryptjs";
 import type { RoleCode } from "@prisma/client";
 import { audit } from "@/lib/audit";
 import { isDemoEmail } from "@/lib/deploy";
-import { sendPasswordLink } from "@/lib/email";
+import { notifyTeam, sendPasswordLink } from "@/lib/email";
 import { accessChanges, accessError, isRole, removeError, type Actor } from "@/lib/member-rules";
 import { isStaff, ROLE_LABEL } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
@@ -110,6 +110,45 @@ export async function sendSelfServiceLink(email: string) {
   await audit({ actorId: null, action: "auth.password_link_requested", entityType: "User", entityId: user.id });
 }
 
+export type SignupInput = { name: string; email: string; phone: string };
+
+/** Why a sign-up can't go ahead as entered, or null. */
+export function signupProblem(input: SignupInput) {
+  if (!input.name.trim() || input.name.length > 120) return "Enter your name.";
+  if (!EMAIL.test(input.email) || input.email.length > 200) return "Enter a valid email address.";
+  if (isDemoEmail(input.email)) return "That address is reserved for demo accounts.";
+  if (input.phone.length > 40) return "Enter a shorter phone number.";
+  return null;
+}
+
+/**
+ * Someone creating their own borrower account (the public sign-up page). The account stays PENDING, unable to sign in,
+ * until they use the link emailed to them, which proves the address is theirs. An address that already has an account
+ * gets a password link instead, so the page never says which addresses are taken.
+ */
+export async function startSignup(input: SignupInput) {
+  const existing = await prisma.user.findUnique({ where: { email: input.email } });
+  if (existing && !existing.deletedAt) {
+    if (existing.accountStatus === "PENDING" && existing.signedUpAt) await sendPasswordLink(existing.email, await newLink(existing.id), "signup");
+    else await sendSelfServiceLink(existing.email);
+    return;
+  }
+  const passwordHash = await bcrypt.hash(randomBytes(32).toString("hex"), 10);
+  const details = { name: input.name.trim(), phone: input.phone.trim(), title: null, accountStatus: "PENDING" as const, signedUpAt: new Date(), organizationId: null, passwordHash, extraPermissions: [], deniedPermissions: [] };
+  const user = existing
+    ? await prisma.user.update({ where: { id: existing.id }, data: { ...details, deletedAt: null, lastLoginAt: null, roles: { deleteMany: {}, create: [{ role: "BORROWER" }] } } })
+    : await prisma.user.create({ data: { ...details, email: input.email, roles: { create: [{ role: "BORROWER" }] } } });
+  await audit({ actorId: null, action: "auth.signup_requested", entityType: "User", entityId: user.id, after: { roles: ["BORROWER"] } });
+  await sendPasswordLink(user.email, await newLink(user.id), "signup");
+}
+
+/** Tells the team someone finished signing up, so a loan officer can reach out. */
+export async function announceSignup(userId: string) {
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { name: true, email: true, phone: true } });
+  if (!user) return;
+  await notifyTeam(`New borrower account: ${user.name}`, `${user.name} (${user.email}${user.phone ? `, ${user.phone}` : ""}) created a LendHous borrower account and confirmed the email.\n\nThey can now apply for a loan and send property photos from their portal. Loans you start for this email will show up there too.`, "auth.signup");
+}
+
 /** Who a link belongs to, for the set-password page. Null when it is unknown or expired. */
 export async function peekPasswordLink(token: string) {
   const row = await prisma.passwordLink.findUnique({ where: { tokenHash: hashOf(token) }, include: { user: { select: { email: true, deletedAt: true } } } });
@@ -118,15 +157,17 @@ export async function peekPasswordLink(token: string) {
 }
 
 /** Uses the link. deleteMany is atomic, so the same link can't set a password twice. Other sessions end, as after any reset. */
-export async function usePasswordLink(token: string, password: string): Promise<{ error: string } | { userId: string }> {
+export async function usePasswordLink(token: string, password: string): Promise<{ error: string } | { userId: string; signedUp: boolean }> {
   if (password.length < PASSWORD_MIN) return { error: `Use at least ${PASSWORD_MIN} characters.` };
   const tokenHash = hashOf(token);
-  const row = await prisma.passwordLink.findUnique({ where: { tokenHash }, include: { user: { select: { deletedAt: true } } } });
+  const row = await prisma.passwordLink.findUnique({ where: { tokenHash }, include: { user: { select: { deletedAt: true, accountStatus: true, signedUpAt: true } } } });
   if (!row || row.expiresAt < new Date() || row.user.deletedAt) return { error: "This link has expired or was already used. Ask your administrator for a new one." };
   const { count } = await prisma.passwordLink.deleteMany({ where: { tokenHash } });
   if (!count) return { error: "This link has expired or was already used. Ask your administrator for a new one." };
-  await prisma.user.update({ where: { id: row.userId }, data: { passwordHash: await bcrypt.hash(password, 10) } });
+  // Using the link from a sign-up proves the email is theirs, which is what the account was waiting for.
+  const signedUp = row.user.accountStatus === "PENDING" && Boolean(row.user.signedUpAt);
+  await prisma.user.update({ where: { id: row.userId }, data: { passwordHash: await bcrypt.hash(password, 10), ...(signedUp ? { accountStatus: "APPROVED" as const } : {}) } });
   await prisma.serverSession.deleteMany({ where: { userId: row.userId } });
-  await audit({ actorId: row.userId, action: "auth.password_set", entityType: "User", entityId: row.userId });
-  return { userId: row.userId };
+  await audit({ actorId: row.userId, action: signedUp ? "auth.signup_confirmed" : "auth.password_set", entityType: "User", entityId: row.userId });
+  return { userId: row.userId, signedUp };
 }

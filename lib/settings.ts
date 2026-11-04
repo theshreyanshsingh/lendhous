@@ -6,6 +6,7 @@ const DEFAULTS: Omit<PlatformSettings, "updatedAt"> = {
   retentionYears: 7,
   staffIdleMinutes: 30,
   offerSampleData: true,
+  allowSignup: true,
   dualApprovalDrawCents: 5_000_000,
   dualApprovalDistributionCents: 25_000_000,
   lenderAddress: "",

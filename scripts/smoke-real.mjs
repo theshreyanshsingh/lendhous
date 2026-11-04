@@ -2,6 +2,7 @@
 // sign-up to funding, documents, draws, payoff, a partner bid, a loan sale and a broker deal, checking what each person
 // can and can't see. It wipes the loan book when it starts and ends, so it refuses anything but a local database.
 // Usage: npm run db:seed && npm run build && npm start, then npm run smoke:real
+import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import bcrypt from "bcryptjs";
@@ -21,7 +22,7 @@ const prisma = new PrismaClient();
 const wipe = async () => {
   await prisma.bookRecord.deleteMany();
   await prisma.bookVersion.deleteMany();
-  await prisma.document.deleteMany({ where: { ownerType: "LOAN" } });
+  await prisma.document.deleteMany({ where: { ownerType: { in: ["LOAN", "LEAD"] } } });
   await prisma.lead.deleteMany();
   await prisma.pricingVersion.deleteMany();
   await prisma.sanctionsList.deleteMany();
@@ -30,9 +31,11 @@ const wipe = async () => {
   await prisma.applicationLink.deleteMany();
   await prisma.rateWindow.deleteMany({ where: { key: { startsWith: "lead:" } } });
   await prisma.rateWindow.deleteMany({ where: { key: { startsWith: "payoff-form:" } } });
+  await prisma.rateWindow.deleteMany({ where: { key: { startsWith: "lead-photos:" } } });
+  await prisma.rateWindow.deleteMany({ where: { key: { startsWith: "signup-ip:" } } });
   await prisma.user.deleteMany({ where: { email: { endsWith: DOMAIN } } });
   await prisma.rateWindow.deleteMany({ where: { key: { contains: DOMAIN } } });
-  await prisma.platformSettings.update({ where: { id: "default" }, data: { offerSampleData: true } });
+  await prisma.platformSettings.update({ where: { id: "default" }, data: { offerSampleData: true, allowSignup: true } });
 };
 await wipe();
 // A small stand-in for Treasury's sanctions list, so applications are screened as they arrive (the nightly job downloads the real one).
@@ -75,6 +78,18 @@ const answerAll = async (page, yes = []) => { for (const key of QUESTIONS) await
 const PDF = { name: "bank-statement.pdf", mimeType: "application/pdf", buffer: Buffer.concat([Buffer.from("%PDF-1.4 real smoke test file\n"), Buffer.alloc(3 * 1024 * 1024, 32)]) };
 // What's on disk under a stored file's key.
 const STORED = (key) => readFileSync(join(process.cwd(), "storage", "uploads", key));
+// A real picture at a phone camera's size, drawn in the browser: it has to survive being shrunk and show as a thumbnail.
+const cameraJpeg = async (page) => Buffer.from(await page.evaluate(() => {
+  const canvas = document.createElement("canvas");
+  canvas.width = 3000; canvas.height = 2250;
+  const context = canvas.getContext("2d");
+  const image = context.createImageData(3000, 2250);
+  for (let i = 0; i < image.data.length; i += 4) { const shade = Math.random() * 255; image.data[i] = shade; image.data[i + 1] = 120; image.data[i + 2] = 100; image.data[i + 3] = 255; }
+  context.putImageData(image, 0, 0);
+  return canvas.toDataURL("image/jpeg", 0.92).split(",")[1];
+}), "base64");
+// Shows whether an image on the page actually loaded.
+const loaded = (locator) => locator.first().evaluate((img) => (img.complete ? img.naturalWidth > 0 : new Promise((done) => { img.onload = () => done(img.naturalWidth > 0); img.onerror = () => done(false); })));
 const rawRows = async (collection) => JSON.stringify((await prisma.$runCommandRaw({ find: collection, filter: {} })).cursor.firstBatch);
 
 try {
@@ -112,9 +127,16 @@ try {
     await visitor.locator("textarea").first().fill(notes);
   };
   await fillQuote("Vera", `vera@${DOMAIN}`, "Refinance into a rental next spring.");
+  const housePhoto = await cameraJpeg(visitor);
+  await visitor.getByTestId("quote-photos-input").setInputFiles({ name: "vera-front-yard.jpg", mimeType: "image/jpeg", buffer: housePhoto });
+  await seen(visitor.getByTestId("quote-photos-item"));
   await visitor.getByTestId("quote-submit").click();
   ok("a visitor can send a quote request from a phone", await seen(visitor.getByTestId("quote-sent")));
   ok("and sees indicative terms", (await visitor.getByTestId("quote-amount").innerText()).startsWith("up to $"));
+  ok("with a photo of the property, shrunk on the phone first", await seen(visitor.getByTestId("quote-photos-sent").filter({ hasText: "1 photo of the property sent." }), 20_000));
+  const veraLead = await prisma.lead.findFirstOrThrow({ orderBy: { createdAt: "desc" } });
+  const leadPhoto = await prisma.document.findFirst({ where: { ownerType: "LEAD", ownerId: veraLead.id, documentType: "property_photo" } });
+  ok("it's kept with the request, smaller than the original and encrypted", !!leadPhoto && leadPhoto.size < housePhoto.length && leadPhoto.mime === "image/jpeg" && leadPhoto.uploadedById === null && STORED(leadPhoto.storageKey).subarray(0, 6).toString() === "LHENC1" && !(await rawRows("Document")).includes("vera-front-yard"));
   const leadRows = await rawRows("Lead");
   ok("the request's contact details are encrypted in the database", !leadRows.includes("Vera Visitor") && !leadRows.includes(`vera@${DOMAIN}`) && !leadRows.includes("(555) 010-0300") && !leadRows.includes("Refinance into a rental") && !leadRows.includes("44 Visitor Lane") && leadRows.includes("enc1:"));
   ok("so is the alert saved for the team", !(await rawRows("Notification")).includes("Vera Visitor"));
@@ -126,6 +148,11 @@ try {
   const veraRow = owner.getByTestId("leads-table").locator("tr", { hasText: "Vera Visitor" });
   ok("the request reaches the leads inbox, readable", (await seen(veraRow)) && (await veraRow.innerText()).includes("Refinance into a rental") && (await veraRow.innerText()).includes("$270,000") && (await veraRow.innerText()).includes("ARV $480,000"));
   ok("staff can email the visitor from it", (await veraRow.getByRole("link", { name: `vera@${DOMAIN}` }).getAttribute("href")) === `mailto:vera@${DOMAIN}`);
+  await veraRow.scrollIntoViewIfNeeded();
+  ok("the team sees the visitor's photo with the request", (await veraRow.getByTestId("lead-photo").count()) === 1 && (await loaded(veraRow.getByTestId("lead-photo"))));
+  const leadPhotoUrl = BASE + (await veraRow.getByTestId("lead-photo").getAttribute("src"));
+  ok("a borrower can't open a lead's photo", (await borrower.request.get(leadPhotoUrl)).status() !== 200);
+  ok("nor can anyone signed out", (await (await browser.newContext()).request.get(leadPhotoUrl, { maxRedirects: 0 })).status() !== 200);
   await veraRow.getByRole("button", { name: "Mark contacted" }).click();
   ok("staff can mark it contacted", await seen(veraRow.getByText("Contacted")));
   await go(borrower, "/admin/leads");
@@ -136,6 +163,50 @@ try {
   await visitor.getByTestId("quote-submit").click();
   await seen(visitor.getByTestId("quote-sent"));
   ok("a bot filling the hidden field gets a normal reply and nothing is kept", (await prisma.lead.count()) === before);
+
+  // A contractor creates their own account from a phone, confirms the email, and signs in.
+  await visitor.goto(`${BASE}/login`);
+  await visitor.getByTestId("signup-link").click();
+  await visitor.getByTestId("signup-name").fill("Sage Signup");
+  await visitor.getByTestId("signup-email").fill(`sage@${DOMAIN}`);
+  await visitor.getByTestId("signup-phone").fill("(555) 010-0400");
+  await visitor.getByRole("button", { name: "Create my account" }).click();
+  ok("anyone can sign up from the login page", await seen(visitor.getByTestId("signup-sent")));
+  const sage = await prisma.user.findUnique({ where: { email: `sage@${DOMAIN}` }, include: { roles: true, passwordLinks: true } });
+  ok("it makes a borrower account that waits for the email to be confirmed", sage?.accountStatus === "PENDING" && !!sage.signedUpAt && sage.roles.map((row) => row.role).join() === "BORROWER" && sage.passwordLinks.length === 1);
+  await visitor.goto(`${BASE}/login/signup`);
+  await visitor.getByTestId("signup-name").fill("Not Bonnie");
+  await visitor.getByTestId("signup-email").fill(`borrower@${DOMAIN}`);
+  await visitor.getByRole("button", { name: "Create my account" }).click();
+  await seen(visitor.getByTestId("signup-sent"));
+  const bonnie = await prisma.user.findUniqueOrThrow({ where: { email: `borrower@${DOMAIN}` }, include: { roles: true } });
+  ok("signing up with an address that has an account looks the same and changes nothing", bonnie.name === "Bonnie Borrower" && bonnie.accountStatus === "APPROVED" && !bonnie.signedUpAt && (await bcrypt.compare(PASSWORD, bonnie.passwordHash)));
+  // The emailed link goes to a test address that's never delivered, so put one in its place this script knows.
+  const confirmToken = randomBytes(32).toString("base64url");
+  await prisma.passwordLink.updateMany({ where: { userId: sage.id }, data: { tokenHash: createHash("sha256").update(confirmToken).digest("hex") } });
+  await visitor.goto(`${BASE}/login/set-password?token=${confirmToken}`);
+  await visitor.getByTestId("new-password").fill(PASSWORD);
+  await visitor.getByTestId("confirm-password").fill(PASSWORD);
+  await visitor.getByTestId("confirm-password").press("Enter");
+  ok("the emailed link confirms it", await seen(visitor.getByText("Your email is confirmed and your account is ready.")));
+  await visitor.getByTestId("login-email").fill(`sage@${DOMAIN}`);
+  await visitor.getByTestId("login-password").fill(PASSWORD);
+  await visitor.getByRole("button", { name: "Sign in" }).click();
+  ok("and they can sign in to their own portal", await visitor.waitForURL("**/admin/borrower").then(() => true, () => false));
+  ok("the team hears about the new account", (await prisma.notification.count({ where: { eventCode: "auth.signup", toEmail: `owner@${DOMAIN}` } })) === 1);
+  await go(owner, "/admin/settings");
+  await owner.getByTestId("setting-signup").uncheck();
+  await owner.getByRole("button", { name: "Save settings" }).click();
+  await seen(owner.getByText("Settings saved."));
+  await visitor.context().clearCookies();
+  await visitor.goto(`${BASE}/login/signup`);
+  ok("turning sign-ups off in Settings closes the page", (await seen(visitor.getByTestId("signup-closed"))) && (await visitor.getByTestId("signup-form").count()) === 0);
+  await visitor.goto(`${BASE}/login`);
+  ok("and takes the link off the login page", (await visitor.getByTestId("login-email").count()) === 1 && (await visitor.getByTestId("signup-link").count()) === 0);
+  await go(owner, "/admin/settings");
+  await owner.getByTestId("setting-signup").check();
+  await owner.getByRole("button", { name: "Save settings" }).click();
+  await seen(owner.getByText("Settings saved."));
 
   await visitorContext.close();
 
@@ -190,6 +261,11 @@ try {
   ok("it's still there after a reload", (await borrower.getByTestId("borrower-loan-card").count()) === 1);
   await borrower.getByTestId("borrower-loan-card").click();
   ok("the needs list follows the application: proof of past deals and a letter for the yes", (await seen(borrower.getByTestId("doc-track"))) && (await seen(borrower.getByTestId("doc-explanation"))) && (await borrower.getByTestId("doc-good-standing").innerText()).includes("last 90 days"));
+  await borrower.getByTestId("property-photo-input").setInputFiles([{ name: "street-view.jpg", mimeType: "image/jpeg", buffer: housePhoto }, { name: "kitchen.jpg", mimeType: "image/jpeg", buffer: housePhoto }]);
+  ok("the borrower adds photos of the property to their loan", await borrower.getByTestId("property-photo").nth(1).waitFor({ timeout: 30_000 }).then(() => true, () => false));
+  await borrower.reload({ waitUntil: "networkidle" });
+  ok("they're saved with the loan and show as pictures", (await borrower.getByTestId("property-photo").count()) === 2 && (await loaded(borrower.getByTestId("property-photo").locator("img"))));
+  ok("there's no remove button on the borrower's side", (await borrower.getByTestId("remove-property-photo").count()) === 0);
 
   await go(under, "/admin");
   const row = under.getByTestId("pipeline-table").locator("tr", { hasText: "Bonnie Borrower" });
@@ -198,6 +274,10 @@ try {
   ok("the pipeline flags it", (await under.getByTestId("attention-applications").innerText()).includes("New applications"));
   const dealHref = await row.getByRole("link").first().getAttribute("href");
   const dealId = dealHref.split("/").pop();
+  await go(under, dealHref);
+  await under.getByTestId("tab-Documents").click();
+  ok("the team sees the borrower's photos on the loan", (await seen(under.getByTestId("property-photo"))) && (await under.getByTestId("property-photo").count()) === 2 && (await loaded(under.getByTestId("property-photo").locator("img"))));
+  ok("they're filed as the borrower's", (await prisma.document.count({ where: { ownerType: "LOAN", ownerId: dealId, documentType: "property_photo", uploadedById: (await prisma.user.findUniqueOrThrow({ where: { email: `borrower@${DOMAIN}` } })).id } })) === 2);
   await go(owner, "/admin/account/notifications");
   ok("the owner is told about it", await seen(owner.getByTestId("notice").filter({ hasText: "New application" })));
   await go(other, "/admin/borrower");
@@ -380,7 +460,15 @@ try {
     await under.waitForFunction(([selector, before]) => document.querySelectorAll(selector).length < before, [waiveSelector, left], { timeout: 10_000 }).catch(() => {});
     left = await waives.count();
   }
-  const acceptAll = async () => { const reviews = under.getByRole("button", { name: "Accept" }); for (let left = await reviews.count(); left > 0; left = await reviews.count()) { await reviews.first().click(); await under.waitForTimeout(150); } };
+  // Accepting works the same way: each one is saved before the next click.
+  const acceptAll = async () => {
+    const reviews = under.getByRole("button", { name: "Accept", exact: true });
+    for (let left = await reviews.count(), tries = 0; left > 0 && tries < 30; tries++) {
+      await reviews.first().click();
+      await under.waitForFunction((before) => [...document.querySelectorAll("button")].filter((button) => button.textContent === "Accept").length < before, left, { timeout: 10_000 }).catch(() => {});
+      left = await reviews.count();
+    }
+  };
   await acceptAll();
   await under.getByTestId("tab-Capital Routing").click();
   await under.getByTestId("route-in_house").click();
@@ -773,7 +861,13 @@ try {
   await go(owner, `/admin/deals/${dealId}`);
   ok("the funded loan keeps the pricing it was priced on", (await owner.locator("main").innerText()).includes("pricing PLACEHOLDER-"));
 
-  // A website brief becomes a loan
+  // A website brief becomes a loan, and the photo sent with it comes along. The key stands in for the one the quote
+  // form hands the visitor's browser.
+  const photoKey = randomBytes(24).toString("base64url");
+  await prisma.lead.update({ where: { id: lead.id }, data: { photoKeyHash: createHash("sha256").update(photoKey).digest("hex"), photoKeyExpiresAt: new Date(Date.now() + 3_600_000) } });
+  const sentPhoto = await owner.request.post(`${BASE}/api/lead-photos`, { multipart: { key: photoKey, file: { name: "lena-front.jpg", mimeType: "image/jpeg", buffer: housePhoto } } });
+  ok("a quote's photo goes up with its key", sentPhoto.status() === 200);
+  ok("and not without it", (await owner.request.post(`${BASE}/api/lead-photos`, { multipart: { key: "wrong-key", file: { name: "x.jpg", mimeType: "image/jpeg", buffer: housePhoto } } })).status() === 403);
   await go(owner, "/admin/leads");
   await owner.locator("tr", { hasText: "Lena Lead" }).getByTestId("start-loan").click();
   await owner.waitForURL("**/admin/new-loan?lead=*");
@@ -795,6 +889,9 @@ try {
   ok("the client is invited to the portal", invited?.roles[0]?.role === "BORROWER" && invited.passwordLinks.length === 1);
   const leadRow = await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } });
   ok("the brief links to its loan", leadRow.loanId === leadDealId && Boolean(leadRow.contactedAt));
+  ok("its photo moves to the loan", (await prisma.document.count({ where: { ownerType: "LOAN", ownerId: leadDealId, documentType: "property_photo" } })) === 1 && (await prisma.document.count({ where: { ownerType: "LEAD", ownerId: lead.id } })) === 0);
+  await owner.getByTestId("tab-Documents").click();
+  ok("and shows on the loan's documents", (await seen(owner.getByTestId("property-photo"))) && (await loaded(owner.getByTestId("property-photo").locator("img"))));
   await go(owner, leadDeal);
   await owner.getByTestId("tab-Credit review").click();
   ok("a loan started from a call waits for the borrower's profile", (await owner.getByTestId("credit-flags").innerText()).includes("No borrower profile"));

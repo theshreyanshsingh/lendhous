@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { requirePermission, requireUser } from "@/lib/auth";
-import { inviteMember, parseMember, reissueLink, removeMember, sendSelfServiceLink, updateMember, usePasswordLink, type Issued } from "@/lib/members";
+import { announceSignup, inviteMember, parseMember, reissueLink, removeMember, sendSelfServiceLink, updateMember, usePasswordLink, type Issued } from "@/lib/members";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import { requestMeta } from "@/lib/request-meta";
 
@@ -70,6 +70,10 @@ export async function setPassword(formData: FormData) {
   const password = String(formData.get("password") || "");
   if (password !== String(formData.get("confirm") || "")) back("Those two passwords don't match.");
   const result = await usePasswordLink(token, password);
-  if ("error" in result) back(result.error);
+  if ("error" in result) return back(result.error);
+  if (result.signedUp) {
+    await announceSignup(result.userId).catch((error) => console.error("[lendhous] couldn't tell the team about a sign-up", error));
+    redirect("/login?notice=signup_confirmed");
+  }
   redirect("/login?notice=password_set");
 }

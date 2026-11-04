@@ -13,6 +13,7 @@ import { notify, notifyTeam } from "@/lib/email";
 import { openLead, openQuote } from "@/lib/lead-store";
 import { borrowerFor, screenAutomatically, staffActor } from "@/lib/loan-intake";
 import { notDeleted, prisma } from "@/lib/prisma";
+import { moveLeadPhotos } from "@/lib/property-photos";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import { requestMeta } from "@/lib/request-meta";
 import { servicingDate } from "@/lib/servicing";
@@ -94,7 +95,12 @@ export async function signApplication(token: string, raw: unknown, consents: Rec
     if ("error" in result) return { error: result.error };
     dealId = result.after.deals.find((item) => !result.before.deals.some((old) => old.id === item.id))!.id;
     await sendAlerts(result.before, result.after, result.action);
-    if (link.row.leadId) await prisma.lead.update({ where: { id: link.row.leadId }, data: { loanId: dealId } });
+    if (link.row.leadId) {
+      await prisma.lead.update({ where: { id: link.row.leadId }, data: { loanId: dealId } });
+      // The photos sent with the quote or on this link go to the new loan.
+      const photos = await moveLeadPhotos(link.row.leadId, dealId);
+      if (photos.length) await runAction(actor, { t: "addPropertyPhotos", dealId, photos, by: signer }, { trusted: true });
+    }
   }
   const meta = await requestMeta();
   await markSigned(link.row.id, draft, { name: signer, at: new Date().toISOString(), ip: meta.ipAddress, userAgent: meta.userAgent ?? "", consents, version: CONSENT_VERSION, digest: digestOf(draft) }, dealId);

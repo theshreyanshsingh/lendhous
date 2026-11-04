@@ -3,6 +3,8 @@ import Link from "next/link";
 import { useState, type FormEvent } from "react";
 import { sendQuote } from "@/actions/leads";
 import { AddressField, emptyAddress, type AddressValue } from "@/components/AddressField";
+import { PropertyPhotoPicker } from "@/components/PropertyPhotoPicker";
+import { SIGNUP_PREFILL } from "@/components/signup-form";
 import { Arrive, Reveal } from "@/components/motion";
 import type { PricingConfig } from "@/lib/pricing-config";
 import { CITIZENSHIP_LABEL, CREDIT_LABEL, EXITS, EXPERIENCE_LABEL, indicativeTerms, LOAN_TYPES, PRICED, PROPERTY_TYPES, PURPOSES, quoteProblem, quoteSummary, type LoanType, type Quote } from "@/lib/quote";
@@ -34,11 +36,13 @@ function toQuote(draft: Draft): unknown {
  * The loan quote request: a borrower or a broker sends the deal, the team gets everything a first call needs, and the
  * visitor sees indicative terms from today's pricing straight away.
  */
-export function QuoteRequest({ pricing }: { pricing: PricingConfig }) {
+export function QuoteRequest({ pricing, signupOpen = false }: { pricing: PricingConfig; signupOpen?: boolean }) {
   const [draft, setDraft] = useState<Draft>(blank);
   const [error, setError] = useState("");
-  const [sending, setSending] = useState(false);
+  const [sending, setSending] = useState<false | "quote" | string>(false);
   const [sent, setSent] = useState<Quote | null>(null);
+  const [photos, setPhotos] = useState<File[]>([]);
+  const [photoResult, setPhotoResult] = useState({ sent: 0, failed: 0 });
   const [honeypot, setHoneypot] = useState("");
   const put = (changes: Partial<Draft>) => setDraft((current) => ({ ...current, ...changes }));
   const rehabLoan = draft.loanType === "fix_flip" || draft.loanType === "ground_up";
@@ -49,15 +53,26 @@ export function QuoteRequest({ pricing }: { pricing: PricingConfig }) {
     setError("");
     const checked = quoteProblem(toQuote(draft));
     if ("error" in checked) return setError(checked.error);
-    setSending(true);
-    const reply = await sendQuote(checked.quote, honeypot).catch(() => ({ sent: false, error: "We couldn't send this just now. Please try again in a few minutes." }));
+    setSending("quote");
+    const reply: { sent: boolean; error: string; photoKey?: string } = await sendQuote(checked.quote, honeypot).catch(() => ({ sent: false, error: "We couldn't send this just now. Please try again in a few minutes." }));
+    if (!reply.sent) { setSending(false); return setError(reply.error); }
+    // The photos follow the request, one at a time, with the key it came back with.
+    let done = 0; let failed = 0;
+    for (const [index, file] of photos.entries()) {
+      if (!reply.photoKey) { failed++; continue; }
+      setSending(`Sending photo ${index + 1} of ${photos.length}…`);
+      const form = new FormData();
+      form.set("key", reply.photoKey); form.set("file", file);
+      const ok = await fetch("/api/lead-photos", { method: "POST", body: form }).then((response) => response.ok).catch(() => false);
+      if (ok) done++; else failed++;
+    }
+    setPhotoResult({ sent: done, failed });
     setSending(false);
-    if (!reply.sent) return setError(reply.error);
     setSent(checked.quote);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  if (sent) return <QuoteSent quote={sent} pricing={pricing} />;
+  if (sent) return <QuoteSent quote={sent} pricing={pricing} photos={photoResult} signupOpen={signupOpen} />;
 
   const text = (label: string, value: string, set: (value: string) => void, extra: { type?: string; testid?: string; auto?: string; required?: boolean; max?: number; placeholder?: string } = {}) => (
     <label>{label}{extra.required === false ? "" : " *"}<input type={extra.type ?? "text"} data-testid={extra.testid} autoComplete={extra.auto} required={extra.required !== false} maxLength={extra.max ?? 120} placeholder={extra.placeholder} value={value} onChange={(event) => set(event.target.value)} /></label>
@@ -112,6 +127,7 @@ export function QuoteRequest({ pricing }: { pricing: PricingConfig }) {
       <section className="panel">
         <div className="quote-step-title"><i>2</i> The property</div>
         <AddressField variant="site" testid="quote-address" value={draft.address} onChange={(address) => put({ address })} />
+        <div style={{ marginTop: 20 }}><PropertyPhotoPicker onChange={setPhotos} testid="quote-photos" /></div>
         <div className="fields" style={{ marginTop: 20 }}>
           {select("Property type", draft.propertyType, PROPERTY_TYPES, (propertyType) => put({ propertyType }), "quote-type")}
           {text("Bedrooms", draft.beds, (beds) => put({ beds: beds.replace(/[^0-9]/g, "") }), { required: false, max: 3 })}
@@ -161,13 +177,13 @@ export function QuoteRequest({ pricing }: { pricing: PricingConfig }) {
       <label className="hp" aria-hidden="true">Leave this empty<input tabIndex={-1} autoComplete="off" value={honeypot} onChange={(event) => setHoneypot(event.target.value)} /></label>
       {error && <Arrive className="form-error"><span role="alert" data-testid="quote-error">{error}</span></Arrive>}
       <p className="quote-small">This isn&apos;t an application and doesn&apos;t pull credit. Don&apos;t enter a Social Security number or account details here.</p>
-      <button className="button quote-submit" type="submit" data-testid="quote-submit" disabled={sending}>{sending ? "Sending…" : "Get my quote →"}</button>
+      <button className="button quote-submit" type="submit" data-testid="quote-submit" disabled={Boolean(sending)}>{sending === "quote" ? "Sending…" : sending ? sending : "Get my quote →"}</button>
     </form>
   );
 }
 
 /** After sending: indicative terms on today's pricing, and a copy to keep. */
-function QuoteSent({ quote, pricing }: { quote: Quote; pricing: PricingConfig }) {
+function QuoteSent({ quote, pricing, photos, signupOpen }: { quote: Quote; pricing: PricingConfig; photos: { sent: number; failed: number }; signupOpen: boolean }) {
   const terms = indicativeTerms(quote, pricing);
   const download = () => {
     const url = URL.createObjectURL(new Blob([`LENDHOUS: LOAN QUOTE REQUEST\n\n${quoteSummary(quote)}\n\nNot a loan application, offer or approval.`], { type: "text/plain" }));
@@ -200,6 +216,8 @@ function QuoteSent({ quote, pricing }: { quote: Quote; pricing: PricingConfig })
         ) : (
           <p data-testid="quote-review">A loan officer prices {LOAN_TYPES[quote.loanType].toLowerCase()} loans by hand and will be in touch shortly.</p>
         )}
+        {(photos.sent > 0 || photos.failed > 0) && <p className="quote-small" data-testid="quote-photos-sent">{photos.sent ? `${photos.sent} photo${photos.sent === 1 ? "" : "s"} of the property sent.` : ""}{photos.failed ? ` ${photos.failed} didn't go through; send ${photos.failed === 1 ? "it" : "them"} to your loan officer.` : ""}</p>}
+        {signupOpen && quote.submitter === "borrower" && <p className="quote-small" data-testid="quote-signup">Want to follow it and send documents yourself? <Link className="text-link" href="/login/signup" data-testid="quote-signup-link" onClick={() => { try { sessionStorage.setItem(SIGNUP_PREFILL, JSON.stringify({ name: `${quote.borrower.firstName} ${quote.borrower.lastName}`.trim(), email: quote.borrower.email, phone: quote.borrower.phone })); } catch {} }}>Create your LendHous account</Link>.</p>}
         <p className="quote-small">An estimate from what you entered, not an offer or a commitment to lend. Final terms depend on underwriting, the appraisal, title and credit. Business-purpose loans only.</p>
         <div className="quote-actions">
           <button type="button" className="button" onClick={download}>Download a copy</button>

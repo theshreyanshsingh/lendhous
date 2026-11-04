@@ -80,8 +80,9 @@ async function sendSecret(toEmail: string, subject: string, body: string, attach
   }
 }
 
-export function sendPasswordLink(toEmail: string, link: string, reason: { invitedBy: string; roles: string } | "admin" | "self") {
+export function sendPasswordLink(toEmail: string, link: string, reason: { invitedBy: string; roles: string } | "admin" | "self" | "signup") {
   const invited = typeof reason === "object";
+  if (reason === "signup") return sendSecret(toEmail, "Confirm your email to finish your LendHous account", `Thanks for signing up with LendHous.\n\nConfirm this is your email and choose a password here:\n${link}\n\nThe link works once and expires in seven days. Until you use it, the account can't sign in. If you didn't sign up, ignore this email and nothing happens.`);
   const opening = invited ? `${reason.invitedBy} added you to LendHous as ${reason.roles}.` : reason === "admin" ? "Your LendHous administrator sent you a new password link." : "Someone asked to reset the password on your LendHous account.";
   return sendSecret(toEmail, invited ? "You're invited to LendHous" : "Set a new LendHous password", `${opening}\n\nSet your password here:\n${link}\n\nThe link works once and expires in seven days. If you weren't expecting this, ignore it and nothing changes.`);
 }

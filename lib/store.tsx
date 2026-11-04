@@ -19,6 +19,7 @@ type Store = {
   uploadDoc: (dealId: string, docId: string, file: File) => Promise<boolean>;
   uploadCondition: (dealId: string, conditionId: string, file: File) => Promise<boolean>;
   uploadLienFile: (dealId: string, drawId: string, party: { key: string; kind: "progress" | "final" } | "affidavit", file: File) => Promise<boolean>;
+  uploadPropertyPhoto: (dealId: string, file: File) => Promise<boolean>;
   /** Stores one draw photo and gives back its id. Demo and sample data keep no file, so they get null. */
   uploadPhoto: (dealId: string, file: File) => Promise<string | null>;
   /** Takes in a reply from a server action that changed the book some other way, like starting a loan. */
@@ -129,6 +130,14 @@ export function StoreProvider({ demo, accountId, viewerName, initialBook, pricin
     return !(await send(form)).error;
   }, [isLocal, send, viewerName]);
 
+  /** A photo of the property, listed on the loan. Demo seats keep the name only. */
+  const uploadPropertyPhoto = useCallback(async (dealId: string, file: File) => {
+    if (isLocal) { local({ t: "addPropertyPhotos", dealId, photos: [{ id: `demo-photo-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, name: file.name, at: new Date().toISOString() }], by: viewerName }); return true; }
+    const form = new FormData();
+    form.set("dealId", dealId); form.set("propertyPhoto", "1"); form.set("file", file);
+    return !(await send(form)).error;
+  }, [isLocal, send, viewerName]);
+
   const uploadPhoto = useCallback(async (dealId: string, file: File) => {
     if (isLocal) return null;
     const form = new FormData();
@@ -141,7 +150,7 @@ export function StoreProvider({ demo, accountId, viewerName, initialBook, pricin
     setError(reply.error ?? "");
   }, []);
 
-  const value = useMemo(() => ({ s, dispatch, uploadDoc, uploadCondition, uploadLienFile, uploadPhoto, applyReply, newLeads, local: isLocal, demo, viewerName, error, clearError: () => setError("") }), [s, dispatch, uploadDoc, uploadCondition, uploadLienFile, uploadPhoto, applyReply, newLeads, isLocal, demo, viewerName, error]);
+  const value = useMemo(() => ({ s, dispatch, uploadDoc, uploadCondition, uploadLienFile, uploadPropertyPhoto, uploadPhoto, applyReply, newLeads, local: isLocal, demo, viewerName, error, clearError: () => setError("") }), [s, dispatch, uploadDoc, uploadCondition, uploadLienFile, uploadPropertyPhoto, uploadPhoto, applyReply, newLeads, isLocal, demo, viewerName, error]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 export function useStore() { const c = useContext(Ctx); if (!c) throw new Error("no store"); return c; }

@@ -11,7 +11,7 @@ import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { accessFor, isOwner, mixesWorkspaces, PERMISSION_GROUPS, pickRole, ROLE_GROUPS } from "@/lib/member-rules";
 import { PERMISSIONS, ROLE_LABEL, type Permission } from "@/lib/permissions";
 
-export type MemberRow = { id: string; name: string; email: string; title: string; roles: RoleCode[]; extraPermissions: string[]; deniedPermissions: string[]; signedIn: boolean };
+export type MemberRow = { id: string; name: string; email: string; title: string; roles: RoleCode[]; extraPermissions: string[]; deniedPermissions: string[]; signedIn: boolean; unconfirmed?: boolean };
 
 type Draft = { id: string; name: string; email: string; title: string; roles: RoleCode[]; permissions: string[] };
 
@@ -59,7 +59,7 @@ export function MembersBoard({ rows, meId, meIsOwner }: { rows: MemberRow[]; meI
                   <td data-label="Role"><span className="flex flex-wrap justify-end gap-1 lg:justify-start">{row.roles.map((role) => <Badge key={role}>{ROLE_LABEL[role]}</Badge>)}</span>{mixesWorkspaces(row.roles) && <small className="mt-1 block text-right text-xs text-warn lg:text-left" data-testid="mixed-roles">Opens the team panel only. Modify it and keep one side.</small>}</td>
                   <td data-label="Access">{custom(row) ? <Badge tone="violet">Custom</Badge> : <span className="text-muted-foreground">Role default</span>}</td>
                   {row.title ? <td data-label="Title">{row.title}</td> : <td className="hidden lg:table-cell">—</td>}
-                  <td data-label="Status">{row.signedIn ? <span className="text-muted-foreground">Active</span> : <Badge tone="amber">Invited</Badge>}</td>
+                  <td data-label="Status">{row.signedIn ? <span className="text-muted-foreground">Active</span> : row.unconfirmed ? <Badge tone="amber">Email not confirmed</Badge> : <Badge tone="amber">Invited</Badge>}</td>
                   <td>
                     <span className="flex gap-2 pt-1 lg:justify-end lg:pt-0">
                       <button type="button" className="btn-ghost h-9! flex-1 px-3! text-xs! lg:flex-none" data-testid="modify-member" onClick={() => setDraft({ id: row.id, name: row.name, email: row.email, title: row.title, roles: row.roles, permissions: accessFor(row.roles, row) })}>Modify</button>

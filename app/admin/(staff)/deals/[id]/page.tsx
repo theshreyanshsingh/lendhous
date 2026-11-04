@@ -25,6 +25,7 @@ import { ScopeOfWork } from "@/components/loan/ScopeOfWork";
 import { TermSheetBuilder } from "@/components/loan/TermSheetBuilder";
 import { ConditionsPanel } from "@/components/loan/ConditionsPanel";
 import { LienProtection } from "@/components/loan/LienProtection";
+import { PropertyPhotos } from "@/components/loan/PropertyPhotos";
 import { TermSheetCard } from "@/components/loan/TermSheetCard";
 import { useServiceDay } from "@/components/loan/use-service-day";
 import { Badge, GradeBadge, RatioPill, Section, Stat, usd, pct, k, productLabel, statusLabel, capTone, points, ratioGrid, statGrid } from "@/components/ui";
@@ -248,6 +249,7 @@ export default function DealWorkspace() {
       )}
 
       {tab === "Documents" && (<div className="space-y-4">
+        <PropertyPhotos deal={d} side="team" />
         <TermSheetCard deal={d} canSign={false} />
         <ScopeOfWork deal={d} editable={false} />
         {(d.scope?.length ?? 0) > 0 && <Section title="Site photos"><PhotoRequests deal={d} /></Section>}

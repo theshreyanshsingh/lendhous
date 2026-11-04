@@ -16,6 +16,7 @@ import { borrowerFor, screenAutomatically } from "@/lib/loan-intake";
 import { deliverPayoffLetter } from "@/lib/payoff-delivery";
 import { fileProblem } from "@/lib/conditions";
 import { isFinalDraw, partiesFor } from "@/lib/lien-law";
+import { moveLeadPhotos, storePropertyPhoto } from "@/lib/property-photos";
 import { viewFor } from "@/lib/permissions";
 import { screenDeal } from "@/lib/sanctions-store";
 import { consumeRateLimit } from "@/lib/rate-limit";
@@ -45,6 +46,8 @@ async function perform(viewer: Viewer, action: BookAction, options: { trusted?: 
   // New names on a loan are screened straight away, so a possible sanctions match surfaces before anyone works on it.
   const named = result.action.t === "submitApp" ? result.after.deals.find((deal) => !result.before.deals.some((old) => old.id === deal.id))?.id : result.action.t === "saveSponsor" ? result.action.dealId : undefined;
   const screened = named ? await screenAutomatically(named) : null;
+  // A photo taken off the loan is retired as a file too, so it can't be opened from an old link.
+  if (result.action.t === "removePropertyPhoto") await prisma.document.updateMany({ where: { id: result.action.photoId, ownerType: "LOAN", ownerId: result.action.dealId }, data: { deletedAt: new Date() } });
   // A payoff letter goes out the moment it's issued: the 10 days are about sending it, not writing it.
   const delivered = result.action.t === "issuePayoffLetter" ? await deliverPayoffLetter(result.action.payoffId) : null;
   return { book: scopeBook(screened ?? delivered ?? result.after, viewer) };
@@ -89,6 +92,13 @@ export async function uploadLoanFile(form: FormData): Promise<BookReply & { docu
   if (!canUploadFile(book, viewer, dealId, allowed)) return { error: "Your account can't upload to this loan." };
   const doc = docId ? docOf(book, dealId, docId) : undefined;
   if (docId && !doc) return { error: "That document is no longer on this loan." };
+  // A photo of the property, from the borrower, their broker or staff. It's stored, then listed on the loan.
+  if (form.get("propertyPhoto") === "1") {
+    const stored = await storePropertyPhoto({ type: "LOAN", id: dealId }, file, viewer.id);
+    if ("error" in stored) return { error: stored.error };
+    await audit({ actorId: viewer.id, action: "document.uploaded", entityType: "Document", entityId: stored.id, after: { dealId, documentType: "property_photo" } });
+    return { ...(await perform(viewer, { t: "addPropertyPhotos", dealId, photos: [stored], by: viewer.name }, { trusted: true })), documentId: stored.id };
+  }
   // A lien waiver or the contractor's final affidavit for a draw that hasn't gone out yet (Fla. Stat. 713.20, 713.06).
   const drawId = String(form.get("drawId") || "");
   const waiverParty = String(form.get("waiverParty") || "");
@@ -142,11 +152,15 @@ export async function startLoan(input: NewLoan): Promise<BookReply & { dealId?: 
   const deal = result.after.deals.find((item) => !result.before.deals.some((old) => old.id === item.id))!;
   const screened = await screenAutomatically(deal.id);
   await audit({ actorId: actor.id, action: "book.startLoan", entityType: "LoanBook", entityId: deal.id, after: { loanNumber: deal.loanNumber, leadId: input.leadId } });
+  let latest = screened ?? result.after;
   if (input.leadId) {
+    const photos = await moveLeadPhotos(String(input.leadId), deal.id);
+    const withPhotos = photos.length ? await runAction(actor, { t: "addPropertyPhotos", dealId: deal.id, photos, by: "Quote request" }, { trusted: true }) : null;
+    if (withPhotos && !("error" in withPhotos)) latest = withPhotos.after;
     const updated = await prisma.lead.updateMany({ where: { id: String(input.leadId) }, data: { loanId: deal.id, contactedAt: new Date() } });
     if (updated.count) revalidatePath("/admin/leads");
   }
-  return { book: scopeBook(screened ?? result.after, actor), dealId: deal.id };
+  return { book: scopeBook(latest, actor), dealId: deal.id };
 }
 
 /** Gives a loan that has no portal account one, so the borrower can sign in and see it. */

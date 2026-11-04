@@ -121,6 +121,9 @@ export type BookAction =
   /** The notice or statement went out. The server records it after emailing the PDF; a demo browser just marks it. */
   | { t: "recordAdverseNotice"; dealId: string; kind: "notice" | "statement"; method: "email" | "mail"; to: string[]; result?: "sent" | "logged" | "failed"; by: string }
   | { t: "recordReasonsRequest"; dealId: string; receivedOn: string; by: string }
+  /** Photos of the property, listed on the loan once the server has stored them. Only the server adds them. */
+  | { t: "addPropertyPhotos"; dealId: string; photos: { id: string; name: string; at: string }[]; by: string }
+  | { t: "removePropertyPhoto"; dealId: string; photoId: string }
   /** Keeps the loan's records past retention while an investigation or lawsuit is pending. An empty reason lifts it. */
   | { t: "setLegalHold"; dealId: string; reason: string; by: string }
   | { t: "reopenApplication"; dealId: string; by: string }
@@ -600,6 +603,18 @@ export function reducer(s: Book, a: BookAction): Book {
       if (requestProblem(deal.adverseAction, a.receivedOn, serviceDay(s))) return s;
       const request = { receivedOn: a.receivedOn, by: a.by, at: now(), dueOn: addDays(a.receivedOn, STATEMENT_DAYS) };
       return { ...s, deals: upd(a.dealId, (d) => ({ ...d, adverseAction: { ...d.adverseAction!, request } })), audit: log(`${deal.loanNumber}: written request for the decline reasons received ${a.receivedOn}`) };
+    }
+    case "addPropertyPhotos": {
+      const deal = s.deals.find((d) => d.id === a.dealId);
+      const known = new Set((deal?.propertyPhotos ?? []).map((photo) => photo.id));
+      const added = a.photos.filter((photo) => !known.has(photo.id)).map((photo) => ({ ...photo, by: a.by }));
+      if (!deal || !added.length) return s;
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, propertyPhotos: [...(d.propertyPhotos ?? []), ...added] })), audit: log(`${deal.loanNumber}: ${added.length} photo${added.length === 1 ? "" : "s"} of the property added`) };
+    }
+    case "removePropertyPhoto": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (!deal.propertyPhotos?.some((photo) => photo.id === a.photoId)) return s;
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, propertyPhotos: d.propertyPhotos!.filter((photo) => photo.id !== a.photoId) })), audit: log(`${deal.loanNumber}: a photo of the property removed`) };
     }
     case "setLegalHold": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;

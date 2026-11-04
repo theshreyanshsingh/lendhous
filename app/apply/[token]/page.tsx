@@ -1,6 +1,7 @@
 import { BorrowerApplication } from "@/components/BorrowerApplication";
 import { Logo } from "@/components/logo";
 import { openApplicationLink } from "@/lib/application-links";
+import { ownerOf, photosOf } from "@/lib/property-photos";
 import { blankDraft, LINK_DAYS } from "@/lib/borrower-application";
 
 export const metadata = { title: "Your loan application", robots: { index: false, follow: false } };
@@ -32,5 +33,8 @@ export default async function ApplicationLinkPage({ params }: { params: Promise<
       </div>
     );
   }
-  return <BorrowerApplication token={token} initial={link.draft} startStep={link.row.step} savedAt={link.row.savedAt?.toISOString() ?? null} officer={link.row.officer} expiresAt={link.row.expiresAt.toISOString()} />;
+  // Photos already sent on this link, or with the quote request it came from, so they show again after a reload.
+  const owner = ownerOf(link.row);
+  const photos = owner ? (await photosOf(owner)).map((photo) => ({ id: photo.id, name: photo.name, src: `/api/application-links/${token}/photos/${photo.id}` })) : [];
+  return <BorrowerApplication token={token} initial={link.draft} startStep={link.row.step} savedAt={link.row.savedAt?.toISOString() ?? null} officer={link.row.officer} expiresAt={link.row.expiresAt.toISOString()} photos={photos} />;
 }

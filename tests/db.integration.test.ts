@@ -939,3 +939,192 @@ describe("decline notices (Reg B)", () => {
     expect(sample.headers.get("content-type")).toBe("application/pdf");
   });
 });
+
+describe("property photos", () => {
+  const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 9, 8, 7, 6]);
+  const photo = (name = "front.jpg") => new File([JPEG], name, { type: "image/jpeg" });
+  const newLead = async (email: string) => {
+    const { sealLead } = await import("@/lib/lead-store");
+    const sealed = sealLead({ name: "Cody Contractor", email, phone: "(954) 555-0142", strategy: "Fix & flip", experience: "3–4 projects", city: "Miami", state: "FL", propertyValueCents: 30_000_000, renovationCents: 6_000_000, requestedLoanCents: 0, targetClosing: "2027-02-01", notes: "" });
+    return prisma.lead.create({ data: sealed });
+  };
+
+  it("take the quote request's photos with its key, keep them encrypted, and move them to the loan when it starts", async () => {
+    const route = await import("@/app/api/lead-photos/route");
+    const photos = await import("@/lib/property-photos");
+    const store = await import("@/lib/book-store");
+    const { demoBook } = await import("@/lib/book");
+    const lead = await newLead("cody.contractor@example.com");
+    const key = await photos.issuePhotoKey(lead.id);
+    const send = (file: File, withKey = key) => {
+      const form = new FormData();
+      form.set("key", withKey);
+      form.set("file", file);
+      return route.POST(new Request("http://x/api/lead-photos", { method: "POST", body: form }));
+    };
+    expect((await prisma.lead.findUniqueOrThrow({ where: { id: lead.id } })).photoKeyHash).not.toBe(key);
+
+    const sent = await send(photo());
+    expect(sent.status).toBe(200);
+    const { photo: first } = await sent.json();
+    const document = await prisma.document.findUniqueOrThrow({ where: { id: first.id } });
+    expect(document).toMatchObject({ ownerType: "LEAD", ownerId: lead.id, documentType: "property_photo", uploadedById: null, mime: "image/jpeg" });
+    expect(document.storageKey).toMatch(new RegExp(`^leads/${lead.id}/`));
+    expect(document.originalName).not.toContain("front");
+    expect((await send(photo(), "not-the-key")).status).toBe(403);
+    expect((await send(new File(["<script>"], "evil.jpg", { type: "image/jpeg" }))).status).toBe(400);
+    for (let count = 1; count < photos.MAX_PROPERTY_PHOTOS; count++) expect((await send(photo(`room-${count}.jpg`))).status).toBe(200);
+    expect(await (await send(photo("one-too-many.jpg"))).json()).toMatchObject({ error: expect.stringMatching(/most photos/) });
+
+    // Starting the loan from the lead moves the photos and lists them on the loan, where the borrower can see them.
+    const deal = { ...demoBook().deals.find((item) => item.id === "d1")!, id: "photo-loan", loanNumber: "LH-4001", propertyPhotos: undefined };
+    await prisma.bookRecord.create({ data: { id: "deals:photo-loan", kind: "deals", data: JSON.parse(JSON.stringify(deal)) } });
+    const moved = await photos.moveLeadPhotos(lead.id, "photo-loan");
+    expect(moved).toHaveLength(photos.MAX_PROPERTY_PHOTOS);
+    expect(await prisma.document.count({ where: { ownerType: "LEAD", ownerId: lead.id } })).toBe(0);
+    const staff = { id: "staff-photos", name: "Sam Staff", roleCodes: ["ADMIN_OWNER" as const] };
+    expect(await store.runAction(staff, { t: "addPropertyPhotos", dealId: "photo-loan", photos: moved, by: "Quote request" })).toHaveProperty("error");
+    const listed = await store.runAction(staff, { t: "addPropertyPhotos", dealId: "photo-loan", photos: moved, by: "Quote request" }, { trusted: true });
+    if ("error" in listed) throw new Error(listed.error);
+    expect(listed.after.deals.find((item) => item.id === "photo-loan")!.propertyPhotos).toHaveLength(photos.MAX_PROPERTY_PHOTOS);
+    expect(JSON.stringify(((await prisma.$runCommandRaw({ find: "BookRecord", filter: { _id: "deals:photo-loan" } })) as { cursor: { firstBatch: unknown[] } }).cursor.firstBatch)).not.toContain("room-1.jpg");
+
+    // The key stops working after a couple of hours.
+    const late = await newLead("late.sender@example.com");
+    const lateKey = await photos.issuePhotoKey(late.id);
+    await prisma.lead.update({ where: { id: late.id }, data: { photoKeyExpiresAt: new Date(Date.now() - 1000) } });
+    expect((await send(photo(), lateKey)).status).toBe(403);
+  });
+
+  it("let the borrower add, see and take back photos on their application link, and only their own", async () => {
+    const { createApplicationLink } = await import("@/lib/application-links");
+    const { draftFromQuote } = await import("@/lib/borrower-application");
+    const store = await import("@/lib/book-store");
+    const { demoBook } = await import("@/lib/book");
+    const upload = await import("@/app/api/application-links/[token]/photos/route");
+    const one = await import("@/app/api/application-links/[token]/photos/[photoId]/route");
+    const officer = await prisma.user.create({ data: { email: "pia.officer@lendhous.com", name: "Pia Officer", passwordHash: "x", accountStatus: "APPROVED", roles: { create: [{ role: "ADMIN_OWNER" }] } } });
+    const quote = { submitter: "borrower" as const, borrower: { firstName: "Cody", lastName: "Contractor", email: "cody.link@example.com", phone: "(954) 555-0142" }, citizenship: "us" as const, creditBand: "720-759" as const, experience: "3-4" as const, address: { street: "10 Palm Way", city: "Miami", state: "FL", zip: "33101", county: "Miami-Dade" }, propertyType: "sfr" as const, loanType: "fix_flip" as const, purpose: "purchase" as const, purchasePrice: 300_000, rehab: 60_000, arv: 450_000, fundingDate: "2027-02-01", comps: [], exit: "sell" as const, notes: "" };
+    const link = async (target: { leadId?: string; dealId?: string }) => (await createApplicationLink({ ...target, recipient: { name: "Cody Contractor", email: quote.borrower.email }, officer: officer.name, sentById: officer.id, draft: draftFromQuote(quote) })).url.split("/apply/")[1];
+    const post = (token: string, file = photo()) => {
+      const form = new FormData();
+      form.set("file", file);
+      return upload.POST(new Request(`http://x/api/application-links/${token}/photos`, { method: "POST", body: form }), { params: Promise.resolve({ token }) });
+    };
+    const context = (token: string, photoId: string) => ({ params: Promise.resolve({ token, photoId }) });
+
+    const lead = await newLead("cody.link@example.com");
+    const mine = await link({ leadId: lead.id });
+    const other = await link({ leadId: (await newLead("someone.else@example.com")).id });
+    const { photo: sent } = await (await post(mine)).json();
+    expect(await prisma.document.findUniqueOrThrow({ where: { id: sent.id } })).toMatchObject({ ownerType: "LEAD", ownerId: lead.id, uploadedById: null });
+    const shown = await one.GET(new Request("http://x"), context(mine, sent.id));
+    expect(shown.status).toBe(200);
+    expect(Buffer.from(await shown.arrayBuffer()).equals(JPEG)).toBe(true);
+    expect(shown.headers.get("Content-Disposition")).toContain("inline");
+    expect((await one.GET(new Request("http://x"), context(other, sent.id))).status).toBe(404);
+    expect((await one.DELETE(new Request("http://x"), context(other, sent.id))).status).toBe(404);
+    expect((await one.DELETE(new Request("http://x"), context(mine, sent.id))).status).toBe(200);
+    expect((await prisma.document.findUniqueOrThrow({ where: { id: sent.id } })).deletedAt).toBeTruthy();
+    expect((await one.GET(new Request("http://x"), context(mine, sent.id))).status).toBe(404);
+
+    // On a loan's link the photo goes on the loan right away, and taking it back takes it off.
+    const deal = { ...demoBook().deals.find((item) => item.id === "d1")!, id: "link-photo-loan", loanNumber: "LH-4002", propertyPhotos: undefined };
+    await prisma.bookRecord.create({ data: { id: "deals:link-photo-loan", kind: "deals", data: JSON.parse(JSON.stringify(deal)) } });
+    const loanLink = await link({ dealId: "link-photo-loan" });
+    const { photo: onLoan } = await (await post(loanLink)).json();
+    const listed = async () => (await store.readBook()).book.deals.find((item) => item.id === "link-photo-loan")!.propertyPhotos ?? [];
+    expect(await listed()).toMatchObject([{ id: onLoan.id, by: "Borrower's application" }]);
+    // A photo the team added can't be taken away through the link.
+    const { storePropertyPhoto } = await import("@/lib/property-photos");
+    const team = await storePropertyPhoto({ type: "LOAN", id: "link-photo-loan" }, photo("team.jpg"), officer.id);
+    if ("error" in team) throw new Error(team.error);
+    expect((await one.DELETE(new Request("http://x"), context(loanLink, team.id))).status).toBe(404);
+    expect((await one.DELETE(new Request("http://x"), context(loanLink, onLoan.id))).status).toBe(200);
+    expect(await listed()).toEqual([]);
+
+    await prisma.applicationLink.updateMany({ where: { dealId: "link-photo-loan" }, data: { status: "off" } });
+    expect((await post(loanLink)).status).toBe(404);
+  });
+});
+
+describe("signing up", () => {
+  let members: typeof import("@/lib/members");
+  let mail: ReturnType<typeof vi.spyOn>;
+  const lastLink = () => {
+    const found = String(mail.mock.calls.at(-1)?.[0] ?? "").match(/https:\/\/\S+set-password\?token=\S+/);
+    return found ? new URL(found[0]).searchParams.get("token")! : "";
+  };
+  const lastSubject = () => String(mail.mock.calls.at(-1)?.[0] ?? "").match(/subject=([^\n]+)/)?.[1] ?? "";
+
+  beforeAll(async () => {
+    process.env.AUTH_SECRET = "x".repeat(40);
+    process.env.NEXT_PUBLIC_APP_URL = "https://portal.example.com";
+    members = await import("@/lib/members");
+  });
+  beforeEach(() => {
+    mail = vi.spyOn(console, "info").mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("makes a borrower account that can't sign in until the emailed link is used, then tells the team", async () => {
+    expect(members.signupProblem({ name: "", email: "a@example.com", phone: "" })).toMatch(/your name/);
+    expect(members.signupProblem({ name: "Cara", email: "nope", phone: "" })).toMatch(/valid email/);
+    expect(members.signupProblem({ name: "Cara", email: "cara@lendhous.test", phone: "" })).toMatch(/demo accounts/);
+    expect(members.signupProblem({ name: "Cara Contractor", email: "cara@example.com", phone: "" })).toBeNull();
+
+    await members.startSignup({ name: "Cara Contractor", email: "cara@example.com", phone: "(305) 555-0199" });
+    const user = await prisma.user.findUniqueOrThrow({ where: { email: "cara@example.com" }, include: { roles: true } });
+    expect(user).toMatchObject({ name: "Cara Contractor", phone: "(305) 555-0199", accountStatus: "PENDING", organizationId: null });
+    expect(user.signedUpAt).toBeTruthy();
+    expect(user.roles.map((row) => row.role)).toEqual(["BORROWER"]);
+    expect(lastSubject()).toMatch(/Confirm your email/);
+    const first = lastLink();
+    expect(first).toBeTruthy();
+    expect(await prisma.auditEvent.count({ where: { entityId: user.id, action: "auth.signup_requested" } })).toBe(1);
+
+    // Asking again sends a fresh link, and only the newest one works.
+    await members.startSignup({ name: "Cara Contractor", email: "cara@example.com", phone: "" });
+    const second = lastLink();
+    expect(second).not.toBe(first);
+    expect(await members.peekPasswordLink(first)).toBeNull();
+
+    expect(await members.usePasswordLink(second, "a-long-enough-password")).toEqual({ userId: user.id, signedUp: true });
+    expect(await prisma.user.findUniqueOrThrow({ where: { id: user.id } })).toMatchObject({ accountStatus: "APPROVED" });
+    expect(await prisma.auditEvent.count({ where: { entityId: user.id, action: "auth.signup_confirmed" } })).toBe(1);
+
+    await prisma.user.create({ data: { email: "gt.owner@lendhous.com", name: "GT Owner", passwordHash: "x", accountStatus: "APPROVED", roles: { create: [{ role: "ADMIN_OWNER" }] } } });
+    await members.announceSignup(user.id);
+    expect(await prisma.notification.count({ where: { toEmail: "gt.owner@lendhous.com", eventCode: "auth.signup" } })).toBe(1);
+  });
+
+  it("never changes an account that already exists: its owner gets a password link instead", async () => {
+    const bcrypt = (await import("bcryptjs")).default;
+    const staff = await prisma.user.create({ data: { email: "uri.underwriter@example.com", name: "Uri Underwriter", passwordHash: await bcrypt.hash("the-real-password", 4), accountStatus: "APPROVED", roles: { create: [{ role: "UNDERWRITER" }] } } });
+    await members.startSignup({ name: "Mallory", email: "uri.underwriter@example.com", phone: "" });
+    const after = await prisma.user.findUniqueOrThrow({ where: { id: staff.id }, include: { roles: true } });
+    expect(after).toMatchObject({ name: "Uri Underwriter", accountStatus: "APPROVED", signedUpAt: null });
+    expect(after.roles.map((row) => row.role)).toEqual(["UNDERWRITER"]);
+    expect(await bcrypt.compare("the-real-password", after.passwordHash)).toBe(true);
+    expect(lastSubject()).toMatch(/Set a new LendHous password/);
+    // Using that link is an ordinary reset, not a sign-up.
+    expect(await members.usePasswordLink(lastLink(), "another-long-password")).toEqual({ userId: staff.id, signedUp: false });
+
+    // An account waiting on someone's approval stays that way and gets nothing.
+    const waiting = await prisma.user.create({ data: { email: "waiting@example.com", name: "Waiting", passwordHash: "x", accountStatus: "PENDING", roles: { create: [{ role: "BROKER" }] } } });
+    const links = await prisma.passwordLink.count();
+    await members.startSignup({ name: "Waiting", email: "waiting@example.com", phone: "" });
+    expect(await prisma.passwordLink.count()).toBe(links);
+    expect(await prisma.user.findUniqueOrThrow({ where: { id: waiting.id } })).toMatchObject({ accountStatus: "PENDING", signedUpAt: null });
+  });
+
+  it("brings back a removed account as a new borrower, with nothing it used to have", async () => {
+    const old = await prisma.user.create({ data: { email: "back.again@example.com", name: "Old Name", title: "Processor", passwordHash: "x", accountStatus: "APPROVED", deletedAt: new Date(), extraPermissions: ["view_audit"], roles: { create: [{ role: "PROCESSOR" }] } } });
+    await members.startSignup({ name: "Back Again", email: "back.again@example.com", phone: "" });
+    const user = await prisma.user.findUniqueOrThrow({ where: { id: old.id }, include: { roles: true } });
+    expect(user).toMatchObject({ name: "Back Again", title: null, accountStatus: "PENDING", deletedAt: null, extraPermissions: [] });
+    expect(user.roles.map((row) => row.role)).toEqual(["BORROWER"]);
+  });
+});

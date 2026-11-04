@@ -59,7 +59,7 @@ const quietPayoff = (payoff: PayoffRequest): PayoffRequest => ({
 
 /** Removes what identifies the borrower, for a partner or buyer who hasn't closed on the loan. */
 function blind(deal: Deal): Deal {
-  return { ...deal, borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined, closure: undefined, defaults: undefined, extensions: undefined, paidOff: undefined, closing: undefined, wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, termSheets: undefined, pricingException: undefined, conditions: undefined, lienFile: undefined, completed: undefined, revenue: undefined, adverseAction: undefined, legalHold: undefined, ...quietPayments(deal, false) };
+  return { ...deal, borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined, closure: undefined, defaults: undefined, extensions: undefined, paidOff: undefined, closing: undefined, wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, termSheets: undefined, pricingException: undefined, conditions: undefined, lienFile: undefined, completed: undefined, revenue: undefined, adverseAction: undefined, legalHold: undefined, propertyPhotos: undefined, ...quietPayments(deal, false) };
 }
 
 /** The conditions that are the borrower's to meet (Spec B17), without who on the team handled them or why one was waived. */
@@ -458,6 +458,14 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
     }
     case "recordAdverseNotice":
       return trusted ? ok() : no("Send the notice from the loan's page.");
+    case "addPropertyPhotos":
+      return trusted ? ok() : no("Upload the photos themselves.");
+    case "removePropertyPhoto": {
+      const deal = dealOf(action.dealId);
+      if (!deal?.propertyPhotos?.some((photo) => photo.id === action.photoId)) return no(GONE);
+      // The application link takes away a photo its borrower sent (trusted); otherwise it's the team's call.
+      return trusted ? ok() : staffOnly("review_documents", "manage_conditions");
+    }
     case "setLegalHold": {
       if (!dealOf(action.dealId)) return no(GONE);
       return staffOnlyAllowed("manage_roles") ? ok({ ...action, by: viewer.name }) : no(NOT_ALLOWED);

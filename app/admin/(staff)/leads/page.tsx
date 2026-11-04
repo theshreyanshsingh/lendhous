@@ -7,6 +7,7 @@ import { linkSummaries } from "@/lib/application-links";
 import { openLead, openQuote } from "@/lib/lead-store";
 import { CITIZENSHIP_LABEL, CREDIT_LABEL } from "@/lib/quote";
 import { notDeleted, prisma } from "@/lib/prisma";
+import { PROPERTY_PHOTO } from "@/lib/property-photos";
 
 export const metadata = { title: "Website leads" };
 export const dynamic = "force-dynamic";
@@ -18,6 +19,9 @@ export default async function Leads() {
   await requirePermission("view_pipeline");
   const leads = (await prisma.lead.findMany({ where: notDeleted, orderBy: { createdAt: "desc" }, take: 200 })).map((row) => ({ ...openLead(row), request: openQuote(row) }));
   const links = await linkSummaries({ leadIds: leads.map((lead) => lead.id) });
+  // Photos sent with each quote request, until the lead becomes a loan and they move to it.
+  const photoRows = await prisma.document.findMany({ where: { ownerType: "LEAD", ownerId: { in: leads.map((lead) => lead.id) }, documentType: PROPERTY_PHOTO, ...notDeleted }, select: { id: true, ownerId: true }, orderBy: { createdAt: "asc" } });
+  const photosFor = (leadId: string) => photoRows.filter((row) => row.ownerId === leadId);
   return (
     <div className="space-y-4">
       <PageIntro eyebrow="Website" title="Website leads" lede="Quote requests from the public site, from borrowers and brokers. Send the borrower the secure application link to turn one into a loan." />
@@ -43,6 +47,17 @@ export default async function Leads() {
                       <div className="text-xs text-muted-foreground">{lead.request ? `${lead.request.address.street}, ${lead.request.address.city}, ${lead.request.address.state} ${lead.request.address.zip}` : `${lead.city}, ${lead.state}`}{lead.experience ? ` · ${lead.experience}` : ""}</div>
                       {lead.request && <div className="text-xs text-muted-foreground">{CREDIT_LABEL[lead.request.creditBand]} credit · {CITIZENSHIP_LABEL[lead.request.citizenship]}{lead.request.comps.length ? ` · ${lead.request.comps.length} comp${lead.request.comps.length === 1 ? "" : "s"}` : ""}</div>}
                       {lead.targetClosing && <div className="text-xs text-muted-foreground">Target closing {lead.targetClosing}</div>}
+                      {photosFor(lead.id).length > 0 && (
+                        <div className="mt-1.5 flex flex-wrap gap-1" data-testid="lead-photos">
+                          {photosFor(lead.id).slice(0, 6).map((photo) => (
+                            <a key={photo.id} href={`/api/documents/${photo.id}?view=1`} target="_blank" rel="noreferrer">
+                              {/* eslint-disable-next-line @next/next/no-img-element -- a signed-in file, not a page image */}
+                              <img src={`/api/documents/${photo.id}?view=thumb`} alt="Property photo" loading="lazy" className="size-12 rounded-[2px] object-cover" data-testid="lead-photo" />
+                            </a>
+                          ))}
+                          {photosFor(lead.id).length > 6 && <span className="self-center text-xs text-muted-foreground">+{photosFor(lead.id).length - 6} more</span>}
+                        </div>
+                      )}
                     </div>
                   </td>
                   <td data-label="Requested" className="text-right lg:whitespace-nowrap">

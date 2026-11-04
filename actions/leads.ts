@@ -6,11 +6,13 @@ import { requirePermission } from "@/lib/auth";
 import { notifyTeam } from "@/lib/email";
 import { sealLead, sealQuote } from "@/lib/lead-store";
 import { prisma } from "@/lib/prisma";
+import { issuePhotoKey } from "@/lib/property-photos";
 import { EXPERIENCE_LABEL, LOAN_TYPES, quoteProblem, quoteSummary } from "@/lib/quote";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import { requestMeta } from "@/lib/request-meta";
 
-export type QuoteReply = { sent: boolean; error: string };
+/** photoKey lets this browser send photos of the property for the next couple of hours. */
+export type QuoteReply = { sent: boolean; error: string; photoKey?: string };
 
 /**
  * The public quote request. Open to anyone, so it's rate limited and has the same honeypot. The visitor's indicative terms
@@ -42,7 +44,7 @@ export async function sendQuote(raw: unknown, honeypot = ""): Promise<QuoteReply
   } catch (error) {
     console.error("[lendhous-leads] could not alert the team:", error);
   }
-  return { sent: true, error: "" };
+  return { sent: true, error: "", photoKey: await issuePhotoKey(leadId).catch(() => undefined) };
 }
 
 export async function markLeadContacted(formData: FormData) {

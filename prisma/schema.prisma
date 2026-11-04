@@ -115,6 +115,8 @@ model User {
   notifyEmail      Boolean       @default(true)
   notifyInApp      Boolean       @default(true)
   lastLoginAt      DateTime?
+  // Created through the public sign-up page. Such an account stays PENDING until its email link is used.
+  signedUpAt       DateTime?
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
   deletedAt        DateTime?
@@ -304,6 +306,8 @@ model PlatformSettings {
   // Spec v3 Section 1 placeholders: second approver above these amounts.
   dualApprovalDrawCents         Int      @default(5000000)
   dualApprovalDistributionCents Int      @default(25000000)
+  // Lets people create their own borrower accounts on /login/signup. Unset counts as on.
+  allowSignup                   Boolean?
   // The lender's mailing address and phone, printed on notices that need them (Reg B adverse action notices).
   lenderAddress                 String   @default("")
   lenderPhone                   String   @default("")
@@ -335,6 +339,10 @@ model Lead {
   contactedAt        DateTime?
   // The loan started from this brief, once staff start one.
   loanId             String?
+  // A short-lived key the visitor's browser uses to send photos of the property after the request goes in. Only its
+  // hash is kept.
+  photoKeyHash       String?   @unique
+  photoKeyExpiresAt  DateTime?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
   deletedAt          DateTime?

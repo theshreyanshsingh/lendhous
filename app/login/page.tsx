@@ -7,6 +7,7 @@ import { DEMO_EMAILS, DEMO_LOGINS, DEV_DEMO_PASSWORD, showDemoDesk } from "@/lib
 import { q } from "@/lib/format";
 import { homeFor } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
+import { getSettings } from "@/lib/settings";
 
 export const metadata = { title: "Sign in" };
 export const dynamic = "force-dynamic";
@@ -28,7 +29,7 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
           <p className="eyebrow">Sign in</p>
           <h1 className="mt-3 text-[36px] leading-[1.04] font-normal text-foreground sm:text-[48px]">Welcome back to LendHous.</h1>
           <div className="mt-5"><Notice notice={q(params, "notice")} error={q(params, "error")} /></div>
-          <div className="mt-8"><LoginPanel next={q(params, "next")} demo={demo} /></div>
+          <div className="mt-8"><LoginPanel next={q(params, "next")} demo={demo} signup={(await getSettings()).allowSignup !== false} /></div>
         </div>
       </main>
     </div>

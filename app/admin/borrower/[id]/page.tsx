@@ -15,6 +15,7 @@ import { PaymentsPanel } from "@/components/loan/PaymentsPanel";
 import { ScopeOfWork } from "@/components/loan/ScopeOfWork";
 import { TermSheetCard } from "@/components/loan/TermSheetCard";
 import { BorrowerConditions } from "@/components/loan/BorrowerConditions";
+import { PropertyPhotos } from "@/components/loan/PropertyPhotos";
 import Tracker from "@/components/Tracker";
 import { Badge, Section, Stat, usd, pct, productLabel, statusLabel } from "@/components/ui";
 import type { DocStatus } from "@/lib/mockData";
@@ -71,6 +72,7 @@ export default function BorrowerLoan() {
           </div>
         </Section>
         {d.sponsor && ["submitted", "initial_review", "underwriting"].includes(d.status) && <Link href={`/admin/borrower/${d.id}/profile`} className="block text-sm text-link underline underline-offset-2" data-testid="edit-profile">Update your guarantors, past deals or credit answers</Link>}
+        <PropertyPhotos deal={d} side="client" />
         <ScopeOfWork deal={d} editable />
         <LoanMessages dealId={d.id} side="borrower" />
         </div>

@@ -45,6 +45,8 @@ export interface Deal {
   adverseAction?: AdverseAction;
   /** Keep this loan's records past the retention period: an investigation, enforcement or lawsuit is pending (1002.12(b)(4)). */
   legalHold?: { reason: string; by: string; at: string };
+  /** Photos of the property sent with the quote, the application or from the portal. The files are encrypted Documents. */
+  propertyPhotos?: { id: string; name: string; at: string; by: string }[];
   /** Pricing outside the matrix asked for by an underwriter, and an owner's answer (Spec A9). */
   pricingException?: PricingException;
   /** People who approved funding this loan. It always takes two different people (Spec 6, dual control). */

@@ -38,6 +38,16 @@ page.on("console", (m) => { if (m.type() === "error") errors.push("console: " + 
 // Every credit question has to be answered on its own.
 const QUESTIONS = ["bankruptcy", "foreclosure", "delinquent", "judgments", "lawsuit", "felony", "borrowedDownPayment"];
 const answerAll = async (p) => { for (const key of QUESTIONS) await p.getByTestId(`decl-${key}-no`).click(); };
+// A real picture, drawn in the browser, so it survives being shrunk and shows as a thumbnail.
+const makePhoto = async (p) => Buffer.from(await p.evaluate(() => {
+  const canvas = document.createElement("canvas");
+  canvas.width = 800; canvas.height = 600;
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#677D67"; context.fillRect(0, 0, 800, 600);
+  context.fillStyle = "#F4F1EA"; context.fillRect(200, 260, 400, 260);
+  context.fillStyle = "#202B28"; context.beginPath(); context.moveTo(160, 270); context.lineTo(400, 110); context.lineTo(640, 270); context.fill();
+  return canvas.toDataURL("image/jpeg", 0.9).split(",")[1];
+}), "base64");
 const shot = async (p, name, full = true) => { await p.waitForTimeout(350); await p.screenshot({ path: `${OUT}/${name}`, fullPage: full }); };
 
 // Sessions are kept per seat and swapped in later, so the run signs in once per seat (sign-in is rate limited).
@@ -124,10 +134,18 @@ await page.getByTestId("comp-sold-0").fill("2026-08");
 await page.getByTestId("quote-broker").click();
 ok("a broker gets their own section", await page.getByTestId("broker-name").waitFor({ timeout: 5000 }).then(() => true, () => false));
 await page.getByTestId("quote-borrower").click();
+const PHOTO = await makePhoto(page);
+await page.getByTestId("quote-photos-input").setInputFiles({ name: "front-of-house.jpg", mimeType: "image/jpeg", buffer: PHOTO });
+ok("the quote request takes photos of the property", await page.getByTestId("quote-photos-item").getByText("Ready to send").waitFor({ timeout: 5000 }).then(() => true, () => false));
 await shot(page, "00c-site-quote-request.png");
 await page.getByTestId("quote-submit").click();
 ok("the quote request shows indicative terms from today's pricing", (await page.getByTestId("quote-sent").waitFor({ timeout: 5000 }).then(() => true, () => false)) && (await page.getByTestId("quote-amount").innerText()).startsWith("up to $"));
+ok("and says the photo went with it", await page.getByTestId("quote-photos-sent").getByText("1 photo of the property sent.").waitFor({ timeout: 10000 }).then(() => true, () => false));
 await shot(page, "00d-site-quote-terms.png");
+await page.getByTestId("quote-signup-link").click();
+ok("the borrower can go on to create an account, already filled in", await page.getByTestId("signup-name").waitFor({ timeout: 5000 }).then(async () => (await page.getByTestId("signup-name").inputValue()) === LEAD_NAME && (await page.getByTestId("signup-email").inputValue()) === LEAD_EMAIL, () => false));
+ok("without their details in the address bar", !page.url().includes("@") && !page.url().includes("Smoke"));
+await shot(page, "00h-signup.png");
 await page.goto(BASE + "/programs");
 ok("the programs page compares all four programs from the pricing", (await page.getByTestId("compare-card").count()) === 4 && (await page.getByTestId("program-compare").innerText()).toLowerCase().includes("rate from"));
 // The borrower application link, as a preview: it checks each step before moving on.
@@ -136,6 +154,8 @@ await page.getByTestId("app-next").click();
 ok("the application link moves on from a complete step", (await page.getByTestId("app-step").innerText()).toLowerCase() === "step 2 of 5");
 await page.getByTestId("app-next").click();
 ok("and won't move on from an incomplete one", (await page.getByTestId("app-problems").waitFor({ timeout: 5000 }).then(() => true, () => false)) && (await page.getByTestId("app-step").innerText()).toLowerCase() === "step 2 of 5");
+await page.getByTestId("app-photos-input").setInputFiles({ name: "kitchen.jpg", mimeType: "image/jpeg", buffer: PHOTO });
+ok("the application link takes photos of the property", (await page.getByTestId("app-photos-item").waitFor({ timeout: 5000 }).then(() => true, () => false)) && (await page.getByTestId("app-photos-item").count()) === 1);
 await shot(page, "00e-application-link.png");
 // The public payoff request: anyone but the borrower attaches the borrower's authorization, and the loan has to be found.
 await page.goto(BASE + "/payoff");
@@ -232,6 +252,10 @@ await fileInput.setInputFiles({ name: "FAKE-bank-statement-sep-2026.pdf", mimeTy
 await page.waitForTimeout(250);
 ok("document upload changes status to Uploaded", (await page.getByTestId("doc-bank").innerText()).includes("Uploaded"));
 await shot(page, "03-borrower-loan-document-center.png");
+await page.getByTestId("property-photo-input").setInputFiles({ name: "back-yard.jpg", mimeType: "image/jpeg", buffer: PHOTO });
+ok("the borrower adds photos of the property to their loan", await page.getByTestId("property-photos").getByTestId("property-photo").first().waitFor({ timeout: 5000 }).then(() => true, () => false));
+await page.getByTestId("property-photos").scrollIntoViewIfNeeded();
+await shot(page, "03b-borrower-property-photos.png", false);
 
 // 3. Staff seat: pipeline
 await signIn(page, SEATS.staff);
@@ -241,6 +265,8 @@ ok("Portal login takes someone already signed in straight to the panel", new URL
 await page.goto(BASE + "/admin/leads");
 const inbox = page.getByTestId("leads-table").locator("tr", { hasText: LEAD_NAME });
 ok("the quote request reaches the staff inbox with its ARV", (await inbox.count()) === 1 && (await inbox.innerText()).includes("$240,000") && (await inbox.innerText()).includes("ARV $520,000"));
+await inbox.scrollIntoViewIfNeeded();
+ok("with the photo the visitor sent, shown to the team", (await inbox.getByTestId("lead-photo").count()) === 1 && (await inbox.getByTestId("lead-photo").evaluate((img) => img.complete ? img.naturalWidth > 0 : new Promise((done) => { img.onload = () => done(img.naturalWidth > 0); img.onerror = () => done(false); }))));
 await inbox.getByRole("button", { name: "Mark contacted" }).click();
 ok("staff can mark a lead contacted", await inbox.getByText("Contacted").waitFor({ timeout: 5000 }).then(() => true, () => false));
 await shot(page, "04b-admin-website-leads.png");
@@ -1024,7 +1050,7 @@ await phone.close();
 
 // cold load of every route in a fresh browser, as the seat that owns it: catches hydration mismatches that
 // client-side navigation hides
-const routes = [["/", null], ["/calculators", null], ["/start", null], ["/resources", null], ["/admin/apply", SEATS.borrower], ["/admin/borrower", SEATS.borrower], ["/admin/borrower/d2", SEATS.borrower], ["/admin", SEATS.staff], ["/admin/deals/d1", SEATS.staff], ["/login/forgot", null], ["/admin/capital", SEATS.staff], ["/admin/loan-sales", SEATS.staff], ["/admin/draws", SEATS.staff], ["/admin/servicing", SEATS.staff], ["/admin/audit", SEATS.staff], ["/admin/account/notifications", SEATS.staff], ["/admin/borrower/d18", SEATS.borrower], ["/admin/broker", SEATS.broker], ["/admin/broker/new", SEATS.broker], ["/admin/broker/deals/d3", SEATS.broker], ["/admin/members", SEATS.staff], ["/admin/buyer", SEATS.buyer], ["/admin/buyer/loans/s-d10", SEATS.buyer], ["/admin/buyer/portfolio", SEATS.buyer], ["/admin/partner", SEATS.partner], ["/admin/partner/teasers/d3", SEATS.partner]];
+const routes = [["/", null], ["/calculators", null], ["/start", null], ["/resources", null], ["/admin/apply", SEATS.borrower], ["/admin/borrower", SEATS.borrower], ["/admin/borrower/d2", SEATS.borrower], ["/admin", SEATS.staff], ["/admin/deals/d1", SEATS.staff], ["/login/forgot", null], ["/login/signup", null], ["/admin/capital", SEATS.staff], ["/admin/loan-sales", SEATS.staff], ["/admin/draws", SEATS.staff], ["/admin/servicing", SEATS.staff], ["/admin/audit", SEATS.staff], ["/admin/account/notifications", SEATS.staff], ["/admin/borrower/d18", SEATS.borrower], ["/admin/broker", SEATS.broker], ["/admin/broker/new", SEATS.broker], ["/admin/broker/deals/d3", SEATS.broker], ["/admin/members", SEATS.staff], ["/admin/buyer", SEATS.buyer], ["/admin/buyer/loans/s-d10", SEATS.buyer], ["/admin/buyer/portfolio", SEATS.buyer], ["/admin/partner", SEATS.partner], ["/admin/partner/teasers/d3", SEATS.partner]];
 for (const [r, seat] of routes) {
   const c = await browser.newContext(); if (seat) await c.addCookies(sessions[seat]); const p = await c.newPage(); const errs = [];
   p.on("pageerror", (e) => errs.push(e.message)); p.on("console", (msg) => { if (msg.type() === "error") errs.push(msg.text()); });

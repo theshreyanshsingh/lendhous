@@ -8,7 +8,7 @@ import { SubmitButton } from "@/components/submit-button";
 
 export type DemoDesk = { password: string; accounts: { role: string; email: string }[] };
 
-export function LoginPanel({ next, demo }: { next?: string; demo?: DemoDesk }) {
+export function LoginPanel({ next, demo, signup = false }: { next?: string; demo?: DemoDesk; signup?: boolean }) {
   const [state, action] = useActionState(login, { error: "" });
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -27,6 +27,7 @@ export function LoginPanel({ next, demo }: { next?: string; demo?: DemoDesk }) {
         {state.error && <p className="text-sm text-bad" role="alert">{state.error}</p>}
         <SubmitButton className="h-11 w-full text-[13.5px] font-medium" pendingLabel="Checking…">Sign in</SubmitButton>
         <Link href="/login/forgot" className="block text-center text-sm text-muted-foreground underline underline-offset-2" data-testid="forgot-password">Forgot your password?</Link>
+        {signup && <Link href="/login/signup" className="block text-center text-sm text-muted-foreground underline underline-offset-2" data-testid="signup-link">New to LendHous? Create an account</Link>}
       </form>
       {demo && (
         <aside>

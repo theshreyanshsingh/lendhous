@@ -3,6 +3,7 @@ import Link from "next/link";
 import { PageHead } from "@/components/site-chrome";
 import { loadPricing } from "@/lib/pricing-store";
 import { currentPricing } from "@/lib/pricing-versions";
+import { getSettings } from "@/lib/settings";
 import { QuoteRequest } from "./quote-request";
 
 export const metadata: Metadata = {
@@ -18,7 +19,7 @@ export default async function Start() {
     <>
       <PageHead eyebrow="LOAN QUOTE REQUEST" title="Tell us about the deal." description="A borrower or a broker can send it. You'll see indicative terms as soon as it's in, and a loan officer follows up the same business day." />
       <main className="content quote-layout">
-        <QuoteRequest pricing={currentPricing()} />
+        <QuoteRequest pricing={currentPricing()} signupOpen={(await getSettings()).allowSignup !== false} />
         <aside className="panel" style={{ position: "sticky", top: 24 }}>
           <div className="eyebrow">WHAT HAPPENS NEXT</div>
           <ol className="quote-next">

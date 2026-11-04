@@ -4,6 +4,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { readField } from "@/lib/crypto";
 import { canOpenFile } from "@/lib/book-access";
 import { permissionCheck, readBook } from "@/lib/book-store";
+import { viewFor } from "@/lib/permissions";
 import { notDeleted, prisma } from "@/lib/prisma";
 import { getBytes } from "@/lib/storage";
 import { attachmentName, documentNameContext, fileHeaders } from "@/lib/uploads";
@@ -17,11 +18,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   // The same answer whether the file doesn't exist or isn't theirs, so nobody can test for files.
   const refused = () => new NextResponse("File not found.", { status: 404 });
   if (!document) return refused();
-  const { book } = await readBook();
-  if (!canOpenFile(book, user, document.ownerId, await permissionCheck(user))) return refused();
+  const allowed = await permissionCheck(user);
+  // A lead's photos, sent with a quote request before there's a loan, are for the team that answers leads.
+  if (document.ownerType === "LEAD") { if (viewFor(user.roleCodes) !== "admin" || !allowed("view_pipeline")) return refused(); }
+  else if (!canOpenFile((await readBook()).book, user, document.ownerId, allowed)) return refused();
   const view = new URL(request.url).searchParams.get("view");
-  // A thumbnail is a glance at a job site photo on a draw. Opening it, like opening any other file, is what gets logged.
-  if (view !== "thumb" || document.documentType !== "draw_photo") await audit({ actorId: user.id, action: "document.opened", entityType: "Document", entityId: document.id, after: { dealId: document.ownerId } });
+  // A thumbnail is a glance at a photo on a draw or of the property. Opening it, like opening any other file, is what gets logged.
+  if (view !== "thumb" || (document.documentType !== "draw_photo" && document.documentType !== "property_photo")) await audit({ actorId: user.id, action: "document.opened", entityType: "Document", entityId: document.id, after: { [document.ownerType === "LEAD" ? "leadId" : "dealId"]: document.ownerId } });
   const name = attachmentName(readField(document.originalName, documentNameContext(document.id)));
   // Files are encrypted in storage, so they always come through here rather than from a signed link to the bucket.
   return new NextResponse(new Uint8Array(await getBytes(document.storageKey)), { headers: fileHeaders(document.mime, name, Boolean(view)) });

@@ -5,6 +5,7 @@ import { DocUpload } from "@/components/loan/DocUpload";
 import { LoanMessages } from "@/components/loan/LoanMessages";
 import { TermSheetCard } from "@/components/loan/TermSheetCard";
 import { BorrowerConditions } from "@/components/loan/BorrowerConditions";
+import { PropertyPhotos } from "@/components/loan/PropertyPhotos";
 import Tracker from "@/components/Tracker";
 import { Badge, Section, Stat, points, productLabel, statusLabel, usd } from "@/components/ui";
 import { est, useStore } from "@/lib/store";
@@ -32,6 +33,7 @@ export default function BrokerDeal() {
           <Section title="Documents" right={<span className="text-xs text-muted-foreground">{deal.docs.filter((doc) => doc.status === "accepted").length}/{deal.docs.length} accepted</span>}>
             <ul className="divide-y divide-border">{deal.docs.map((doc) => <li key={doc.id} className="flex flex-wrap items-center justify-between gap-2 py-2" data-testid="broker-doc"><span className="min-w-0 text-sm">{doc.name}{doc.documentId && <a className="block text-xs text-link underline underline-offset-2" href={`/api/documents/${doc.documentId}`}>{doc.fileName}</a>}</span><span className="flex flex-wrap items-center gap-2"><Badge tone={doc.status === "accepted" ? "green" : doc.status === "requested" || doc.status === "rejected" ? "amber" : "slate"}>{statusLabel(doc.status)}</Badge><DocUpload dealId={deal.id} doc={doc} /></span></li>)}</ul>
           </Section>
+          <PropertyPhotos deal={deal} side="client" />
           <LoanMessages dealId={deal.id} side="broker" />
         </div>
         <div className="min-w-0 space-y-4">

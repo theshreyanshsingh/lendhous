@@ -140,6 +140,7 @@ const schema = z.discriminatedUnion("t", [
   z.object({ t: z.literal("saveAdverseReasons"), dealId: id, reasons: z.array(text(300)).max(6), by: z.string().max(120) }),
   z.object({ t: z.literal("recordReasonsRequest"), dealId: id, receivedOn: date, by: z.string().max(120) }),
   z.object({ t: z.literal("setLegalHold"), dealId: id, reason: text(1000), by: z.string().max(120) }),
+  z.object({ t: z.literal("removePropertyPhoto"), dealId: id, photoId: id }),
   z.object({ t: z.literal("reopenApplication"), dealId: id, by: z.string().max(120) }),
   z.object({ t: z.literal("declareDefault"), dealId: id, kind: z.enum(["monetary", "maturity", "covenant", "insurance_lapse", "tax_delinquency"]), effectiveOn: date, note: text(1000).min(1), by: z.string().max(120) }),
   z.object({ t: z.literal("cureDefault"), dealId: id, note: text(1000).min(1), by: z.string().max(120) }),
@@ -151,7 +152,7 @@ const schema = z.discriminatedUnion("t", [
 ]);
 
 /**
- * The action if it is well formed, or null. uploadDoc, conditionFile, lienWaiverReceived, affidavitReceived, recordAdverseNotice, linkBorrower,
+ * The action if it is well formed, or null. uploadDoc, conditionFile, addPropertyPhotos, lienWaiverReceived, affidavitReceived, recordAdverseNotice, linkBorrower,
  * settleLoans, checkTermSheets, checkInsurance, submitPayoffRequest and payoffLetterDelivered aren't here: only the server
  * starts those.
  */

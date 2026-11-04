@@ -209,6 +209,28 @@ describe("what each account may do", () => {
   });
 });
 
+describe("property photos", () => {
+  const photos = [{ id: "ph-1", name: "front.jpg", at: "2026-11-04T10:00:00Z" }, { id: "ph-2", name: "kitchen.jpg", at: "2026-11-04T10:01:00Z" }];
+  const withPhotos = () => reducer(live(), { t: "addPropertyPhotos", dealId: "d1", photos, by: "Quote request" });
+  it("are listed only by the server, once each, and taken off by the team", () => {
+    expect(check(live(), owner, { t: "addPropertyPhotos", dealId: "d1", photos, by: "x" })).toHaveProperty("error");
+    expect(check(live(), borrower, { t: "addPropertyPhotos", dealId: "d1", photos, by: "x" }, true)).not.toHaveProperty("error");
+    const twice = reducer(withPhotos(), { t: "addPropertyPhotos", dealId: "d1", photos: [photos[1], { id: "ph-3", name: "roof.jpg", at: "2026-11-04T10:02:00Z" }], by: "Cody" });
+    expect(twice.deals.find((deal) => deal.id === "d1")!.propertyPhotos!.map((photo) => [photo.id, photo.by])).toEqual([["ph-1", "Quote request"], ["ph-2", "Quote request"], ["ph-3", "Cody"]]);
+    expect(check(withPhotos(), processor, { t: "removePropertyPhoto", dealId: "d1", photoId: "ph-1" })).not.toHaveProperty("error");
+    expect(check(withPhotos(), borrower, { t: "removePropertyPhoto", dealId: "d1", photoId: "ph-1" })).toHaveProperty("error");
+    expect(reducer(withPhotos(), { t: "removePropertyPhoto", dealId: "d1", photoId: "ph-1" }).deals.find((deal) => deal.id === "d1")!.propertyPhotos!.map((photo) => photo.id)).toEqual(["ph-2"]);
+    expect(parseAction({ t: "addPropertyPhotos", dealId: "d1", photos, by: "x" })).toBeNull();
+    expect(parseAction({ t: "removePropertyPhoto", dealId: "d1", photoId: "ph-1" })).toEqual({ t: "removePropertyPhoto", dealId: "d1", photoId: "ph-1" });
+  });
+  it("show on the borrower's own loan, and never on a partner's blind teaser", () => {
+    const b = reducer(withPhotos(), { t: "addPropertyPhotos", dealId: "d3", photos, by: "Quote request" });
+    expect(scopeBook(b, borrower).deals.find((deal) => deal.id === "d1")!.propertyPhotos).toHaveLength(2);
+    expect(scopeBook(b, partner).deals.find((deal) => deal.id === "d3")!.propertyPhotos).toBeUndefined();
+    expect(JSON.stringify(scopeBook(b, partner))).not.toContain("front.jpg");
+  });
+});
+
 describe("requests from the browser", () => {
   it("drops unknown fields and refuses anything malformed", () => {
     expect(parseAction({ t: "advanceLoan", dealId: "d1", extra: "x" })).toEqual({ t: "advanceLoan", dealId: "d1" });

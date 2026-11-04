@@ -4,6 +4,7 @@ import { Check, Lock, MapPin } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { saveApplicationDraft, signApplication } from "@/actions/application-links";
 import { AddressField, type AddressValue } from "@/components/AddressField";
+import { PropertyPhotoPicker } from "@/components/PropertyPhotoPicker";
 import { Logo } from "@/components/logo";
 import { Arrive, Reveal, StepSwap } from "@/components/motion";
 import { TrackRecordFields } from "@/components/SponsorForm";
@@ -12,7 +13,7 @@ import { CITIZENSHIP, DECLARATIONS } from "@/lib/credit";
 import { LOAN_TYPES, type LoanType } from "@/lib/quote";
 import { servicingDate } from "@/lib/servicing";
 
-type Props = { token: string | null; initial: AppDraft; startStep: number; savedAt: string | null; officer: string; expiresAt: string };
+type Props = { token: string | null; initial: AppDraft; startStep: number; savedAt: string | null; officer: string; expiresAt: string ; photos?: { id: string; name: string; src: string }[] };
 
 const money = (text: string) => { const value = num(text); return value === undefined ? "" : value.toLocaleString("en-US"); };
 const clock = (iso: string) => new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }).toLowerCase().replace(" ", "");
@@ -38,7 +39,7 @@ const yesNo = [{ v: true, l: "Yes" }, { v: false, l: "No" }];
  * The borrower application behind a secure link (no sign-in): five steps, saved as the borrower goes, then four consents
  * and a typed signature. With no token it's a preview that keeps everything in the browser.
  */
-export function BorrowerApplication({ token, initial, startStep, savedAt, officer, expiresAt }: Props) {
+export function BorrowerApplication({ token, initial, startStep, savedAt, officer, expiresAt, photos = [] }: Props) {
   const [draft, setDraft] = useState(initial);
   const [step, setStep] = useState(startStep);
   const [direction, setDirection] = useState<1 | -1>(1);
@@ -139,6 +140,15 @@ export function BorrowerApplication({ token, initial, startStep, savedAt, office
               {step === 1 && (<>
                 <h2 className="text-lg font-normal">The property</h2>
                 <AddressField testid="app-address" value={address} onChange={(next: AddressValue) => put({ property: { ...draft.property, address: next } })} />
+                <div>
+                  <span className="label">Photos of the property</span>
+                  {token ? (
+                    <PropertyPhotoPicker testid="app-photos" initial={photos}
+                      upload={async (file) => { const form = new FormData(); form.set("file", file); const response = await fetch(`/api/application-links/${token}/photos`, { method: "POST", body: form }); const body = await response.json().catch(() => ({})); return response.ok ? { id: body.photo?.id } : { error: body.error ?? "That photo didn't go through." }; }}
+                      remove={async (id) => (await fetch(`/api/application-links/${token}/photos/${id}`, { method: "DELETE" })).ok}
+                      note="Optional, up to 12: the front, the street, and the rooms or areas that need work. Each is sent as you add it." />
+                  ) : <PropertyPhotoPicker testid="app-photos" note="In this preview the photos stay in your browser." />}
+                </div>
                 <div><span className="label">Is the property in a flood zone?</span><Pills value={draft.property.floodZone} testid="app-flood" onChange={(floodZone) => put({ property: { ...draft.property, floodZone } })} options={[{ v: "yes" as const, l: "Yes" }, { v: "no" as const, l: "No" }, { v: "unsure" as const, l: "I'm not sure" }]} /></div>
                 <div className="grid gap-3 sm:grid-cols-2">
                   <Field label="Property type"><select className="desk-input" data-testid="app-type" value={draft.property.propertyType} onChange={(event) => put({ property: { ...draft.property, propertyType: event.target.value as AppDraft["property"]["propertyType"] } })}><option value="">Select</option><option value="sfr">Single-family home</option><option value="2_4">2–4 units</option><option value="condo">Condo</option><option value="townhome">Townhome</option></select></Field>

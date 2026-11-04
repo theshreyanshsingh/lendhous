@@ -18,6 +18,7 @@ export default async function MembersPage() {
     extraPermissions: user.extraPermissions,
     deniedPermissions: user.deniedPermissions,
     signedIn: Boolean(user.lastLoginAt),
+    unconfirmed: user.accountStatus === "PENDING" && Boolean(user.signedUpAt),
   }));
   return <MembersBoard rows={rows} meId={me.id} meIsOwner={isOwner(me.roleCodes)} />;
 }
