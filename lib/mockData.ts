@@ -24,6 +24,8 @@ export interface Sponsor { entityState: string; guarantors: Guarantor[]; trackRe
 /** A credit officer's sign-off. Pricing then uses only the experience they verified. */
 export interface CreditReview { by: string; at: string; note: string; verifiedDeals: number }
 export interface Allocation { sourceId: string; amount: number }
+/** When a loan moved into a stage. */
+export interface StageEntry { status: LoanStatus; at: string }
 export interface Deal {
   id: string; loanNumber: string; borrowerId: string; borrowerName: string; entityName: string;
   address: string; city: string; zip: string; app: Application; status: LoanStatus; daysInStage: number;
@@ -79,6 +81,8 @@ export interface Deal {
   fundingWireId?: string;
   /** Sanctions (OFAC) screenings of the people and company on the loan, oldest first. */
   screenings?: Screening[];
+  /** Each stage the loan moved into and when, oldest first. Loans started before this was kept begin partway through. */
+  stages?: StageEntry[];
 }
 export interface ClosingAgent {
   company: string; contact: string; phone: string; email: string; fileNumber: string;

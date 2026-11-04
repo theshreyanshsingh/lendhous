@@ -2,7 +2,11 @@
 import { randomUUID } from "node:crypto";
 import { encryptField, readField } from "@/lib/crypto";
 import type { LeadDetails } from "@/lib/leads";
+import { notDeleted, prisma } from "@/lib/prisma";
 import type { Quote } from "@/lib/quote";
+
+/** Quote requests no one has answered. On MongoDB `null` only matches a stored null, so check for the field being unset too. */
+export const unansweredLeads = () => prisma.lead.count({ where: { ...notDeleted, AND: [{ OR: [{ contactedAt: null }, { contactedAt: { isSet: false } }] }] } });
 
 export const SEALED_LEAD_FIELDS = ["name", "email", "phone", "city", "state", "notes"] as const;
 type SealedField = (typeof SEALED_LEAD_FIELDS)[number];

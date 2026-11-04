@@ -1128,3 +1128,28 @@ describe("signing up", () => {
     expect(user.roles.map((row) => row.role)).toEqual(["BORROWER"]);
   });
 });
+
+describe("the owners' morning email", () => {
+  it("goes to each owner once a day, with the day's numbers and no borrower names", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const { demoBook } = await import("@/lib/book");
+    const base = demoBook().deals.find((deal) => deal.id === "d1")!;
+    const deal = { ...base, id: "digest-loan", loanNumber: "LH-5001", borrowerName: "Dana Digest", status: "underwriting", stages: [{ status: "submitted", at: "2026-11-02T15:00:00.000Z" }, { status: "underwriting", at: "2026-11-02T16:00:00.000Z" }] };
+    await prisma.bookRecord.create({ data: { id: "deals:digest-loan", kind: "deals", data: JSON.parse(JSON.stringify(deal)) } });
+    const owner = await prisma.user.create({ data: { email: "olga.owner@lendhous.com", name: "Olga Owner", passwordHash: "x", accountStatus: "APPROVED", roles: { create: [{ role: "ADMIN_OWNER" }] } } });
+    process.env.NEXT_PUBLIC_APP_URL = "https://portal.example.com";
+    const now = new Date("2026-11-03T11:00:00Z");
+    const first = await lib.jobs.runJob("digest", now);
+    expect(first).toMatchObject({ skipped: false });
+    expect(first.summary).toMatch(/^LendHous today: 1 new application, 0 funded, \d+ waiting$/);
+    const sent = await prisma.notification.findMany({ where: { eventCode: "digest.daily", toEmail: owner.email } });
+    expect(sent).toHaveLength(1);
+    const { recentNotices } = await import("@/lib/notifications");
+    const [notice] = (await recentNotices(owner)).filter((item) => item.subject.startsWith("LendHous today"));
+    expect(notice.body).toMatch(/^Yesterday \(Mon, Nov 2\): 1 new application \(\$/);
+    expect(notice.body).toContain("https://portal.example.com/admin/reports");
+    expect(notice.body).not.toContain("Dana Digest");
+    expect((await lib.jobs.runJob("digest", now)).skipped).toBe(true);
+    vi.restoreAllMocks();
+  });
+});

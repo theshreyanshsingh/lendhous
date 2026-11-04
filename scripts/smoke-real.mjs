@@ -899,6 +899,16 @@ try {
   ok("a new application is priced on the new version", (await owner.locator("main").innerText()).includes(`pricing ${published?.version}`));
   await go(owner, "/admin/leads");
   ok("the leads page opens the loan", (await owner.locator("tr", { hasText: "Lena Lead" }).getByTestId("lead-loan").getAttribute("href")) === leadDeal);
+  // The business reports, on loans that were all started today, so each one is an application this month.
+  await go(owner, "/admin/reports");
+  await seen(owner.getByTestId("reports"));
+  const loansSoFar = await prisma.bookRecord.count({ where: { kind: "deals" } });
+  ok(`the reports count every application started today (${loansSoFar})`, Number((await owner.getByTestId("kpi-applications").innerText()).split("\n")[1]) === loansSoFar && (await owner.getByTestId("reports-undated").count()) === 0);
+  const [reportFile] = await Promise.all([owner.waitForEvent("download"), owner.getByTestId("export-loans").click()]);
+  const reportCsv = readFileSync(await reportFile.path(), "utf8");
+  ok("the owner downloads every loan with the day it applied", reportCsv.includes("LH-1001") && reportCsv.includes("Bonnie Borrower") && reportCsv.includes(new Date().toISOString().slice(0, 4)));
+  await go(under, "/admin/reports");
+  ok("an underwriter can't open the reports by default", path(under) === "/admin" && (await under.getByRole("link", { name: "Reports" }).count()) === 0);
   // Declining it: the client is told, the team's notes stay encrypted and out of the email, and it can be reopened.
   // The Reg B notice needs LendHous's address, which lives in Settings.
   await go(owner, "/admin/settings");

@@ -193,6 +193,8 @@ await page.goto(BASE + "/admin");
 ok("the borrower seat can't open the staff pipeline", new URL(page.url()).pathname === "/admin/borrower");
 await page.goto(BASE + "/admin/leads");
 ok("the borrower seat can't open the website leads", new URL(page.url()).pathname === "/admin/borrower");
+await page.goto(BASE + "/admin/reports");
+ok("nor the business reports", new URL(page.url()).pathname === "/admin/borrower");
 
 await page.goto(BASE + "/admin/apply");
 await page.getByTestId("next").click(); // -> property
@@ -274,6 +276,28 @@ await page.goto(BASE + "/admin");
 // the saved demo book loads after the first render, so wait for the row rather than reading the table at once
 ok(`the staff seat sees the borrower's new application (${newLoan})`, !!newLoan && (await page.getByTestId("pipeline-table").getByText(newLoan).waitFor({ timeout: 5000 }).then(() => true, () => false)));
 await shot(page, "04-admin-pipeline-scoring.png");
+const stuckRow = page.getByTestId("pipeline-table").locator("tr", { hasText: "LH-DEMO-1005" });
+ok("the pipeline marks a loan sitting in one stage over a week", (await stuckRow.getByTestId("days-in-stage").innerText()) === "9d in stage" && (await stuckRow.getByTestId("days-in-stage").getAttribute("class")).includes("text-warn"));
+// The business reports: the pipeline over a period, capital and the portfolio today, and the spreadsheets.
+await page.getByRole("link", { name: "Reports" }).click();
+await page.getByTestId("reports").waitFor();
+ok("the reports count the last 90 days' applications, fundings and term sheets", (await page.getByTestId("kpi-applications").innerText()).includes("12") && (await page.getByTestId("kpi-funded").innerText()).includes("2") && (await page.getByTestId("range-dates").innerText()).includes("90 days"));
+ok("they follow the applications through and time each step", (await page.getByTestId("pull-through-row").count()) === 5 && (await page.getByTestId("cycle-times").innerText()).includes("10 days"));
+ok("they list the loan stuck in underwriting", (await page.getByTestId("stuck-row").count()) === 1 && (await page.getByTestId("stuck").innerText()).includes("LH-DEMO-1005"));
+ok("they show capital and the portfolio as of today", (await page.getByTestId("kpi-available").innerText()).includes("$3.46M") && (await page.getByTestId("kpi-outstanding").innerText()).includes("$2.73M") && (await page.getByTestId("delinquency-row").count()) === 5);
+await shot(page, "24-admin-reports.png");
+await page.getByTestId("range-month").click();
+ok("a different range recounts", (await page.getByTestId("range-dates").innerText()).startsWith("Oct 1, 2026 to Oct 31, 2026"));
+await page.getByTestId("range-custom").click();
+await page.getByTestId("range-from").fill("2026-10-20");
+await page.getByTestId("range-to").fill("2026-10-31");
+const appsIn = async () => Number((await page.getByTestId("kpi-applications").innerText()).split("\n")[1]);
+ok(`and so does a custom one (${await appsIn()} applications from Oct 20)`, (await appsIn()) < 12 && (await page.getByTestId("range-dates").count()) === 0);
+const [loansFile] = await Promise.all([page.waitForEvent("download"), page.getByTestId("export-loans").click()]);
+const loansCsv = fs.readFileSync(await loansFile.path(), "utf8");
+ok("every loan downloads as a spreadsheet with its steps", loansFile.suggestedFilename().startsWith("lendhous-loans-") && loansCsv.startsWith("Loan,Borrower,Source") && loansCsv.includes("LH-DEMO-1005"));
+const [summaryFile] = await Promise.all([page.waitForEvent("download"), page.getByTestId("export-summary").click()]);
+ok("and so does the summary", fs.readFileSync(await summaryFile.path(), "utf8").includes("Loans funded (count)"));
 // 4. Deal workspace numbers & ratios
 await page.goto(BASE + "/admin/deals/d1");
 ok("deal d1 LTC pill shows 85.0%", (await page.getByTestId("ratio-LTC").innerText()).includes("85.0%"));
@@ -1050,7 +1074,7 @@ await phone.close();
 
 // cold load of every route in a fresh browser, as the seat that owns it: catches hydration mismatches that
 // client-side navigation hides
-const routes = [["/", null], ["/calculators", null], ["/start", null], ["/resources", null], ["/admin/apply", SEATS.borrower], ["/admin/borrower", SEATS.borrower], ["/admin/borrower/d2", SEATS.borrower], ["/admin", SEATS.staff], ["/admin/deals/d1", SEATS.staff], ["/login/forgot", null], ["/login/signup", null], ["/admin/capital", SEATS.staff], ["/admin/loan-sales", SEATS.staff], ["/admin/draws", SEATS.staff], ["/admin/servicing", SEATS.staff], ["/admin/audit", SEATS.staff], ["/admin/account/notifications", SEATS.staff], ["/admin/borrower/d18", SEATS.borrower], ["/admin/broker", SEATS.broker], ["/admin/broker/new", SEATS.broker], ["/admin/broker/deals/d3", SEATS.broker], ["/admin/members", SEATS.staff], ["/admin/buyer", SEATS.buyer], ["/admin/buyer/loans/s-d10", SEATS.buyer], ["/admin/buyer/portfolio", SEATS.buyer], ["/admin/partner", SEATS.partner], ["/admin/partner/teasers/d3", SEATS.partner]];
+const routes = [["/", null], ["/calculators", null], ["/start", null], ["/resources", null], ["/admin/apply", SEATS.borrower], ["/admin/borrower", SEATS.borrower], ["/admin/borrower/d2", SEATS.borrower], ["/admin", SEATS.staff], ["/admin/deals/d1", SEATS.staff], ["/admin/reports", SEATS.staff], ["/login/forgot", null], ["/login/signup", null], ["/admin/capital", SEATS.staff], ["/admin/loan-sales", SEATS.staff], ["/admin/draws", SEATS.staff], ["/admin/servicing", SEATS.staff], ["/admin/audit", SEATS.staff], ["/admin/account/notifications", SEATS.staff], ["/admin/borrower/d18", SEATS.borrower], ["/admin/broker", SEATS.broker], ["/admin/broker/new", SEATS.broker], ["/admin/broker/deals/d3", SEATS.broker], ["/admin/members", SEATS.staff], ["/admin/buyer", SEATS.buyer], ["/admin/buyer/loans/s-d10", SEATS.buyer], ["/admin/buyer/portfolio", SEATS.buyer], ["/admin/partner", SEATS.partner], ["/admin/partner/teasers/d3", SEATS.partner]];
 for (const [r, seat] of routes) {
   const c = await browser.newContext(); if (seat) await c.addCookies(sessions[seat]); const p = await c.newPage(); const errs = [];
   p.on("pageerror", (e) => errs.push(e.message)); p.on("console", (msg) => { if (msg.type() === "error") errs.push(msg.text()); });

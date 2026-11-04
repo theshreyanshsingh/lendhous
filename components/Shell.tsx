@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Bell, Briefcase, Percent, Building2, ClipboardList, FilePlus, Hammer, Inbox, Landmark, LayoutDashboard, ListChecks, BookOpen, Lock, LogOut, Menu, ReceiptText, RotateCcw, ScrollText, Settings, Store, Tag, Users, type LucideIcon } from "lucide-react";
+import { BarChart3, Bell, Briefcase, Percent, Building2, ClipboardList, FilePlus, Hammer, Inbox, Landmark, LayoutDashboard, ListChecks, BookOpen, Lock, LogOut, Menu, ReceiptText, RotateCcw, ScrollText, Settings, Store, Tag, Users, type LucideIcon } from "lucide-react";
 import { logout } from "@/actions/auth";
 import { attentionCounts } from "@/lib/attention";
 import { useStore } from "@/lib/store";
@@ -31,7 +31,7 @@ function active(path: string, href: string) {
   return path === href || path.startsWith(`${href}/`);
 }
 
-export type ShellAccount = { name: string; email: string; roles: string[]; demo: boolean; canManageMembers: boolean; canViewAudit: boolean; canManageSettings: boolean; canManageFirms: boolean; canManagePricing: boolean; unread: number; offerSample: boolean };
+export type ShellAccount = { name: string; email: string; roles: string[]; demo: boolean; canManageMembers: boolean; canViewAudit: boolean; canManageSettings: boolean; canManageFirms: boolean; canManagePricing: boolean; canViewReports: boolean; unread: number; offerSample: boolean };
 
 export default function Shell({ children, account, view }: { children: React.ReactNode; account: ShellAccount; view: View | null }) {
   const path = usePathname();
@@ -42,6 +42,7 @@ export default function Shell({ children, account, view }: { children: React.Rea
   const counted: Record<string, number> = view === "admin" ? { "/admin/leads": waiting.leads, "/admin/draws": waiting.draws, "/admin/loan-sales": waiting.offers, "/admin/servicing": waiting.servicing } : {};
   const items: NavItem[] = [
     ...(view ? nav[view] : []).map((item) => ({ ...item, count: counted[item.href] })),
+    ...(account.canViewReports && view === "admin" ? [{ href: "/admin/reports", label: "Reports", icon: BarChart3 }] : []),
     ...(account.canManageFirms ? [{ href: "/admin/partners", label: "Partners & buyers", icon: Building2, section: "Money" }] : []),
     ...(account.canManagePricing && view === "admin" ? [{ href: "/admin/pricing", label: "Pricing", icon: Percent, section: "Money" }] : []),
     { href: "/admin/account/notifications", label: "Notifications", icon: Bell, section: "Account", count: account.unread },

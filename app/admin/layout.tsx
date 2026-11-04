@@ -5,9 +5,9 @@ import { scopedBook } from "@/lib/book-store";
 import { loadPricing } from "@/lib/pricing-store";
 import { pricingPayload } from "@/lib/pricing-versions";
 import { isDemoEmail } from "@/lib/deploy";
+import { unansweredLeads } from "@/lib/lead-store";
 import { unreadCount } from "@/lib/notifications";
 import { ROLE_LABEL, viewFor } from "@/lib/permissions";
-import { notDeleted, prisma } from "@/lib/prisma";
 import { getSettings } from "@/lib/settings";
 import { StoreProvider } from "@/lib/store";
 
@@ -19,19 +19,19 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (!user) redirect("/login");
   const demo = isDemoEmail(user.email);
   const view = viewFor(user.roleCodes);
-  const [canManageMembers, canViewAudit, canManageSettings, canRouteCapital, canManageCapital, canManagePricing, unread, newLeads, settings] = await Promise.all([
+  const [canManageMembers, canViewAudit, canManageSettings, canRouteCapital, canManageCapital, canManagePricing, canViewReports, unread, newLeads, settings] = await Promise.all([
     hasPermission(user, "manage_users"),
     hasPermission(user, "view_audit"),
     hasPermission(user, "manage_roles"),
     hasPermission(user, "route_capital"),
     hasPermission(user, "manage_capital"),
     hasPermission(user, "manage_pricing"),
+    hasPermission(user, "view_reports"),
     unreadCount(user),
-    // A brief no one has answered. On MongoDB `null` only matches a stored null, so check for the field being unset too.
-    view === "admin" ? prisma.lead.count({ where: { ...notDeleted, AND: [{ OR: [{ contactedAt: null }, { contactedAt: { isSet: false } }] }] } }) : 0,
+    view === "admin" ? unansweredLeads() : 0,
     getSettings(),
   ]);
-  const account = { name: user.name, email: user.email, roles: user.roleCodes.map((role) => ROLE_LABEL[role]), demo, canManageMembers, canViewAudit, canManageSettings, canManageFirms: canRouteCapital || canManageCapital, canManagePricing, unread, offerSample: settings.offerSampleData !== false };
+  const account = { name: user.name, email: user.email, roles: user.roleCodes.map((role) => ROLE_LABEL[role]), demo, canManageMembers, canViewAudit, canManageSettings, canManageFirms: canRouteCapital || canManageCapital, canManagePricing, canViewReports, unread, offerSample: settings.offerSampleData !== false };
   return (
     // Every page, demo seats too, prices new quotes on the version the server does, so the two render the same.
     <StoreProvider demo={demo} accountId={user.id} viewerName={user.name} initialBook={demo ? undefined : await scopedBook(user)} pricing={(await loadPricing(), pricingPayload([]))} newLeads={newLeads}>

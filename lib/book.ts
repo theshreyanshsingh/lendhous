@@ -12,7 +12,7 @@ import { isLarge, noticeDueOn, noticeOwed, reasonsProblem, requestProblem, start
 import { defaultNocExpiry, drawHolds, insuranceChecks, lienFileProblem, partiesFor, unreleasedHolds, waiverCheckProblem } from "./lien-law";
 import { addProblem, changeProblem, DEFAULT_LIBRARY, fromTemplate, libraryOf, missingStandard, templateProblem, templatesFor, type ConditionInput } from "./conditions";
 import { draftSheet, exceptionDecisionProblem, exceptionReasons, exceptionRequestProblem, issueProblem as sheetProblem, latestSheet, matrixOf, pricedApp, respondProblem, startingTerms, termSheetChecks, type Prepay } from "./term-sheets";
-import { seedDeals, seedBids, seedDraws, seedLoanSales, seedLoanOffers, seedMessages, seedPhotoRequests, DEMO_SPONSORS, capitalSources, partners as seedPartners, brokers as seedBrokers, loanBuyers, BORROWER_ID, DEMO_PARTNER_ID, DEMO_BUYER_ID, DEMO_BROKER_ID, type Broker, type ClosingAgent, type Closure, type Deal, type DefaultKind, type Bid, type DrawRequest, type DrawRequestLine, type LoanExtension, type LoanMessage, type Screening, type WireInstruction, type Partner, type PayoffChannel, type PayoffLetter, type PayoffRequest, type NoticeToOwner, type LienWaiver, type ConditionTemplate, type LoanCondition, type DocStatus, type CapitalSource, type LoanBuyer, type LoanOffer, type LoanSale, type LoanPayment, type PaymentMethod, type PhotoRequest, type RequestPhoto, type ScopeLine, type Sponsor } from "./mockData";
+import { seedDeals, seedBids, seedDraws, seedLoanSales, seedLoanOffers, seedMessages, seedPhotoRequests, DEMO_SPONSORS, capitalSources, partners as seedPartners, brokers as seedBrokers, loanBuyers, BORROWER_ID, DEMO_PARTNER_ID, DEMO_BUYER_ID, DEMO_BROKER_ID, type Broker, type ClosingAgent, type Closure, type Deal, type DefaultKind, type Bid, type DrawRequest, type DrawRequestLine, type LoanExtension, type LoanMessage, type Screening, type WireInstruction, type Partner, type PayoffChannel, type PayoffLetter, type PayoffRequest, type NoticeToOwner, type LienWaiver, type ConditionTemplate, type LoanCondition, type DocStatus, type CapitalSource, type LoanBuyer, type LoanOffer, type LoanSale, type LoanPayment, type LoanStatus, type PaymentMethod, type PhotoRequest, type RequestPhoto, type ScopeLine, type Sponsor, type StageEntry } from "./mockData";
 import { BASE_VERSION, currentPricing, type PricingPayload } from "./pricing-versions";
 import { addDays, DEMO_SERVICING_DAY, firstDueDate, ledger, maturityOf, payoffFor, SERVICED, servicingDate, settle } from "./servicing";
 
@@ -165,10 +165,27 @@ export const isDemoBook = (s: Book) => s.loanPrefix === DEMO_PREFIX;
 export const serviceDay = (s: Book) => (isDemoBook(s) ? DEMO_SERVICING_DAY : servicingDate(new Date()));
 const money = (amount: number) => `$${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+// The steps to funding, for the demo book's made-up history.
+const PATH: LoanStatus[] = ["submitted", "initial_review", "underwriting", "term_sheet_issued", "term_sheet_accepted", "conditions", "clear_to_close", "closing", "funded"];
+
+/** A demo loan's history: a few days a step, ending on the day it entered its stage, so the reports have something to show. */
+function demoStages(deal: Deal): StageEntry[] {
+  const stamp = (day: string) => `${day}T14:00:00.000Z`;
+  const gap = 2 + (Number(deal.loanNumber.slice(-1)) % 3);
+  const entered = addDays(DEMO_SERVICING_DAY, -deal.daysInStage);
+  const walk = (steps: LoanStatus[], last: string) => steps.map((status, i) => ({ status, at: stamp(addDays(last, -gap * (steps.length - 1 - i))) }));
+  if (SERVICED.includes(deal.status) || deal.status === "paid_off") {
+    const history = walk(PATH, deal.closingDate);
+    return deal.status === "funded" ? history : [...history, { status: deal.status, at: stamp(entered > deal.closingDate ? entered : deal.closingDate) }];
+  }
+  const index = PATH.indexOf(deal.status);
+  return index >= 0 ? walk(PATH.slice(0, index + 1), entered) : [...walk(PATH.slice(0, 3), addDays(entered, -gap)), { status: deal.status, at: stamp(entered) }];
+}
+
 export function demoBook(): Book {
   const deals = seedDeals.map((d) => {
     const e = evaluate(d.app);
-    const deal: Deal = { ...d, app: { ...d.app, pricingVersion: BASE_VERSION }, sponsor: DEMO_SPONSORS[d.id], scope: defaultScope(d.app.product, e.holdback, d.disbursedDraws ?? 0), allocations: d.allocations.map((a) => ({ ...a, amount: a.amount || e.noteAmount })) };
+    const deal: Deal = { ...d, stages: demoStages(d), app: { ...d.app, pricingVersion: BASE_VERSION }, sponsor: DEMO_SPONSORS[d.id], scope: defaultScope(d.app.product, e.holdback, d.disbursedDraws ?? 0), allocations: d.allocations.map((a) => ({ ...a, amount: a.amount || e.noteAmount })) };
     // Every demo loan was screened the day before the demo's day, and one has a possible match to review.
     deal.screenings = [{ id: `ofac-demo-${d.id}`, at: "2026-10-30T12:00:00Z", by: "Nightly sanctions check", checkedAt: "2026-10-30T12:00:00Z", list: { fetchedAt: "2026-10-30T11:00:00Z", names: 18_240 }, status: d.id === "d6" ? "review" : "clear",
       subjects: screeningSubjects(deal).map((subject) => ({ ...subject, hits: d.id === "d6" && subject.role === "borrower" ? [{ uid: 990_001, name: "MOCKUP, Morgan Alexei (FAKE)", type: "individual", program: "SDGT (FAKE)", score: 0.946 }] : [] })) }];
@@ -230,7 +247,20 @@ export function demoBook(): Book {
 /** A book with no records: a new database, or an account with nothing to see yet. */
 export const emptyBook = (): Book => ({ partnerId: "", buyerId: "", brokerId: "", borrowerId: "", loanPrefix: "LH-", deals: [], bids: [], partners: [], buyers: [], brokers: [], sales: [], offers: [], draws: [], photoRequests: [], payoffs: [], messages: [], sources: [], conditionLibrary: [], audit: [] });
 
+/**
+ * Every change to the book goes through here. A loan that moves to another stage has the time noted, so reports can
+ * tell how long each step took and how long a loan has sat where it is. Loading or clearing sample data keeps the
+ * sample's own history.
+ */
 export function reducer(s: Book, a: BookAction): Book {
+  const next = apply(s, a);
+  if (next.deals === s.deals || a.t === "reset" || a.t === "loadSample" || a.t === "clearSample") return next;
+  const before = new Map(s.deals.map((deal) => [deal.id, deal.status]));
+  const at = now();
+  return { ...next, deals: next.deals.map((deal) => (before.get(deal.id) === deal.status ? deal : { ...deal, stages: [...(deal.stages ?? []), { status: deal.status, at }] })) };
+}
+
+function apply(s: Book, a: BookAction): Book {
   const log = (text: string) => [{ at: now(), text }, ...s.audit].slice(0, 50);
   const upd = (id: string, f: (d: Deal) => Deal) => s.deals.map((d) => (d.id === id ? f(d) : d));
   const photos = (id: string, f: (r: PhotoRequest) => PhotoRequest) => s.photoRequests.map((r) => (r.id === id ? f(r) : r));

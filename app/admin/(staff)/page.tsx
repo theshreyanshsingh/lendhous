@@ -1,7 +1,9 @@
 "use client";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { attentionItems } from "@/lib/attention";
+import { serviceDay } from "@/lib/book";
+import { daysInStage, STUCK_DAYS } from "@/lib/reports";
 import { closureReason, isClosedApplication } from "@/lib/loan-exits";
 import { downloadCsv } from "@/lib/csv";
 import { useStore, est } from "@/lib/store";
@@ -12,6 +14,10 @@ import { Badge, GradeBadge, ColorDot, usd, pct, k, productLabel, statusLabel, ca
 export default function Pipeline() {
   const { s, newLeads } = useStore();
   const attention = attentionItems(s, newLeads);
+  // Set after the first render: the server and the browser can disagree about today's date.
+  const [today, setToday] = useState("");
+  useEffect(() => { setToday(serviceDay(s)); }, [s]);
+  const inStage = (deal: (typeof s.deals)[number]) => (today ? daysInStage(deal, today) : deal.daysInStage);
   const [product, setProduct] = useState("all"); const [q, setQ] = useState(""); const [ended, setEnded] = useState(false);
   const rows = useMemo(() => s.deals.map((d) => ({ d, e: est(d.app) })).filter(({ d }) => isClosedApplication(d.status) === ended && (product === "all" || d.app.product === product) && (q === "" || (d.borrowerName + d.address + d.loanNumber).toLowerCase().includes(q.toLowerCase()))), [s.deals, product, q, ended]);
   const pre = s.deals.filter((d) => !["servicing_current", "servicing_delinquent", "paid_off", "funded", "matured", "default", "declined", "withdrawn"].includes(d.status));
@@ -78,7 +84,7 @@ export default function Pipeline() {
                 const ltvCell = r("ltv") ? cell("ltv") : <span className="text-faint" title="Total loan ÷ as-is (rehab loans exceed 100% by design)">{pct(e.noteAmount / d.app.purchasePrice)}</span>;
                 return (
                   <tr key={d.id} className="hover:bg-hover/60">
-                    <td><Link href={`/admin/deals/${d.id}`} className="whitespace-nowrap font-semibold text-link hover:underline">{d.loanNumber}</Link><div className="text-xs whitespace-nowrap text-muted-foreground">{productLabel[d.app.product]}</div><div className="text-xs text-faint">{d.daysInStage}d in stage</div></td>
+                    <td><Link href={`/admin/deals/${d.id}`} className="whitespace-nowrap font-semibold text-link hover:underline">{d.loanNumber}</Link><div className="text-xs whitespace-nowrap text-muted-foreground">{productLabel[d.app.product]}</div><div className={`text-xs ${inStage(d) > STUCK_DAYS && pre.includes(d) ? "font-medium text-warn" : "text-faint"}`} data-testid="days-in-stage">{inStage(d)}d in stage</div></td>
                     <td className="min-w-52"><div className="font-medium">{d.borrowerName}</div><div className="text-xs text-muted-foreground">{d.address}, {d.city} · {d.app.county}</div>{d.contractorIsGtAffiliate && <div className="mt-1"><Badge tone="rose">Affiliated contractor (COI)</Badge></div>}</td>
                     <td className="text-right font-semibold">{usd(e.noteAmount)}</td>
                     <td>{ltvCell}</td><td>{cell("ltc")}</td><td>{cell("ltarv")}</td><td>{cell("dscr", true)}</td>

@@ -2,6 +2,7 @@
 // insurance expiry and OFAC re-checks), so each job is named and runs at most once per day: the JobRun.runKey unique
 // index makes a second cron call that day a no-op.
 import { Prisma } from "@prisma/client";
+import { attentionItems } from "@/lib/attention";
 import { audit } from "@/lib/audit";
 import type { Viewer } from "@/lib/book-access";
 import { sendAlerts } from "@/lib/book-alerts";
@@ -10,8 +11,10 @@ import { PRE_FUNDING } from "@/lib/loan-exits";
 import { refreshSanctionsList, screenDeal } from "@/lib/sanctions-store";
 import { encryptStoredData } from "@/lib/encrypt-data";
 import { notifyTeam } from "@/lib/email";
+import { unansweredLeads } from "@/lib/lead-store";
 import { payoffReminders } from "@/lib/payoffs";
 import { noticeReminders } from "@/lib/adverse-action";
+import { dailyDigest } from "@/lib/reports";
 import { prisma } from "@/lib/prisma";
 import { SERVICED, servicingDate } from "@/lib/servicing";
 import { getSettings } from "@/lib/settings";
@@ -110,7 +113,18 @@ async function checkSanctions(now: Date) {
   return `list of ${refreshed.names} names${refreshed.changed ? " (updated)" : ""}; screened ${active.length} loans; ${flagged} possible matches`;
 }
 
-export const JOBS: Record<string, Job> = { sanctions: checkSanctions, servicing: checkServicing, termSheets: checkTermSheets, insurance: checkInsurance, sessions: purgeSessions, retention: cleanRetention, encryption: sealStoredData };
+// The owners' morning email (Spec 11): yesterday's applications, term sheets and fundings, what's waiting on the team,
+// what's stuck, and where the portfolio and capital stand. It runs after the other jobs, so tonight's checks are in it.
+async function sendDigest(now: Date) {
+  const book = (await readBook()).book;
+  if (!book.deals.length) return "no loans yet; nothing sent";
+  const link = `${(process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "")}/admin/reports`;
+  const digest = dailyDigest(book, servicingDate(now), attentionItems(book, await unansweredLeads()), link);
+  await notifyTeam(digest.subject, digest.body, "digest.daily");
+  return digest.subject;
+}
+
+export const JOBS: Record<string, Job> = { sanctions: checkSanctions, servicing: checkServicing, termSheets: checkTermSheets, insurance: checkInsurance, sessions: purgeSessions, retention: cleanRetention, encryption: sealStoredData, digest: sendDigest };
 
 export const runKeyFor = (job: string, now: Date) => `${job}:${now.toISOString().slice(0, 10)}`;
 
