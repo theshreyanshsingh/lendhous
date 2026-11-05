@@ -13,6 +13,8 @@ import { unreadCount } from "@/lib/notifications";
 import { ROLE_LABEL, viewFor } from "@/lib/permissions";
 import { getSettings } from "@/lib/settings";
 import { StoreProvider } from "@/lib/store";
+import { streetViewOn } from "@/lib/street-view";
+import { targetsFrom } from "@/lib/sla";
 
 // Every workspace needs a signed-in account. Demo data loads only for the seeded demo seats (@lendhous.test);
 // any other account starts empty until its records come from the database, unless it loads the sample book itself.
@@ -42,7 +44,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const account = { name: user.name, email: user.email, roles: user.roleCodes.map((role) => ROLE_LABEL[role]), demo, canManageMembers, canViewAudit, canManageSettings, canManageFirms: canRouteCapital || canManageCapital, canManagePricing, canViewReports, canIssueLetters, canManageBrokers, staleJobs: stale.map((job) => JOB_LABEL[job]), openErrors, unread, offerSample: settings.offerSampleData !== false };
   return (
     // Every page, demo seats too, prices new quotes on the version the server does, so the two render the same.
-    <StoreProvider demo={demo} accountId={user.id} viewerName={user.name} viewerEmail={user.email} initialBook={demo ? undefined : await scopedBook(user)} pricing={(await loadPricing(), pricingPayload([]))} newLeads={newLeads}>
+    <StoreProvider demo={demo} accountId={user.id} viewerName={user.name} viewerEmail={user.email} initialBook={demo ? undefined : await scopedBook(user)} pricing={(await loadPricing(), pricingPayload([]))} newLeads={newLeads} streetView={!demo && streetViewOn()} targets={targetsFrom(settings.slaTargets as never)}>
       <Shell account={account} view={view}>{children}</Shell>
     </StoreProvider>
   );

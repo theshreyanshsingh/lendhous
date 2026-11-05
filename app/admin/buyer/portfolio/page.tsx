@@ -8,6 +8,7 @@ import { Badge, Section, Stat, k, productLabel, usd } from "@/components/ui";
 import { BuyerGate } from "../buyer-gate";
 import { shortDay } from "@/lib/format";
 import { InvestorStatements } from "@/components/InvestorStatements";
+import { PortfolioCharts } from "@/components/charts/PortfolioCharts";
 import { holdingsOf, splitOf } from "@/lib/investor-statements";
 
 export default function Portfolio() {
@@ -35,6 +36,7 @@ function Holdings({ me }: { me: LoanBuyer }) {
         <div className="glass p-4"><Stat label="Average yield" value={invested ? `${weighted.toFixed(2)}%` : "—"} sub="weighted by price paid" /></div>
       </div>
       <div className="glass p-4" data-testid="buyer-received"><Stat label="Paid to you so far" value={usd(received, 2)} sub="since you bought each loan, after servicing" /></div>
+      <PortfolioCharts investor={{ type: "buyer", id: me.id }} />
       <Section title={`Loans you own (${owned.length})`}>
         {owned.length === 0 && <p className="text-sm text-muted-foreground">No loans yet. <Link className="text-link underline" href="/admin/buyer">See what&apos;s for sale</Link>.</p>}
         <ul className="divide-y divide-border">

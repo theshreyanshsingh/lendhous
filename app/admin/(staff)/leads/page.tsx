@@ -7,6 +7,7 @@ import { SendApplicationLink } from "@/components/SendApplicationLink";
 import { linkSummaries } from "@/lib/application-links";
 import { openLead, openQuote } from "@/lib/lead-store";
 import { CITIZENSHIP_LABEL, CREDIT_LABEL } from "@/lib/quote";
+import { channelLabel } from "@/lib/quote-funnel";
 import { notDeleted, prisma } from "@/lib/prisma";
 import { PROPERTY_PHOTO } from "@/lib/property-photos";
 
@@ -46,7 +47,7 @@ export default async function Leads() {
                   <td data-label="Received" className="lg:whitespace-nowrap">{when(lead.createdAt)}</td>
                   <td data-label="Project">
                     <div>
-                      <div>{lead.strategy}{lead.submitter === "broker" && <span className="ml-1 text-xs text-link">· broker</span>}{lead.brokerId && <span className="ml-1 text-xs text-link" data-testid="lead-referral">· referred by {brokers.get(lead.brokerId) ?? "a broker"}</span>}</div>
+                      <div>{lead.strategy}{lead.submitter === "broker" && <span className="ml-1 text-xs text-link">· broker</span>}{lead.channel && lead.channel !== "site" && <span className="ml-1 text-xs text-link" data-testid="lead-channel">· {channelLabel(lead.channel).toLowerCase()}</span>}{lead.brokerId && <span className="ml-1 text-xs text-link" data-testid="lead-referral">· referred by {brokers.get(lead.brokerId) ?? "a broker"}</span>}</div>
                       <div className="text-xs text-muted-foreground">{lead.request ? `${lead.request.address.street}, ${lead.request.address.city}, ${lead.request.address.state} ${lead.request.address.zip}` : `${lead.city}, ${lead.state}`}{lead.experience ? ` · ${lead.experience}` : ""}</div>
                       {lead.request && <div className="text-xs text-muted-foreground">{CREDIT_LABEL[lead.request.creditBand]} credit · {CITIZENSHIP_LABEL[lead.request.citizenship]}{lead.request.comps.length ? ` · ${lead.request.comps.length} comp${lead.request.comps.length === 1 ? "" : "s"}` : ""}</div>}
                       {lead.targetClosing && <div className="text-xs text-muted-foreground">Target closing {lead.targetClosing}</div>}

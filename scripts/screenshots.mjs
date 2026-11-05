@@ -79,7 +79,7 @@ ok("an unknown program page is a 404", (await fetch(BASE + "/programs/nope")).st
 
 await page.goto(BASE + "/");
 ok("the landing page is the main page", (await page.locator("h1").innerText()).includes("A considered"));
-ok("the hero photo loads", await page.locator(".hero-visual img").evaluate((img) => img.complete && img.naturalWidth > 0));
+ok("the hero is a drawing of Florida, not another city's photo", (await page.getByTestId("hero-art").isVisible()) && (await page.locator(".hero-visual img").count()) === 0 && !(await page.content()).includes("dallas"));
 await shot(page, "00-landing-page.png");
 ok("the landing page shows all five programs", (await page.getByTestId("home-program").count()) === 5);
 ok("the quick check shows the lower cap", (await page.getByTestId("quick-result").innerText()) === "$262,500");
@@ -107,12 +107,9 @@ ok("the leverage calculator takes the lower cap", (await page.getByTestId("calc-
 await page.getByTestId("calc-value").fill("");
 ok("an empty calculator input shows an error instead of a number", (await page.getByRole("alert").filter({ hasText: "non-negative" }).count()) === 1);
 
-// The loan quote request: the ARV and comps go with it, and the visitor sees indicative terms straight away.
+// The loan quote: the deal first and its indicative terms straight away, with no contact details and nothing kept;
+// saving the terms asks who's asking and sends the request, with its ARV, comps and photo.
 await page.goto(BASE + "/start");
-await page.getByTestId("quote-first").fill("Smoke Test");
-await page.getByTestId("quote-last").fill("Lead");
-await page.getByTestId("quote-email").fill(LEAD_EMAIL);
-await page.getByTestId("quote-phone").fill("(954) 555-0177");
 await page.getByTestId("quote-citizen").selectOption("us");
 await page.getByTestId("quote-credit").selectOption("720-759");
 await page.getByTestId("quote-experience").selectOption("3-4");
@@ -125,28 +122,56 @@ await page.getByTestId("quote-purchasePrice").fill("300000");
 await page.getByTestId("quote-rehab").fill("80000");
 await page.getByTestId("quote-requestedAmount").fill("240000");
 await page.getByTestId("quote-date").fill("2026-12-15");
-await page.getByTestId("quote-submit").click();
-ok("a fix and flip quote can't go without its ARV", (await page.getByTestId("quote-error").innerText()).includes("after-repair value"));
+ok("the quote asks for no contact details up front", (await page.getByTestId("quote-first").count()) === 0);
+await page.getByTestId("quote-see-terms").click();
+ok("a fix and flip quote can't show terms without its ARV", (await page.getByTestId("quote-error").innerText()).includes("after-repair value"));
 await page.getByTestId("quote-arv").fill("520000");
 await page.getByTestId("add-comp").click();
 await page.getByTestId("comp-address-0").fill("120 Smoke Test Way");
 await page.getByTestId("comp-price-0").fill("515000");
 await page.getByTestId("comp-sold-0").fill("2026-08");
-await page.getByTestId("quote-broker").click();
-ok("a broker gets their own section", await page.getByTestId("broker-name").waitFor({ timeout: 5000 }).then(() => true, () => false));
-await page.getByTestId("quote-borrower").click();
 const PHOTO = await makePhoto(page);
 await page.getByTestId("quote-photos-input").setInputFiles({ name: "front-of-house.jpg", mimeType: "image/jpeg", buffer: PHOTO });
 ok("the quote request takes photos of the property", await page.getByTestId("quote-photos-item").getByText("Ready to send").waitFor({ timeout: 5000 }).then(() => true, () => false));
+await page.getByTestId("quote-see-terms").click();
+ok("the visitor sees indicative terms from today's pricing before giving any contact details", (await seen(page.getByTestId("quote-live"))) && (await page.getByTestId("quote-amount").innerText()).startsWith("up to $"));
+await page.getByTestId("quote-cash-parts").locator("summary").click();
+ok("with the cash to close itemized", (await page.getByTestId("quote-cash-parts").innerText()).includes("Down payment") && (await page.getByTestId("quote-cash-parts").innerText()).includes("Closing costs"));
+const cashBefore = await page.getByTestId("quote-cash").innerText();
+await page.getByTestId("quote-rehab").fill("90000");
+ok("the terms follow the numbers as they change", (await page.getByTestId("quote-cash").innerText()) !== cashBefore);
+await page.getByTestId("quote-rehab").fill("80000");
 await shot(page, "00c-site-quote-request.png");
+ok("nothing about the visitor is kept until they save", (await prisma.lead.count({ where: OWN_LEAD })) === 0);
+await page.getByTestId("quote-broker").click();
+ok("a broker gets their own section", await page.getByTestId("broker-name").waitFor({ timeout: 5000 }).then(() => true, () => false));
+await page.getByTestId("quote-borrower").click();
+await page.getByTestId("quote-first").fill("Smoke Test");
+await page.getByTestId("quote-last").fill("Lead");
+await page.getByTestId("quote-email").fill(LEAD_EMAIL);
+await page.getByTestId("quote-phone").fill("(954) 555-0177");
 await page.getByTestId("quote-submit").click();
-ok("the quote request shows indicative terms from today's pricing", (await page.getByTestId("quote-sent").waitFor({ timeout: 5000 }).then(() => true, () => false)) && (await page.getByTestId("quote-amount").innerText()).startsWith("up to $"));
+ok("saving sends the request, with its terms again", (await page.getByTestId("quote-sent").waitFor({ timeout: 5000 }).then(() => true, () => false)) && (await page.getByTestId("quote-amount").innerText()).startsWith("up to $") && (await prisma.lead.count({ where: OWN_LEAD })) === 1);
 ok("and says the photo went with it", await page.getByTestId("quote-photos-sent").getByText("1 photo of the property sent.").waitFor({ timeout: 10000 }).then(() => true, () => false));
 await shot(page, "00d-site-quote-terms.png");
 await page.getByTestId("quote-signup-link").click();
 ok("the borrower can go on to create an account, already filled in", await page.getByTestId("signup-name").waitFor({ timeout: 5000 }).then(async () => (await page.getByTestId("signup-name").inputValue()) === LEAD_NAME && (await page.getByTestId("signup-email").inputValue()) === LEAD_EMAIL, () => false));
 ok("without their details in the address bar", !page.url().includes("@") && !page.url().includes("Smoke"));
 await shot(page, "00h-signup.png");
+// The quote widget: a page for other sites to frame, and the only one that may be framed.
+const widgetReply = await page.goto(BASE + "/embed/quote?site=wholesale");
+ok("the quote widget opens on its own, without the site's header", (await seen(page.getByTestId("embed-quote"))) && (await page.locator("header").count()) === 0 && (await page.getByTestId("quote-see-terms").isVisible()));
+ok("other sites may frame the widget", (widgetReply.headers()["content-security-policy"] ?? "").includes("frame-ancestors *"));
+const startReply = await page.request.get(BASE + "/start");
+ok("and no other page", startReply.headers()["x-frame-options"] === "DENY" && (startReply.headers()["content-security-policy"] ?? "").includes("frame-ancestors 'none'"));
+await shot(page, "00i-quote-widget.png", false);
+// A page of its own, since the browser reports the refused frame as an error on the page that tried.
+const framer = await ctx.newPage();
+await framer.goto(BASE + "/programs");
+await framer.evaluate((base) => { for (const path of ["/embed/quote", "/start"]) { const frame = document.createElement("iframe"); frame.src = base + path; frame.dataset.path = path; frame.style.cssText = "width:600px;height:400px"; document.body.append(frame); } }, BASE);
+await framer.waitForTimeout(2500);
+ok("in a browser, the widget loads in a frame and the quote page refuses to", (await framer.frameLocator('iframe[data-path="/embed/quote"]').getByTestId("embed-quote").isVisible().catch(() => false)) && !(await framer.frameLocator('iframe[data-path="/start"]').getByTestId("quote-form").isVisible().catch(() => false)));
+await framer.close();
 await page.goto(BASE + "/programs");
 ok("the programs page compares all four programs from the pricing", (await page.getByTestId("compare-card").count()) === 4 && (await page.getByTestId("program-compare").innerText()).toLowerCase().includes("rate from"));
 // The borrower application link, as a preview: it checks each step before moving on.
@@ -270,6 +295,8 @@ const newLoan = (await page.getByTestId("borrower-loan-card").first().innerText(
 
 // 2. Borrower dashboard + doc upload
 await shot(page, "02-borrower-dashboard.png");
+ok("each loan card leads with the property and its one next step", (await page.getByTestId("borrower-loan-card").first().getByTestId("property-picture").count()) === 1 && (await page.getByTestId("card-next-step").count()) >= 3);
+ok("the dashboard's dates are written out, never ISO", !/\b20\d\d-\d\d-\d\d\b/.test(await page.locator("main").innerText()));
 await page.getByTestId("borrower-loan-card").filter({ hasText: newLoan }).click();
 ok("the entity's papers accepted on the funded loan carry over to the new one", (await seen(page.getByTestId("doc-entity").getByTestId("doc-carried"))) && (await page.getByTestId("doc-ein").getByTestId("doc-carried").count()) === 1 && (await page.getByTestId("doc-bank").getByTestId("doc-carried").count()) === 0);
 await page.goto(BASE + "/admin/borrower/d1");
@@ -281,6 +308,8 @@ ok("document upload changes status to Uploaded", (await page.getByTestId("doc-ba
 ok("the borrower's loan starts with what's needed from them", (await page.getByTestId("need-item").count()) >= 1 && (await page.getByTestId("needs-progress").innerText()).includes("documents in"));
 ok("and there's one way to apply, in plain words", (await page.getByRole("link", { name: "Apply for a loan" }).count()) >= 1 && (await page.getByRole("link", { name: "New application" }).count()) === 0);
 ok("the borrower sees who's on their loan and how to reach them", (await page.getByTestId("your-team").innerText()).includes("Uma Underwriter (FAKE)") && (await page.getByTestId("your-team").getByRole("link", { name: /^Call/ }).count()) === 2);
+ok("the loan page shows one next step and the loan's journey", (await page.getByTestId("borrower-next-step").count()) === 1 && (await seen(page.getByTestId("loan-timeline"))) && (await page.getByTestId("timeline-point").count()) >= 6 && (await page.getByTestId("timeline-point").filter({ hasText: "Target" }).count()) === 1);
+ok("in plain words and written-out dates", !/full-boat|Dutch|LTARV|Servicing Current|Term Sheet Issued/.test(await page.locator("main").innerText()) && !/\b20\d\d-\d\d-\d\d\b/.test(await page.locator("main").innerText()));
 await shot(page, "03-borrower-loan-document-center.png");
 await page.getByTestId("property-photo-input").setInputFiles({ name: "back-yard.jpg", mimeType: "image/jpeg", buffer: PHOTO });
 ok("the borrower adds photos of the property to their loan", await page.getByTestId("property-photos").getByTestId("property-photo").first().waitFor({ timeout: 5000 }).then(() => true, () => false));
@@ -304,6 +333,19 @@ await page.goto(BASE + "/admin");
 // the saved demo book loads after the first render, so wait for the row rather than reading the table at once
 ok(`the staff seat sees the borrower's new application (${newLoan})`, !!newLoan && (await page.getByTestId("pipeline-table").getByText(newLoan).waitFor({ timeout: 5000 }).then(() => true, () => false)));
 await shot(page, "04-admin-pipeline-scoring.png");
+// The menu fits a laptop: the owners' tools fold under Admin, and the account's controls sit in its own menu.
+for (const [width, height] of [[1440, 900], [1280, 720]]) {
+  await page.setViewportSize({ width, height });
+  await page.waitForTimeout(250);
+  ok(`the staff menu fits at ${width}×${height} without scrolling`, (await page.getByTestId("side-nav").first().getAttribute("data-more")) === null);
+}
+await page.setViewportSize({ width: 1440, height: 1000 });
+await page.getByTestId("account-menu").first().click();
+ok("the account menu holds security, the theme and sign-out", (await page.getByTestId("account-menu-items").getByRole("button", { name: "Sign out" }).isVisible()) && (await page.getByTestId("account-menu-items").getByRole("link", { name: "Password and security" }).isVisible()));
+await page.keyboard.press("Escape");
+await page.getByTestId("nav-group-Admin").first().click();
+ok("the folded Admin group opens", await page.getByRole("link", { name: "Members" }).first().isVisible());
+await page.getByTestId("nav-group-Admin").first().click();
 const stuckRow = page.getByTestId("pipeline-table").locator("tr", { hasText: "LH-DEMO-1005" });
 ok("the pipeline marks a loan sitting in one stage over a week", (await stuckRow.getByTestId("days-in-stage").innerText()) === "9d in stage" && (await stuckRow.getByTestId("days-in-stage").getAttribute("class")).includes("text-warn"));
 // The business reports: the pipeline over a period, capital and the portfolio today, and the spreadsheets.
@@ -313,6 +355,8 @@ ok("the reports count the last 90 days' applications, fundings and term sheets",
 ok("they follow the applications through and time each step", (await page.getByTestId("pull-through-row").count()) === 5 && (await page.getByTestId("cycle-times").innerText()).includes("10 days"));
 ok("they list the loan stuck in underwriting", (await page.getByTestId("stuck-row").count()) === 1 && (await page.getByTestId("stuck").innerText()).includes("LH-DEMO-1005"));
 ok("they show capital and the portfolio as of today", (await page.getByTestId("kpi-available").innerText()).includes("$3.69M") && (await page.getByTestId("kpi-outstanding").innerText()).includes("$2.73M") && (await page.getByTestId("delinquency-row").count()) === 5);
+ok("the reports say what the quote funnel shows on a real account", await seen(page.getByTestId("quote-funnel-demo")));
+ok("and how fast the team worked against its targets", (await seen(page.getByTestId("speed-measures"))) && (await page.getByTestId("speed-firstLook").innerText()).includes("New application looked at"));
 ok("they break the period down by loan officer", (await page.getByTestId("by-officer").innerText()).includes("Uma Underwriter (FAKE)"));
 await shot(page, "24-admin-reports.png");
 await page.getByTestId("range-month").click();
@@ -351,7 +395,7 @@ await page.getByTestId("pipeline-ended").selectOption("funded");
 ok("and shows the funded ones when asked", await seen(page.getByTestId("pipeline-table").getByText("LH-DEMO-1002")));
 await page.getByTestId("pipeline-ended").selectOption("pipeline");
 const rehabRow = page.getByTestId("pipeline-table").locator("tr", { hasText: "LH-DEMO-1001" });
-ok("a rehab loan shows no total-loan-to-as-is LTV, and one status", (await rehabRow.locator("td").nth(3).innerText()).trim() === "—" && !(await page.getByTestId("pipeline-table").innerText()).includes("Not Started"));
+ok("a rehab loan shows no total-loan-to-as-is LTV, and one status", (await rehabRow.locator("td").nth(3).innerText()).trim() === "—" && !/not started/i.test(await page.getByTestId("pipeline-table").innerText()));
 await page.getByTestId("staff-search-input").fill("1005");
 ok("the staff search finds a loan by number", await seen(page.getByTestId("search-result").filter({ hasText: "LH-DEMO-1005" })));
 await page.getByTestId("staff-search-input").fill("Smoke Test");
@@ -361,6 +405,28 @@ await page.getByTestId("search-result").filter({ hasText: "LH-DEMO-1005" }).clic
 ok("a result opens the loan", await page.waitForURL("**/admin/deals/d5").then(() => true, () => false));
 await page.goto(BASE + "/admin");
 ok("needs attention counts the applications with no loan officer", (await page.getByTestId("attention-unassigned").innerText()).includes("no loan officer"));
+// The work queue: the owner's own loans first, each item with its deadline or its clock, linked to where it's done.
+await seen(page.getByTestId("queue-item"));
+ok("the work queue lists what to do next, on the owner's own loans and for the team", (await page.getByTestId("queue-mine").getByTestId("queue-item").count()) >= 1 && (await page.getByTestId("queue-team").getByTestId("queue-item").count()) >= 1);
+const deadlinesFirst = await page.evaluate(() => [...document.querySelectorAll("[data-testid=queue-mine], [data-testid=queue-team]")].every((list) => { const due = [...list.querySelectorAll("[data-testid=queue-item]")].map((item) => Boolean(item.querySelector("[data-testid=queue-due]"))); const first = due.indexOf(false); return first === -1 || due.slice(first).every((flag) => !flag); }));
+ok("with legal deadlines first and clocks against the targets", deadlinesFirst && (await page.getByTestId("queue-due").count()) >= 1 && (await page.getByTestId("queue-clock").count()) >= 1);
+const docsItem = page.getByTestId("queue-item").filter({ hasText: /Review \d+ documents?/ }).first();
+await docsItem.click();
+await page.waitForURL(/\/admin\/deals\/.+\?tab=Documents/);
+ok("an item opens the loan on the tab where it's done", await page.waitForFunction(() => document.querySelector("[data-testid='tab-Documents']")?.className.includes("border-primary"), null, { timeout: 5000 }).then(() => true, () => false));
+await page.goto(BASE + "/admin");
+// The board: columns by stage; a card only moves to its next step.
+await page.getByTestId("layout-board").click();
+await seen(page.getByTestId("pipeline-board"));
+// The application the borrower sent earlier in this run, which nothing later needs to find still unopened.
+const freshCard = page.getByTestId("board-column-submitted").getByTestId("board-card").filter({ hasText: newLoan });
+const freshId = await freshCard.getAttribute("data-deal");
+await freshCard.dragTo(page.getByTestId("board-column-conditions"));
+ok("the board refuses a jump past the next step, and says why", (await seen(page.getByTestId("board-refused"))) && (await page.getByTestId("board-refused").innerText()).includes("one step at a time"));
+await page.getByTestId("board-column-submitted").locator(`[data-deal="${freshId}"]`).dragTo(page.getByTestId("board-column-initial_review"));
+ok("and moves a card to its next step", await seen(page.getByTestId("board-column-initial_review").locator(`[data-deal="${freshId}"]`)));
+await shot(page, "04c-admin-pipeline-board.png");
+await page.getByTestId("layout-list").click();
 await page.getByTestId("pipeline-team").selectOption("unassigned");
 const officers = page.getByTestId("pipeline-table").getByTestId("officer");
 ok("the pipeline shows the applications nobody has taken", (await officers.count()) > 0 && (await officers.allInnerTexts()).every((text) => text === "No loan officer"));
@@ -376,6 +442,7 @@ ok("the loan shows its officer and processor", (await chosen("officer")) === "Um
 await page.getByTestId("assign-processor").selectOption({ label: "Olivia Owner (FAKE)" });
 ok("an owner hands it to someone else", (await chosen("processor")) === "Olivia Owner (FAKE)");
 await page.getByTestId("assign-processor").selectOption({ label: "Pat Processor (FAKE)" });
+ok("the staff loan page leads with the property and the loan's journey", (await page.getByTestId("property-picture").first().isVisible()) && (await seen(page.getByTestId("loan-timeline"))) && (await page.getByTestId("timeline-point").filter({ hasText: "days so far" }).count()) === 1);
 await shot(page, "05-admin-deal-ratios.png");
 // 5. Capital routing: send a teaser to the demo partner seat's organization, partner bids, staff accepts
 await page.getByTestId("tab-Capital Routing").click();
@@ -399,6 +466,7 @@ ok("with what's been paid to it after servicing", (await page.getByTestId("portf
 ok("and October's statement: its interest at its own rate", (await page.getByTestId("statement-net").innerText()) === "$1,792.19");
 const samplePdfReply = await page.request.get(BASE + (await page.getByTestId("statement-sample-pdf").getAttribute("href")));
 ok("the sample statement downloads as a PDF", samplePdfReply.headers()["content-type"] === "application/pdf" && (await samplePdfReply.body()).subarray(0, 5).toString() === "%PDF-");
+ok("the partner sees what it was paid each month and when its money comes back", (await seen(page.getByTestId("paid-chart"))) && (await page.getByTestId("month-bar").count()) === 12 && (await page.getByTestId("maturity-ladder").innerText()).includes("$232,500"));
 await shot(page, "07b-partner-portfolio.png");
 await page.goto(BASE + "/admin/account/tax");
 ok("a partner has a tax form page (a sample on demo seats)", await seen(page.getByTestId("tax-demo")));
@@ -463,6 +531,7 @@ await page.goto(BASE + "/admin/buyer/portfolio");
 await page.getByTestId("my-offer-row").first().waitFor({ timeout: 5000 });
 ok("the buyer's page shows the loan they own and their offers", (await page.getByTestId("owned-loan").count()) === 1 && (await page.getByTestId("my-offer-row").count()) === 2);
 ok("the buyer sees what it's been paid since it bought, and last month's statement", !(await page.getByTestId("buyer-received").innerText()).includes("$0.00") && (await seen(page.getByTestId("statement-preview"))));
+ok("the buyer gets the same charts of its money", await seen(page.getByTestId("portfolio-charts")));
 await shot(page, "12-buyer-portfolio.png");
 await page.goto(BASE + "/admin/buyer/loans/s-d14");
 ok("a loan the buyer owns shows its address and file", await page.getByTestId("file-open").waitFor({ timeout: 5000 }).then(() => true, () => false) && (await page.getByTestId("loan-heading").innerText()).includes("250 Sample Shore Dr"));
@@ -589,6 +658,10 @@ await page.goto(BASE + "/admin/borrower/d2");
 await seen(page.getByTestId("request-draw"));
 ok("a funded loan offers the next one, with what paying as agreed earns", (await page.getByTestId("repeat-status").innerText()).includes("loan paid as agreed takes 0.25% off the rate") && (await page.getByTestId("repeat-status").innerText()).includes("more take it to 0.5% off"));
 await shot(page, "02e-next-loan.png", false);
+ok("a funded loan shows the rehab money paid out, line by line", (await seen(page.getByTestId("rehab-progress"))) && (await page.getByTestId("rehab-progress").getByRole("meter").count()) >= 3);
+ok("and its payments, maturity and extension dates written out", !/\b20\d\d-\d\d-\d\d\b/.test(await page.locator("main").innerText()));
+await page.getByTestId("showcase-toggle").click();
+ok("the borrower can show the funded loan on the website", await seen(page.getByTestId("showcase-on")));
 ok("the borrower sees the draw in progress", (await page.getByTestId("my-draw").count()) === 1);
 await page.getByTestId("request-draw").click();
 await page.getByTestId("draw-plumbing").fill("3000");
@@ -620,6 +693,10 @@ ok("a withdrawn application has no steps left", (await page.getByTestId("borrowe
 
 // 9. The same loans from the staff side: draws, servicing, moving a loan forward, and the conversation
 await actAs(SEATS.staff);
+await page.goto(BASE + "/admin/deals/d2");
+ok("the team sees the borrower put the loan on the website", await seen(page.getByTestId("showcase-team")));
+await page.getByTestId("showcase-take-down").click();
+ok("and can take it down", await page.getByTestId("showcase-team").waitFor({ state: "detached", timeout: 5000 }).then(() => true, () => false));
 await page.goto(BASE + "/admin/draws");
 const draw = page.getByTestId("draw-card").filter({ hasText: "Cabinets are in" });
 await seen(draw);
@@ -1046,6 +1123,8 @@ ok("the broker sees only their own deals", (await page.getByTestId("broker-deal"
 ok("funding a loan earns the broker's fee", (await page.getByTestId("fees-earned").innerText()) !== "$0");
 ok("a fee on a funded loan shows as not paid yet until the team records it", (await page.getByTestId("fees-unpaid").innerText()).includes("not paid yet"));
 ok("the approved brokerage has a referral link", (await page.getByTestId("referral-url").innerText()).endsWith("/start?ref=demobrkr"));
+await page.waitForFunction(() => (document.querySelector("[data-testid=embed-code]")?.value ?? "").length > 0, null, { timeout: 5000 }).catch(() => {});
+ok("and the quote widget's code for its own site, with its referral code", (await page.getByTestId("embed-code").inputValue()).includes("/embed/quote?ref=demobrkr"));
 await shot(page, "20-broker-deals.png");
 await page.goto(BASE + "/admin");
 ok("the broker seat can't open the staff pipeline", pathOf(page) === "/admin/broker");
@@ -1171,6 +1250,19 @@ await mp.waitForTimeout(300);
 await shot(mp, "09-mobile-application.png", false);
 await m.close();
 
+// A borrower's phone: four tabs under the thumb instead of the menu button.
+const borrowerPhone = await browser.newContext({ viewport: { width: 375, height: 760 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+await borrowerPhone.addCookies(sessions[SEATS.borrower]);
+const bp = await borrowerPhone.newPage();
+await bp.goto(BASE + "/admin/borrower");
+ok("a borrower's phone has a tab bar and no menu button", (await bp.getByTestId("borrower-tabs").isVisible()) && !(await bp.getByRole("button", { name: "Open navigation" }).isVisible()));
+await bp.getByTestId("tab-bar-upload").click();
+ok("its Upload tab opens the loan that needs something", await bp.waitForURL(/\/admin\/borrower\/d\w+/, { timeout: 5000 }).then(() => true, () => false));
+await bp.getByTestId("tab-bar-account").click();
+ok("and Account opens the menu", await bp.getByTestId("account-menu").last().isVisible());
+await shot(bp, "09b-mobile-borrower-tabs.png", false);
+await borrowerPhone.close();
+
 // The sheets and the menu open over the page, so the phone-check script doesn't see them.
 const phone = await browser.newContext({ viewport: { width: 375, height: 760 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
 await phone.addCookies(sessions[SEATS.staff]);
@@ -1178,6 +1270,8 @@ const pp = await phone.newPage();
 const fits = () => pp.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth && [...document.querySelectorAll("[data-slot='sheet-content'] *")].every((el) => el.getBoundingClientRect().right <= document.documentElement.clientWidth + 1));
 await pp.goto(BASE + "/admin");
 await pp.getByRole("button", { name: "Open navigation" }).click();
+// The owners' tools are folded under Admin until opened.
+await pp.getByTestId("nav-group-Admin").last().click();
 await pp.getByRole("link", { name: "Members" }).click();
 await pp.waitForURL("**/admin/members");
 ok("the phone menu reaches the members page", pathOf(pp) === "/admin/members");

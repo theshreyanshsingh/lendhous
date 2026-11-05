@@ -46,7 +46,7 @@ export function Extensions({ deal, side }: { deal: Deal; side: "team" | "borrowe
     </div>
   );
   return (
-    <Section title="Extension" right={<span className="text-xs text-muted-foreground" data-testid="extensions-used">{used} of {maxCount} used · matures {maturityOf(deal)}</span>}>
+    <Section title="Extension" right={<span className="text-xs text-muted-foreground" data-testid="extensions-used">{used} of {maxCount} used · matures {shortDay(maturityOf(deal))}</span>}>
       {open ? (team ? <OpenExtension deal={deal} extension={open} today={today} /> : <BorrowerOpen deal={deal} extension={open} />)
         : team ? (asking ? form : <button type="button" className="btn-ghost h-9! px-3! text-xs!" data-testid="file-extension" disabled={used >= maxCount} onClick={() => setAsking(true)}>{used >= maxCount ? `Extended ${maxCount} times already` : "File an extension request"}</button>)
         : refused ? <p className="text-sm text-muted-foreground" data-testid="extension-not-yet">{refused}</p>
@@ -64,7 +64,7 @@ function BorrowerOpen({ deal, extension }: { deal: Deal; extension: LoanExtensio
   return (
     <div className="space-y-1 text-sm" data-testid="extension-open">
       <p className="flex flex-wrap items-center gap-2"><Badge tone={statusTone[extension.status]}>{statusText[extension.status]}</Badge>{extension.months} more month{extension.months === 1 ? "" : "s"}, asked {shortDate(extension.requestedAt)}</p>
-      <p className="text-muted-foreground">{extension.status === "approved" ? `Approved. Sign the extension agreement and pay the ${usd(extension.fee, 2)} fee, and your loan will mature on ${maturityAfter(deal, extension)}. Your servicing team will send them.` : `The fee would be ${usd(extension.fee, 2)}. We'll tell you when it's decided.`}</p>
+      <p className="text-muted-foreground">{extension.status === "approved" ? `Approved. Sign the extension agreement and pay the ${usd(extension.fee, 2)} fee, and your loan will mature on ${shortDay(maturityAfter(deal, extension))}. Your servicing team will send them.` : `The fee would be ${usd(extension.fee, 2)}. We'll tell you when it's decided.`}</p>
     </div>
   );
 }

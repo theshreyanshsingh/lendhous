@@ -8,6 +8,10 @@ import Tracker from "@/components/Tracker";
 import { PageIntro } from "@/components/page-intro";
 import { Badge, usd, productLabel, statusLabel, Stat } from "@/components/ui";
 import { BorrowerLetters } from "@/components/BorrowerLetters";
+import { EmptyArt } from "@/components/art/HouseArt";
+import { PropertyPicture } from "@/components/PropertyPicture";
+import { shortDay } from "@/lib/format";
+import { nextStepFor } from "@/lib/next-step";
 
 export default function BorrowerHome() {
   const { s, viewerName } = useStore();
@@ -21,14 +25,17 @@ export default function BorrowerHome() {
       </div>
       {tasks.length > 0 && <div className="glass border-warn/30 bg-warn/12 p-4 text-sm text-warn"><b>{tasks.length} document{tasks.length > 1 ? "s" : ""} needed</b> across your loans. Open a loan to upload.</div>}
       <BorrowerLetters />
-      {mine.length === 0 && <div className="glass p-6 text-sm text-muted-foreground" data-testid="no-loans">No loans yet. Start an application to get an instant estimate.</div>}
+      {mine.length === 0 && <div className="glass flex flex-col items-center gap-2 p-8 text-center text-sm text-muted-foreground" data-testid="no-loans"><EmptyArt className="h-24 w-32" />No loans yet. Start an application to get an instant estimate.</div>}
       <div className="grid gap-4 lg:grid-cols-2">
         {mine.map((d) => {
           const e = est(d.app); const funded = SERVICED.includes(d.status);
           const open = d.docs.filter((x) => x.status === "requested" || x.status === "rejected").length;
           const b = fundedBalances(e, d.app, d.disbursedDraws);
+          const step = nextStepFor(d);
           return (
-            <Link key={d.id} href={`/admin/borrower/${d.id}`} className="glass block min-w-0 p-5 transition-colors hover:border-faint" data-testid="borrower-loan-card">
+            <Link key={d.id} href={`/admin/borrower/${d.id}`} className="glass block min-w-0 overflow-hidden transition-colors hover:border-faint" data-testid="borrower-loan-card">
+              <PropertyPicture deal={d} variant="card" />
+              <div className="p-5">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0"><div className="text-xs text-muted-foreground">{d.loanNumber} · {productLabel[d.app.product]}</div><div className="text-lg font-semibold">{d.address}, {d.city}</div></div>
                 <Badge tone={d.status === "default" ? "rose" : funded || d.status === "paid_off" ? "green" : isClosedApplication(d.status) ? "slate" : "blue"}>{statusLabel(d.status)}</Badge>
@@ -38,7 +45,7 @@ export default function BorrowerHome() {
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                   <Stat label="Disbursed principal" value={usd(b.disbursed)} />
                   <Stat label="Holdback remaining" value={usd(b.holdbackRemaining)} />
-                  <Stat label="Next payment" value={usd(b.nextPayment)} sub={`due ${ledger(d).nextDue ?? "—"}`} />
+                  <Stat label="Next payment" value={usd(b.nextPayment)} sub={ledger(d).nextDue ? `due ${shortDay(ledger(d).nextDue)}` : "none due"} />
                 </div>
               ) : (
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -47,6 +54,8 @@ export default function BorrowerHome() {
                   <Stat label="Docs needed" value={open} sub={open ? "tap to upload" : "all in"} />
                 </div>
               )}
+              {step && <p className="mt-4 border-t border-border pt-3 text-sm" data-testid="card-next-step"><span className="text-muted-foreground">Next: </span>{step.title}</p>}
+              </div>
             </Link>
           );
         })}

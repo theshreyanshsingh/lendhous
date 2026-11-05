@@ -9,6 +9,9 @@ const nextConfig = {
   serverExternalPackages: ["pdfkit"],
   headers: async () => [
     { source: "/:path*", headers: [{ key: "Strict-Transport-Security", value: "max-age=31536000" }, { key: "X-Content-Type-Options", value: "nosniff" }, { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" }] },
+    // No other site may frame LendHous's pages, except the quote widget, which exists to be framed (/embed/quote).
+    { source: "/((?!embed/).*)", headers: [{ key: "X-Frame-Options", value: "DENY" }, { key: "Content-Security-Policy", value: "frame-ancestors 'none'" }] },
+    { source: "/embed/:path*", headers: [{ key: "Content-Security-Policy", value: "frame-ancestors *" }] },
     // The address of these pages is the key to them, so it must not reach another site or a search engine.
     { source: "/photos/:path*", headers: [{ key: "Referrer-Policy", value: "no-referrer" }, { key: "X-Robots-Tag", value: "noindex, nofollow" }, { key: "Cache-Control", value: "no-store" }] },
     { source: "/apply/:path*", headers: [{ key: "Referrer-Policy", value: "no-referrer" }, { key: "X-Robots-Tag", value: "noindex, nofollow" }, { key: "Cache-Control", value: "no-store" }] },

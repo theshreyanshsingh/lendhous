@@ -1,5 +1,6 @@
 "use client";
 
+import { EmptyState } from "@/components/EmptyState";
 import { useState } from "react";
 import { PageIntro } from "@/components/page-intro";
 import { Badge, productLabel, usd } from "@/components/ui";
@@ -33,7 +34,7 @@ export function PartnersBoard({ accounts }: { accounts: FirmAccount[] }) {
     <div className="space-y-4">
       <PageIntro eyebrow="Money" title="Partners & buyers" lede="The firms you send deals to and sell loans to. Set what each one buys, and deals are matched against it. To add one, invite them from Members with the Partner lender or Loan buyer role." />
       {editing && <FirmForm firm={editing} onClose={() => setEditing(null)} />}
-      {rows.length === 0 && <div className="glass p-6 text-sm text-muted-foreground" data-testid="no-firms">No partner lenders or loan buyers yet. Invite one from Members.</div>}
+      {rows.length === 0 && <EmptyState testid="no-firms">No partner lenders or loan buyers yet. Invite one from Members.</EmptyState>}
       <div className="grid gap-4 lg:grid-cols-2">
         {rows.map((firm) => (
           <section key={firm.id} className="glass min-w-0 p-5" data-testid="firm-row">

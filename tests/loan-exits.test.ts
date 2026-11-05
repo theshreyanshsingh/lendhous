@@ -162,7 +162,7 @@ describe("extending a loan", () => {
     return { b, id };
   };
   it("lets the borrower ask from 60 days before maturity, and the team at any time", () => {
-    expect(check(book(loan()), borrower, ask())).toMatchObject({ error: expect.stringMatching(/from 2026-11-16/) });
+    expect(check(book(loan()), borrower, ask())).toMatchObject({ error: expect.stringMatching(/from Nov 16, 2026/) });
     expect(check(book(loan()), servicer, ask())).toMatchObject({ action: { byTeam: true } });
     vi.setSystemTime(new Date("2026-11-20T17:00:00Z"));
     expect(check(book(loan()), borrower, ask())).toMatchObject({ action: { by: "borrower-1 name", byTeam: false } });

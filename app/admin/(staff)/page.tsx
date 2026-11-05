@@ -12,9 +12,12 @@ import { downloadCsv } from "@/lib/csv";
 import { useStore, est } from "@/lib/store";
 import { pipelineStages } from "@/lib/mockData";
 import { PageIntro } from "@/components/page-intro";
+import { WorkQueue } from "@/components/WorkQueue";
+import { PipelineBoard } from "@/components/PipelineBoard";
 import { Badge, GradeBadge, ColorDot, usd, pct, k, productLabel, statusLabel, capTone } from "@/components/ui";
 
 const TEAM_VIEW = "lendhous-pipeline-team";
+const LAYOUT = "lendhous-pipeline-layout";
 const VIEWS = { pipeline: "In the pipeline", funded: "Funded", ended: "Declined and withdrawn", all: "Every loan" } as const;
 type View = keyof typeof VIEWS;
 const inView = (deal: Deal, view: View) => view === "all" || (view === "pipeline" ? PRE_FUNDING.includes(deal.status) : view === "funded" ? deal.status === "paid_off" || SERVICED.includes(deal.status) : isClosedApplication(deal.status));
@@ -45,6 +48,10 @@ export default function Pipeline() {
     if (pick === "mine" || pick === "unassigned") setTeam(pick);
   }, []);
   const chooseTeam = (next: typeof team) => { setTeam(next); try { localStorage.setItem(TEAM_VIEW, next); } catch {} };
+  // A list or a board of columns by stage, remembered per browser.
+  const [layout, setLayout] = useState<"list" | "board">("list");
+  useEffect(() => { try { if (localStorage.getItem(LAYOUT) === "board") setLayout("board"); } catch {} }, []);
+  const chooseLayout = (next: typeof layout) => { setLayout(next); try { localStorage.setItem(LAYOUT, next); } catch {} };
   const rows = useMemo(() => s.deals.map((d) => ({ d, e: est(d.app) })).filter(({ d }) => inView(d, view) && (product === "all" || d.app.product === product) && (q === "" || (d.borrowerName + d.address + d.loanNumber).toLowerCase().includes(q.toLowerCase())) && (team === "all" || (team === "mine" ? isMine(d, viewer) : !d.team?.officer))), [s.deals, product, q, view, team, viewer]);
   const pre = s.deals.filter((d) => !["servicing_current", "servicing_delinquent", "paid_off", "funded", "matured", "default", "declined", "withdrawn"].includes(d.status));
   const counts = pipelineStages.slice(0, 9).map((st) => ({ ...st, n: s.deals.filter((d) => d.status === st.code).length, amt: s.deals.filter((d) => d.status === st.code).reduce((a, d) => a + est(d.app).noteAmount, 0) }));
@@ -55,7 +62,7 @@ export default function Pipeline() {
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <div className="min-w-0"><PageIntro eyebrow="Underwriting" title="Pipeline" lede="Applications and loans on their way to funding, checked against today's pricing. Open one to work it." /></div>
+        <div className="min-w-0 flex-1 basis-80"><PageIntro eyebrow="Underwriting" title="Pipeline" lede="Applications and loans on their way to funding, checked against today's pricing. Open one to work it." /></div>
         <div className="mb-6 flex w-full flex-col gap-3 sm:w-auto">
         <Link href="/admin/new-loan" className="btn-primary sm:self-end" data-testid="new-loan">+ New loan</Link>
         <div className="grid w-full grid-cols-2 gap-3 sm:w-auto sm:text-right">
@@ -64,11 +71,12 @@ export default function Pipeline() {
         </div>
         </div>
       </div>
+      <WorkQueue />
       {attention.length > 0 && (
-        <section className="glass min-w-0 p-4" data-testid="attention">
-          <h2 className="eyebrow mb-2">Needs attention</h2>
+        <section className="glass min-w-0 px-4 py-3" data-testid="attention">
+          <h2 className="eyebrow mb-1">Everything waiting, by kind</h2>
           <ul className="grid gap-x-6 sm:grid-cols-2 xl:grid-cols-3">
-            {attention.map((item) => <li key={item.key} className="border-b border-border last:border-0 sm:border-0"><Link href={item.href} className="flex min-h-10 items-center justify-between gap-3 py-1 text-sm hover:underline" data-testid={`attention-${item.key}`}><span className="min-w-0">{item.label}{item.due && (() => { const due = dueText(item.due, today); return <span className={`ml-1.5 text-xs font-medium ${due.urgent ? "text-bad" : "text-warn"}`} data-testid="attention-due">{due.text}</span>; })()}</span><b className="shrink-0">{item.count}</b></Link></li>)}
+            {attention.map((item) => <li key={item.key} className="border-b border-border last:border-0 sm:border-0"><Link href={item.href} className="flex min-h-9 items-center justify-between gap-3 py-0.5 text-[13px] text-muted-foreground hover:text-foreground hover:underline" data-testid={`attention-${item.key}`}><span className="min-w-0">{item.label}{item.due && (() => { const due = dueText(item.due, today); return <span className={`ml-1.5 text-xs font-medium ${due.urgent ? "text-bad" : "text-warn"}`} data-testid="attention-due">{due.text}</span>; })()}</span><b className="shrink-0">{item.count}</b></Link></li>)}
           </ul>
         </section>
       )}
@@ -82,8 +90,12 @@ export default function Pipeline() {
           <select className="desk-input w-full sm:w-auto" data-testid="pipeline-team" aria-label="Whose loans" value={team} onChange={(e) => chooseTeam(e.target.value as typeof team)}><option value="all">Everyone&apos;s loans</option><option value="mine">My loans</option><option value="unassigned">No loan officer</option></select>
           <select className="desk-input w-full sm:w-auto" data-testid="pipeline-ended" aria-label="Which loans" value={view} onChange={(e) => setView(e.target.value as View)}>{(Object.keys(VIEWS) as View[]).map((key) => <option key={key} value={key}>{VIEWS[key]} ({s.deals.filter((d) => inView(d, key)).length})</option>)}</select>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground sm:ml-auto"><span className="flex items-center gap-1"><ColorDot color="green" /> within limit</span><span className="flex items-center gap-1"><ColorDot color="yellow" /> within 2.5 pts</span><span className="flex items-center gap-1"><ColorDot color="red" /> over limit</span></div>
+          <div className="flex w-full gap-1 sm:w-auto" role="group" aria-label="Show as">
+            {(["list", "board"] as const).map((option) => <button key={option} type="button" aria-pressed={layout === option} data-testid={`layout-${option}`} className={`${layout === option ? "btn-primary" : "btn-ghost"} h-10! flex-1 px-3! text-xs! sm:flex-none`} onClick={() => chooseLayout(option)}>{option === "list" ? "List" : "Board"}</button>)}
+          </div>
           <button type="button" className="btn-ghost h-10! w-full sm:w-auto" data-testid="export-pipeline" disabled={rows.length === 0} onClick={exportRows}>Export CSV</button>
         </div>
+        {layout === "board" ? <PipelineBoard rows={rows.filter(({ d }) => PRE_FUNDING.includes(d.status))} today={today} inStage={inStage} /> : <>
         {/* Phones and tablets get one compact card per loan; eleven columns only work on a desktop screen. */}
         <ul className="divide-y divide-border xl:hidden" data-testid="pipeline-cards">
           {rows.length === 0 && <li className="p-6 text-center text-sm text-muted-foreground">{empty}</li>}
@@ -121,6 +133,7 @@ export default function Pipeline() {
             </tbody>
           </table>
         </div>
+        </>}
       </div>
       <div className="glass p-4"><div className="eyebrow mb-2">Activity</div><ul className="space-y-1 text-xs text-muted-foreground">{s.audit.length === 0 && <li>No activity yet.</li>}{s.audit.slice(0, 6).map((a, i) => <li key={i}><span className="text-faint">{new Date(a.at).toLocaleString("en-US", { timeZone: "America/Los_Angeles" })} PT</span> · {a.text}</li>)}</ul></div>
     </div>

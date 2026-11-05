@@ -1,4 +1,5 @@
 "use client";
+import { EmptyState } from "@/components/EmptyState";
 import Link from "next/link";
 import { useState } from "react";
 import { DRAW_STATUS, drawTotal } from "@/components/loan/DrawPanel";
@@ -27,7 +28,7 @@ export default function Draws() {
         <div className="glass p-4"><Stat label="Inspections open" value={s.draws.filter((draw) => draw.status === "inspecting").length} /></div>
         <div className="glass p-4"><Stat label="Released" value={k(s.draws.filter((draw) => draw.status === "funded").reduce((sum, draw) => sum + (draw.approved ?? 0), 0))} /></div>
       </div>
-      {open.length === 0 && <div className="glass p-6 text-sm text-muted-foreground">No draws waiting.</div>}
+      {open.length === 0 && <EmptyState>No draws waiting.</EmptyState>}
       {open.map((draw) => <DrawCard key={draw.id} draw={draw} deal={dealOf(draw)} />)}
       {closed.length > 0 && (
         <Section title={`Finished (${closed.length})`}>

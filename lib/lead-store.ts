@@ -30,3 +30,17 @@ export function openLead<Row extends { id: string } & Record<SealedField, string
   const opened = Object.fromEntries(SEALED_LEAD_FIELDS.map((field) => [field, readField(row[field], leadContext(field, row.id))]));
   return { ...row, ...opened };
 }
+
+/**
+ * The newest quote request in the last 30 days whose borrower is this email, for a new account's first application. The
+ * email is sealed, so the recent quotes are opened to compare.
+ */
+export async function recentQuoteFor(email: string, now = new Date()): Promise<Quote | null> {
+  const wanted = email.trim().toLowerCase();
+  const rows = await prisma.lead.findMany({ where: { ...notDeleted, quote: { not: null }, createdAt: { gte: new Date(now.getTime() - 30 * 86_400_000) } }, orderBy: { createdAt: "desc" }, take: 300, select: { id: true, quote: true } });
+  for (const row of rows) {
+    const quote = openQuote(row);
+    if (quote?.borrower.email.toLowerCase() === wanted) return quote;
+  }
+  return null;
+}

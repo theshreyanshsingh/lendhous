@@ -13,7 +13,7 @@ import { useStore } from "@/lib/store";
  * sample data, puts the loan in the browser's own book instead. A repeat borrower's starts from their earlier loan, and
  * the estimate takes off what their loans paid as agreed earn.
  */
-export function PortalApplication({ initial, startStep, savedAt, startedFrom, from }: { initial: AppDraft; startStep: number; savedAt: string | null; startedFrom?: { loanNumber: string; address: string }; from?: string }) {
+export function PortalApplication({ initial, startStep, savedAt, startedFrom, from, fromQuote }: { initial: AppDraft; startStep: number; savedAt: string | null; startedFrom?: { loanNumber: string; address: string }; from?: string; fromQuote?: string }) {
   const { s, dispatch, applyReply, local, viewerName, viewer } = useStore();
   const router = useRouter();
   // The browser's own book has no signed applications, so a demo account starts from the loan itself.
@@ -47,6 +47,7 @@ export function PortalApplication({ initial, startStep, savedAt, startedFrom, fr
           Started from your loan <b>{start.from.loanNumber}</b>{start.from.address ? ` at ${start.from.address}` : ""}: the same entity, guarantors and past deals. Add the new property, and enter each guarantor&apos;s Social Security number, birth date and credit score again.
         </p>
       )}
+      {!start.from && fromQuote && <p className="glass p-3 text-sm" data-testid="app-from-quote">Started from your quote for <b>{fromQuote}</b>: the property and the numbers are filled in. Check them, then add the rest.</p>}
       <BorrowerApplication token={null} initial={start.draft} startStep={startStep} savedAt={savedAt} officer="" expiresAt=""
         portal={{ save: local ? undefined : savePortalApplication, submit, repeat, onDone: (dealId) => router.push(dealId ? `/admin/borrower/${dealId}` : "/admin/borrower") }} />
     </div>

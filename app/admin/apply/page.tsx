@@ -2,7 +2,8 @@ import { PortalApplication } from "@/components/PortalApplication";
 import { lastSignedDraft, openPortalDraft } from "@/lib/application-links";
 import { requireUser } from "@/lib/auth";
 import { readBook } from "@/lib/book-store";
-import { draftForAccount, draftFromLoan, repeatDraft } from "@/lib/borrower-application";
+import { draftForAccount, draftFromLoan, draftFromQuote, repeatDraft } from "@/lib/borrower-application";
+import { recentQuoteFor } from "@/lib/lead-store";
 import { isDemoEmail } from "@/lib/deploy";
 import { earlierLoans } from "@/lib/repeat-borrower";
 
@@ -30,5 +31,9 @@ export default async function Apply({ searchParams }: { searchParams: Promise<{ 
   const open = await openPortalDraft(user.id);
   if (open) return <PortalApplication initial={open.draft} startStep={open.row.step} savedAt={open.row.savedAt?.toISOString() ?? null} />;
   const start = await repeatStart(user, from);
-  return <PortalApplication initial={start?.draft ?? draftForAccount(user)} startStep={0} savedAt={null} startedFrom={start?.from} />;
+  if (start) return <PortalApplication initial={start.draft} startStep={0} savedAt={null} startedFrom={start.from} />;
+  // A new borrower who saved a quote first starts from it: the property and the numbers they already gave.
+  const quote = await recentQuoteFor(user.email).catch(() => null);
+  if (quote) return <PortalApplication initial={{ ...draftFromQuote(quote), contact: draftForAccount(user).contact }} startStep={0} savedAt={null} fromQuote={`${quote.address.street}, ${quote.address.city}`} />;
+  return <PortalApplication initial={draftForAccount(user)} startStep={0} savedAt={null} />;
 }

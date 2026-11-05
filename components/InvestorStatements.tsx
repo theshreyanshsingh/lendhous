@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { myStatements } from "@/actions/statements";
 import { useServiceDay } from "@/components/loan/use-service-day";
-import { Section, usd } from "@/components/ui";
+import { Section, Skeleton, usd } from "@/components/ui";
 import { downloadCsv } from "@/lib/csv";
 import { monthName, previousMonth, statementFor, statementRows, type Investor } from "@/lib/investor-statements";
 import { useStore } from "@/lib/store";
@@ -46,7 +46,7 @@ export function InvestorStatements({ investor }: { investor: Investor }) {
   }
   return (
     <Section title="Monthly statements">
-      {rows === null ? <p className="text-sm text-muted-foreground">Loading…</p> : rows.length === 0 ? <p className="text-sm text-muted-foreground" data-testid="no-statements">Your first statement arrives on the 1st of the month after your first loan pays.</p> : (
+      {rows === null ? <Skeleton /> : rows.length === 0 ? <p className="text-sm text-muted-foreground" data-testid="no-statements">Your first statement arrives on the 1st of the month after your first loan pays.</p> : (
         <ul className="divide-y divide-border text-sm" data-testid="statements">
           {rows.map((row) => (
             <li key={row.id} className="flex flex-wrap items-center justify-between gap-2 py-2" data-testid="statement-row">

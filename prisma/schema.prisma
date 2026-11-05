@@ -311,6 +311,8 @@ model PlatformSettings {
   // The lender's mailing address and phone, printed on notices that need them (Reg B adverse action notices).
   lenderAddress                 String   @default("")
   lenderPhone                   String   @default("")
+  // How long things may wait, in hours, by kind (lib/sla.ts). Unset uses the PLACEHOLDER targets there.
+  slaTargets                    Json?
   updatedAt                     DateTime @updatedAt
 }
 
@@ -341,6 +343,9 @@ model Lead {
   loanId             String?
   // The approved broker whose referral link the visitor came from (lib/brokers.ts). Their loan is attributed to it.
   brokerId           String?
+  // Where the request was sent from: "site" (the /start page) or "embed" / "embed:<site>" (the quote widget on a
+  // partner's or one of GT's own sites, lib/quote-funnel.ts).
+  channel            String    @default("site")
   // A short-lived key the visitor's browser uses to send photos of the property after the request goes in. Only its
   // hash is kept.
   photoKeyHash       String?   @unique
@@ -498,4 +503,17 @@ model TaxForm {
   expiresOn  String?
 
   @@index([ownerType, ownerId])
+}
+
+// How many visitors started a quote and saw terms, per day, channel and referral code (lib/quote-funnel.ts). No person
+// or deal is stored: the terms are worked out in the browser, and only a saved quote becomes a Lead.
+model QuoteCount {
+  id      String @id @default(uuid()) @map("_id")
+  day     String
+  channel String
+  ref     String @default("")
+  started Int    @default(0)
+  shown   Int    @default(0)
+
+  @@unique([day, channel, ref])
 }

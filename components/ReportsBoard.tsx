@@ -8,6 +8,8 @@ import type { Product } from "@/lib/engine";
 import { businessReport, daysFrom, reportRows, STUCK_DAYS, summaryRows, type Period } from "@/lib/reports";
 import { addDays } from "@/lib/servicing";
 import { useStore } from "@/lib/store";
+import { QuoteFunnel } from "@/components/QuoteFunnel";
+import { SpeedScoreboard } from "@/components/SpeedScoreboard";
 
 const RANGES = [
   { key: "30d", label: "Last 30 days" },
@@ -177,6 +179,9 @@ export function ReportsBoard() {
           </div>
         </div>
       </Section>
+
+      <SpeedScoreboard period={period} />
+      <QuoteFunnel period={period} />
 
       <Section title="Capital today">
         <div className={statGrid}>

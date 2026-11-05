@@ -19,6 +19,8 @@ export interface Doc {
   acceptedOn?: string;
   /** The earlier loan it was accepted on, when it carried over. */
   carriedFrom?: string;
+  /** When the borrower last sent it, which starts the review clock (lib/sla.ts). */
+  uploadedAt?: string;
 }
 /** Someone who personally guarantees the loan. Everyone owning 20% or more of the borrowing entity should be one. */
 export interface Guarantor { name: string; ownershipPct: number; fico: number; citizenship: "us" | "resident" | "foreign" }
@@ -113,6 +115,8 @@ export interface Deal {
   brokerFeePaid?: { amount: number; on: string; reference: string; by: string; at: string };
   /** The broker whose referral link brought this borrower, and when (lib/brokers.ts). */
   referredBy?: { brokerId: string; on: string };
+  /** The borrower's choice to show this loan on the website's "Recently funded" list (lib/showcase.ts). Off unless they turn it on. */
+  showcase?: { on: boolean; by: string; at: string };
 }
 export interface ClosingAgent {
   company: string; contact: string; phone: string; email: string; fileNumber: string;
@@ -194,6 +198,8 @@ export interface DrawRequest {
   final?: boolean;
   /** An owner's release past the lien-law holds listed, with why. */
   override?: { by: string; at: string; reason: string; holds: string[] };
+  /** When it was approved or turned down, which stops its clock (lib/sla.ts). */
+  decidedAt?: string;
 }
 export interface LienFile {
   contractor?: string;
@@ -461,7 +467,7 @@ export const pipelineStages: { code: LoanStatus; label: string }[] = [
   { code: "servicing_current", label: "Servicing: current" }, { code: "servicing_delinquent", label: "Servicing: delinquent" }, { code: "matured", label: "Matured" }, { code: "default", label: "Default" }, { code: "paid_off", label: "Paid off" },
   { code: "declined", label: "Declined" }, { code: "withdrawn", label: "Withdrawn" },
 ];
-export const borrowerTimeline = ["Submitted", "Underwriting", "Term Sheet", "Conditions", "Clear to Close", "Funded"];
+export const borrowerTimeline = ["Submitted", "Underwriting", "Term sheet", "Conditions", "Clear to close", "Funded"];
 export function timelineIndex(s: LoanStatus) {
   const m: Record<string, number> = { submitted: 0, initial_review: 1, underwriting: 1, term_sheet_issued: 2, term_sheet_accepted: 3, conditions: 3, clear_to_close: 4, closing: 4 };
   return m[s] ?? 5;

@@ -1,4 +1,5 @@
 "use client";
+import { EmptyState } from "@/components/EmptyState";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { matchPartner } from "@/lib/engine";
@@ -43,7 +44,7 @@ function Market({ me }: { me: LoanBuyer }) {
         <select className="desk-input w-full sm:w-auto" aria-label="Filter by product" value={product} onChange={(event) => setProduct(event.target.value)}><option value="all">All products</option>{Object.entries(productLabel).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
         <select className="desk-input w-full sm:w-auto" aria-label="Sort loans" value={sort} onChange={(event) => setSort(event.target.value)}><option value="match">Best fit first</option><option value="yield">Highest yield first</option><option value="size">Largest balance first</option></select>
       </div>
-      {rows.length === 0 && <div className="glass p-6 text-sm text-muted-foreground">{listed.length === 0 ? "No loans for sale right now." : "No loans match this filter."}</div>}
+      {rows.length === 0 && <EmptyState>{listed.length === 0 ? "No loans for sale right now." : "No loans match this filter."}</EmptyState>}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {rows.map(({ sale, tape, fit, offer }) => (
           <Link key={sale.id} href={`/admin/buyer/loans/${sale.id}`} className="glass block min-w-0 p-5 transition-colors hover:border-faint" data-testid="loan-for-sale">

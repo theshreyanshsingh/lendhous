@@ -9,6 +9,8 @@ import { openLead, sealLead, sealQuote } from "@/lib/lead-store";
 import { notDeleted, prisma } from "@/lib/prisma";
 import { issuePhotoKey } from "@/lib/property-photos";
 import { EXPERIENCE_LABEL, LOAN_TYPES, quoteProblem, quoteSummary } from "@/lib/quote";
+import { channelLabel, channelOf } from "@/lib/quote-funnel";
+import { funnelData } from "@/lib/quote-funnel-store";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import { requestMeta } from "@/lib/request-meta";
 
@@ -19,7 +21,7 @@ export type QuoteReply = { sent: boolean; error: string; photoKey?: string };
  * The public quote request. Open to anyone, so it's rate limited and has the same honeypot. The visitor's indicative terms
  * are worked out in their browser from the pricing the page was sent; this keeps the request for the team.
  */
-export async function sendQuote(raw: unknown, honeypot = "", referral?: string): Promise<QuoteReply> {
+export async function sendQuote(raw: unknown, honeypot = "", referral?: string, from = "site"): Promise<QuoteReply> {
   if (honeypot) return { sent: true, error: "" };
   const checked = quoteProblem(raw);
   if ("error" in checked) return { sent: false, error: checked.error };
@@ -32,18 +34,19 @@ export async function sendQuote(raw: unknown, honeypot = "", referral?: string):
   const details = { ...contact, strategy: LOAN_TYPES[quote.loanType], experience: EXPERIENCE_LABEL[quote.experience], city: quote.address.city, state: quote.address.state, propertyValueCents: Math.round(quote.purchasePrice * 100), renovationCents: Math.round(quote.rehab * 100), requestedLoanCents: Math.round((quote.requestedAmount ?? 0) * 100), targetClosing: quote.fundingDate, notes: quote.notes || "(no notes)" };
   // Looked up here, not taken from the browser: only an approved brokerage's code counts.
   const broker = await brokerByReferral(referral).catch(() => null);
+  const channel = channelOf(from);
   let leadId: string;
   try {
     const sealed = sealLead(details);
-    leadId = (await prisma.lead.create({ data: { ...sealed, submitter: quote.submitter, brokerId: broker?.id ?? null, arvCents: quote.arv ? Math.round(quote.arv * 100) : null, quote: sealQuote(quote, sealed.id) } })).id;
+    leadId = (await prisma.lead.create({ data: { ...sealed, submitter: quote.submitter, channel, brokerId: broker?.id ?? null, arvCents: quote.arv ? Math.round(quote.arv * 100) : null, quote: sealQuote(quote, sealed.id) } })).id;
   } catch (error) {
     console.error("[lendhous-leads] could not save a quote request:", error);
     return { sent: false, error: "We couldn't send this just now. Please try again in a few minutes." };
   }
   try {
-    await audit({ actorId: null, action: "lead.created", entityType: "Lead", entityId: leadId, after: { kind: "quote", submitter: quote.submitter, ...(broker ? { referredBy: broker.id } : {}) } });
+    await audit({ actorId: null, action: "lead.created", entityType: "Lead", entityId: leadId, after: { kind: "quote", submitter: quote.submitter, channel, ...(broker ? { referredBy: broker.id } : {}) } });
     const origin = process.env.NEXT_PUBLIC_APP_URL || "";
-    await notifyTeam(`New quote request: ${LOAN_TYPES[quote.loanType]}, ${quote.address.city}, ${quote.address.state}`, `${quoteSummary(quote)}${broker ? `\n\nReferred by ${broker.name}.` : ""}\n\nOpen the leads inbox: ${origin}/admin/leads`, "lead.new", contact.email);
+    await notifyTeam(`New quote request: ${LOAN_TYPES[quote.loanType]}, ${quote.address.city}, ${quote.address.state}`, `${quoteSummary(quote)}${broker ? `\n\nReferred by ${broker.name}.` : ""}${channel !== "site" ? `\n\nSent from the ${channelLabel(channel).toLowerCase()}.` : ""}\n\nOpen the leads inbox: ${origin}/admin/leads`, "lead.new", contact.email);
   } catch (error) {
     console.error("[lendhous-leads] could not alert the team:", error);
   }
@@ -65,4 +68,11 @@ export async function markLeadContacted(formData: FormData) {
   await prisma.lead.update({ where: { id }, data: { contactedAt: new Date() } });
   await audit({ actorId: user.id, action: "lead.contacted", entityType: "Lead", entityId: id });
   revalidatePath("/admin/leads");
+}
+
+/** The quote funnel's counts and saved quotes for the reports page, for someone who can see the reports. */
+export async function quoteFunnelData(from: string, to: string) {
+  await requirePermission("view_reports");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) return { counts: [], leads: [] };
+  return funnelData(from, to);
 }

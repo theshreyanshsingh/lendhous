@@ -1,6 +1,7 @@
 "use client";
 import React from "react";
 import type { Color, Grade } from "@/lib/engine";
+import { statusWords } from "@/lib/status-words";
 
 export const usd = (n: number, d = 0) => (n < 0 ? "−" : "") + "$" + Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
 export const pct = (x: number, d = 1) => (x * 100).toFixed(d) + "%";
@@ -45,6 +46,11 @@ export const ratioGrid = (count: number) => `grid gap-2 ${count > 2 ? "grid-cols
 /** A fixed time zone, so the server's first render and the browser's match. */
 export const shortDate = (at: string) => new Date(at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "America/Los_Angeles" });
 export const points = (n = 0) => `${n} ${n === 1 ? "point" : "points"}`;
-export const statusLabel = (s: string) => s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-export const productLabel: Record<string, string> = { fix_flip: "Fix & Flip", bridge: "Bridge", ground_up: "Ground-Up", dscr: "DSCR Rental" };
+/** A status code in the words every screen uses (lib/status-words.ts). */
+export const statusLabel = statusWords;
+export const productLabel: Record<string, string> = { fix_flip: "Fix & flip", bridge: "Bridge", ground_up: "Ground-up", dscr: "DSCR rental" };
 export const capTone = (c: string) => (c === "funded" || c === "committed" ? "green" : c === "reserved" ? "blue" : c === "bids_in" ? "violet" : c === "teaser_out" ? "amber" : "slate") as "green";
+/** Grey rows that hold a panel's place while its numbers load. */
+export function Skeleton({ rows = 3 }: { rows?: number }) {
+  return <div className="space-y-2" aria-busy="true" aria-label="Loading" data-testid="skeleton">{Array.from({ length: rows }, (_, i) => <div key={i} className="h-4 animate-pulse rounded-[2px] bg-muted" style={{ width: `${92 - i * 14}%` }} />)}</div>;
+}

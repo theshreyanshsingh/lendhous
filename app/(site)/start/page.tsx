@@ -9,7 +9,7 @@ import { QuoteRequest } from "./quote-request";
 
 export const metadata: Metadata = {
   title: "Get a Loan Quote",
-  description: "Send LendHous your deal and see indicative terms in a minute. Fix and flip, bridge, DSCR rental and new construction loans for real estate investors.",
+  description: "See indicative terms on your deal in a minute, before you give any contact details. Fix and flip, bridge, DSCR rental and new construction loans for real estate investors.",
 };
 // Indicative terms come from the pricing the owner last published, so the page is built per visit.
 export const dynamic = "force-dynamic";
@@ -20,14 +20,14 @@ export default async function Start({ searchParams }: { searchParams: Promise<{ 
   const referral = await brokerByReferral((await searchParams).ref).catch(() => null);
   return (
     <>
-      <PageHead eyebrow="LOAN QUOTE REQUEST" title="Tell us about the deal." description="A borrower or a broker can send it. You'll see indicative terms as soon as it's in, and a loan officer follows up the same business day." />
+      <PageHead eyebrow="LOAN QUOTE" title="Tell us about the deal." description="See indicative terms from today's pricing as soon as the numbers are in, with no name or email needed. Save them, and a loan officer follows up the same business day." />
       <main className="content quote-layout">
         <QuoteRequest pricing={currentPricing()} signupOpen={(await getSettings()).allowSignup !== false} referral={referral ? { code: (await searchParams).ref!, name: referral.name } : undefined} />
         <aside className="panel" style={{ position: "sticky", top: 24 }}>
           <div className="eyebrow">WHAT HAPPENS NEXT</div>
           <ol className="quote-next">
-            <li><b>Indicative terms now.</b> Worked out from today&apos;s pricing and the numbers you send.</li>
-            <li><b>A loan officer calls.</b> Usually the same business day, to go over the deal and the exit.</li>
+            <li><b>Indicative terms now.</b> Worked out from today&apos;s pricing and your numbers, before you give any contact details.</li>
+            <li><b>Save them.</b> A loan officer calls, usually the same business day, to go over the deal and the exit.</li>
             <li><b>A secure application link.</b> Five short steps you can finish over a few sittings; it saves as you go.</li>
             <li><b>Term sheet.</b> Once underwriting has the documents.</li>
           </ol>

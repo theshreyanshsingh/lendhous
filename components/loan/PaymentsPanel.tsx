@@ -27,7 +27,7 @@ export function PaymentsPanel({ deal }: { deal: Deal }) {
   return (
     <Section title="Payments and payoff" right={openDefault(deal) ? <Badge tone="rose">Default</Badge> : l.matured ? <Badge tone="rose">Matured</Badge> : l.paymentsLate ? <Badge tone="rose">{l.paymentsLate} past due</Badge> : <Badge tone="green">Current</Badge>}>
       {openDefault(deal) ? (
-        <p className="mb-3 rounded-md bg-bad/10 p-2 text-sm text-bad" data-testid="default-notice">Your loan is in default since {openDefault(deal)!.effectiveOn}. Interest runs at the default rate of {defaultRateOf(deal).toFixed(2)}% from {defaultInterestFrom(deal)}. Call your LendHous servicing team to talk about bringing it current.</p>
+        <p className="mb-3 rounded-md bg-bad/10 p-2 text-sm text-bad" data-testid="default-notice">Your loan is in default since {shortDay(openDefault(deal)!.effectiveOn)}. Interest runs at the default rate of {defaultRateOf(deal).toFixed(2)}% from {shortDay(defaultInterestFrom(deal))}. Call your LendHous servicing team to talk about bringing it current.</p>
       ) : l.matured ? (
         <p className="mb-3 rounded-md bg-bad/10 p-2 text-sm text-bad" data-testid="matured-notice">Your loan matured on {shortDay(l.maturity)}, so the full balance is due. Interest now runs at the default rate of {defaultRateOf(deal).toFixed(2)}%. Ask for a payoff statement below.</p>
       ) : l.amountDue > 0 && l.paymentsLate ? (
@@ -36,8 +36,8 @@ export function PaymentsPanel({ deal }: { deal: Deal }) {
         <p className="mb-3 rounded-md bg-warn/10 p-2 text-sm" data-testid="maturity-notice">Your loan matures in {l.daysToMaturity} days, on {shortDay(l.maturity)}. Plan your payoff, or talk to us before then if you need more time.</p>
       ) : null}
       <div className="grid grid-cols-2 gap-3">
-        <Stat label={l.amountDue ? "Due now" : "Next payment"} value={<span data-testid="next-due">{l.amountDue ? usd(l.amountDue, 2) : l.nextDue ?? "—"}</span>} sub={l.amountDue ? `oldest due ${shortDay(l.nextDue)}` : next ? usd(next.amount, 2) : undefined} />
-        <Stat label="Maturity" value={l.maturity} />
+        <Stat label={l.amountDue ? "Due now" : "Next payment"} value={<span data-testid="next-due" data-day={l.nextDue ?? ""}>{l.amountDue ? usd(l.amountDue, 2) : l.nextDue ? shortDay(l.nextDue) : "—"}</span>} sub={l.amountDue ? `oldest due ${shortDay(l.nextDue)}` : next ? usd(next.amount, 2) : undefined} />
+        <Stat label="Maturity" value={shortDay(l.maturity)} />
         <Stat label="Balance" value={usd(balanceOf(deal))} />
         <Stat label="Payments made" value={l.paymentsMade} sub={l.credit ? `${usd(l.credit, 2)} credit held` : undefined} />
       </div>

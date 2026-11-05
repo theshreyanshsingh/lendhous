@@ -16,10 +16,16 @@ import { ScopeOfWork } from "@/components/loan/ScopeOfWork";
 import { TermSheetCard } from "@/components/loan/TermSheetCard";
 import { BorrowerConditions } from "@/components/loan/BorrowerConditions";
 import { PropertyPhotos } from "@/components/loan/PropertyPhotos";
-import Tracker from "@/components/Tracker";
 import { TeamContacts } from "@/components/loan/LoanTeam";
 import { NeedsFromYou } from "@/components/loan/NeedsFromYou";
 import { NextLoan } from "@/components/loan/NextLoan";
+import { NextStepCard } from "@/components/loan/NextStepCard";
+import { FundedNote } from "@/components/loan/FundedNote";
+import { LoanTimeline } from "@/components/loan/LoanTimeline";
+import { RehabProgress } from "@/components/loan/RehabProgress";
+import { PropertyPicture } from "@/components/PropertyPicture";
+import { Showcase } from "@/components/loan/Showcase";
+import { interestBasis, PLAIN_RATIO } from "@/lib/status-words";
 import { Badge, Section, Stat, usd, pct, productLabel, statusLabel } from "@/components/ui";
 import type { DocStatus } from "@/lib/mockData";
 import { shortDay } from "@/lib/format";
@@ -40,20 +46,21 @@ export default function BorrowerLoan() {
     <div className="space-y-4">
       <Link href="/admin/borrower" className="text-sm text-link">← My loans</Link>
       <div className="glass p-5">
-        <div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0"><div className="text-xs text-muted-foreground">{d.loanNumber} · {productLabel[d.app.product]} · {d.entityName}</div><h1 className="text-xl font-normal tracking-tight">{d.address}, {d.city} {d.zip}</h1></div><Badge tone={d.status === "default" ? "rose" : funded || d.status === "paid_off" ? "green" : closed ? "slate" : "blue"}>{statusLabel(d.status)}</Badge></div>
-        {closed ? <CloseApplication deal={d} side="borrower" /> : <div className="mt-4"><Tracker status={d.status} /></div>}
-        {!closed && <div className="mt-3 text-sm text-muted-foreground">Next step: {d.status === "paid_off" ? "Nothing. Your loan is paid in full." : d.status === "term_sheet_issued" ? "Review and accept your term sheet below." : funded ? "Make your monthly payment or request a draw." : d.docs.some((x) => x.status === "requested" || x.status === "rejected") ? "Upload the documents marked Requested below." : "Your team is reviewing. We'll notify you of the next step."}</div>}
-        {PRE_FUNDING.includes(d.status) && <div className="mt-3"><CloseApplication deal={d} side="borrower" /></div>}
-      </div>
-      {(funded || d.status === "paid_off") && <NextLoan deal={d} />}
-      {!d.sponsor && ["submitted", "initial_review", "underwriting"].includes(d.status) && (
-        <div className="glass flex flex-wrap items-center justify-between gap-3 border-warn/40 p-4" data-testid="finish-profile">
-          <div className="min-w-0 flex-1 basis-64"><h2 className="text-base font-medium">Finish your application</h2><p className="text-sm text-muted-foreground">Add your guarantors and past deals, and answer the credit questions, so the team can price and approve your loan.</p></div>
-          <Link href={`/admin/borrower/${d.id}/profile`} className="btn-primary">Finish it now</Link>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+          <PropertyPicture deal={d} variant="header" />
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0"><div className="text-xs text-muted-foreground">{d.loanNumber} · {productLabel[d.app.product]} · {d.entityName}</div><h1 className="text-xl font-normal tracking-tight">{d.address}, {d.city} {d.zip}</h1></div><Badge tone={d.status === "default" ? "rose" : funded || d.status === "paid_off" ? "green" : closed ? "slate" : "blue"}>{statusLabel(d.status)}</Badge></div>
+            {closed && <CloseApplication deal={d} side="borrower" />}
+            {PRE_FUNDING.includes(d.status) && <div className="mt-3"><CloseApplication deal={d} side="borrower" /></div>}
+          </div>
         </div>
-      )}
-      {!closed && d.status !== "paid_off" && <NeedsFromYou deal={d} />}
-      <TermSheetCard deal={d} canSign />
+        <LoanTimeline deal={d} side="client" />
+      </div>
+      <FundedNote deal={d} />
+      <NextStepCard deal={d} />
+      {(funded || d.status === "paid_off") && <NextLoan deal={d} />}
+      {!closed && d.status !== "paid_off" && <div id="needs-from-you"><NeedsFromYou deal={d} /></div>}
+      <div id="term-sheet"><TermSheetCard deal={d} canSign /></div>
       <div id="conditions"><BorrowerConditions deal={d} canUpload /></div>
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="min-w-0 space-y-4">
@@ -86,13 +93,14 @@ export default function BorrowerLoan() {
           <Section title={funded ? "Loan balance" : "Estimated terms"}>
             <div className="grid grid-cols-2 gap-3">
               <Stat label="Note amount" value={usd(e.noteAmount)} />
-              <Stat label="Rate" value={`${e.rate.toFixed(2)}%`} sub={d.app.product === "dscr" ? "30-yr amortizing" : d.app.accrual === "dutch" ? "on disbursed funds" : "full-boat"} />
+              <Stat label="Rate" value={`${e.rate.toFixed(2)}%`} sub={interestBasis(d.app.product, d.app.accrual)} />
               {funded ? <><Stat label="Disbursed" value={usd(b.disbursed)} /><Stat label="Holdback left" value={usd(b.holdbackRemaining)} /><Stat label="Next payment" value={usd(b.nextPayment)} sub={ledger(d).nextDue ? `due ${shortDay(ledger(d).nextDue!)}` : "—"} /><Stat label="Maturity" value={shortDay(ledger(d).maturity)} sub={`${e.termMonths}-month term${d.extensions?.some((x) => x.status === "executed") ? ", extended" : ""}`} /></>
-                : <><Stat label="Cash to close" value={usd(e.cashToClose)} /><Stat label="Target closing" value={shortDay(d.closingDate)} /><Stat label={keyRatios.map((r) => r.label).join(" / ")} value={keyRatios.map((r) => (r.key === "dscr" ? r.actual.toFixed(2) + "x" : pct(r.actual))).join(" / ")} /><Stat label="Points" value={usd(e.points)} /></>}
+                : <><Stat label="Cash to close" value={usd(e.cashToClose)} /><Stat label="Target closing" value={shortDay(d.closingDate)} />{keyRatios.map((r) => <Stat key={r.key} label={PLAIN_RATIO[r.key] ?? r.label} value={r.key === "dscr" ? r.actual.toFixed(2) + "x" : pct(r.actual)} />)}<Stat label="Points" value={usd(e.points)} /></>}
             </div>
           </Section>
+          {funded && e.holdback > 0 && <RehabProgress deal={d} />}
           {funded && e.holdback > 0 && <DrawPanel deal={d} />}
-          {funded && <PaymentsPanel deal={d} />}
+          {funded && <div id="payments"><PaymentsPanel deal={d} /></div>}
           {funded && <Extensions deal={d} side="borrower" />}
           {d.status === "paid_off" && <PaidOff deal={d} side="borrower" />}
           {d.closing && PRE_FUNDING.includes(d.status) && (
@@ -101,6 +109,7 @@ export default function BorrowerLoan() {
               <p className="mt-2 rounded-md bg-bad/10 p-2 text-xs text-bad">If you&apos;re wiring money to close, call the title company at a number you looked up yourself to confirm their instructions before you send it. Instructions that change by email are a scam.</p>
             </Section>
           )}
+          {(funded || d.status === "paid_off") && <Showcase deal={d} side="client" />}
           <Section title="Your team"><TeamContacts deal={d} /><div className="mt-3 rounded-md bg-bad/10 p-2 text-xs text-bad">Wire-fraud warning: we will never email you wire instructions. Always confirm by phone with a number you already have.</div></Section>
         </div>
       </div>

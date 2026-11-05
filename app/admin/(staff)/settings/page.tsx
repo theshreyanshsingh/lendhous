@@ -1,10 +1,12 @@
 import { saveSettings } from "@/actions/settings";
+import { EmbedSnippet } from "@/components/EmbedSnippet";
 import { Notice } from "@/components/notice";
 import { PageIntro } from "@/components/page-intro";
 import { SubmitButton } from "@/components/submit-button";
 import { requirePermission } from "@/lib/auth";
 import { q } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
+import { SLA_KEYS, targetsFrom } from "@/lib/sla";
 
 export const metadata = { title: "Settings" };
 export const dynamic = "force-dynamic";
@@ -14,6 +16,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   await requirePermission("manage_roles");
   const params = await searchParams;
   const settings = await getSettings();
+  const targets = targetsFrom(settings.slaTargets as never);
   return (
     <div className="max-w-2xl space-y-4">
       <PageIntro eyebrow="Account" title="Settings" lede="How LendHous behaves for everyone on this account. Changes are recorded in the audit log." />
@@ -31,8 +34,18 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         <label className="block"><span className="label">Delete read notifications after this many years</span><input name="retentionYears" data-testid="setting-retention" type="number" min={1} max={30} className="desk-input w-32!" defaultValue={settings.retentionYears} required /><span className="mt-1 block text-[11px] text-faint">Loan files and the audit log are never deleted by this.</span></label>
         <label className="block"><span className="label">LendHous&apos;s mailing address, for letters</span><input name="lenderAddress" data-testid="setting-address" className="desk-input" maxLength={300} defaultValue={settings.lenderAddress} placeholder="Street, city, state ZIP" /><span className="mt-1 block text-[11px] text-faint">Printed on decline notices, which Reg B requires to carry the lender&apos;s address. They can&apos;t be sent without it.</span></label>
         <label className="block"><span className="label">Phone for those letters (optional)</span><input name="lenderPhone" data-testid="setting-phone" className="desk-input w-56!" maxLength={40} defaultValue={settings.lenderPhone} /></label>
+        <fieldset className="space-y-2" data-testid="setting-targets">
+          <legend className="label">How long things may wait (PLACEHOLDER targets until you set them)</legend>
+          <p className="text-xs text-muted-foreground">Business hours count 9 to 5 Eastern on weekdays, less Florida&apos;s state holidays; 8 of them is one business day. Items turn amber at three quarters of the way and red once past, and red ones go in the morning email.</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {SLA_KEYS.map((key) => <label key={key} className="block"><span className="label">{targets[key].label} ({targets[key].business ? "business hours" : "hours"})</span><input name={`sla-${key}`} data-testid={`setting-sla-${key}`} type="number" min={1} max={240} className="desk-input w-32!" defaultValue={targets[key].hours} /></label>)}
+          </div>
+        </fieldset>
         <SubmitButton className="h-11 text-[13px] font-medium" pendingLabel="Saving…">Save settings</SubmitButton>
       </form>
+      {/* GT's own sites: each gets its own name in the reports' quote funnel. */}
+      <EmbedSnippet site="wholesale" title="The quote on the wholesale site">Paste this on each property GT&apos;s wholesale company lists, so buyers see LendHous&apos;s financing on the deal. Quotes from it show in the reports as the widget on wholesale.</EmbedSnippet>
+      <EmbedSnippet site="realty" title="The quote on the realty site">The same for the realty company&apos;s listings and agent pages. Quotes from it show as the widget on realty.</EmbedSnippet>
     </div>
   );
 }

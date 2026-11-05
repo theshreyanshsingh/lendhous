@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { exportIris, taxYearReport } from "@/actions/tax";
-import { Badge, Section, usd } from "@/components/ui";
+import { Badge, Section, Skeleton, usd } from "@/components/ui";
 import { shortDay } from "@/lib/format";
 import { deadlines, TAX_CONFIG, taxYear, type FormLine } from "@/lib/tax-forms";
 import { useStore } from "@/lib/store";
@@ -51,7 +51,7 @@ export function TaxBoard() {
         return (
           <Section key={group.form} title={group.title}>
             <p className="mb-2 text-xs text-muted-foreground">{group.who}</p>
-            {!report ? <p className="text-sm text-muted-foreground">Loading…</p> : lines.length === 0 ? <p className="text-sm text-muted-foreground">None for {year}.</p> : (
+            {!report ? <Skeleton /> : lines.length === 0 ? <p className="text-sm text-muted-foreground">None for {year}.</p> : (
               <table className="stack-table w-full text-sm" data-testid={`tax-${group.form}`}>
                 <thead><tr><th>Payee</th><th>Loans</th><th className="text-right">Amount</th><th>Tax form</th><th>Form</th></tr></thead>
                 <tbody className="divide-y divide-border">{lines.map((line) => (

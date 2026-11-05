@@ -1355,3 +1355,35 @@ describe("tax forms on file", () => {
     expect(all.has("buyer:tax-foreign")).toBe(true);
   });
 });
+
+describe("the instant quote", () => {
+  it("counts started and shown anonymously, keeps each saved quote's channel, and finds a new borrower's quote by email", async () => {
+    const { countQuoteStep, funnelData } = await import("@/lib/quote-funnel-store");
+    const { recentQuoteFor, sealLead, sealQuote } = await import("@/lib/lead-store");
+    const now = new Date("2026-11-05T15:00:00Z");
+    await countQuoteStep("started", "embed:wholesale", "", now);
+    await countQuoteStep("started", "embed:wholesale", "", now);
+    await countQuoteStep("shown", "embed:wholesale", "", now);
+    await countQuoteStep("started", "site", "demobrkr", now);
+    const rows = await prisma.quoteCount.findMany({ orderBy: { channel: "asc" } });
+    expect(rows.map(({ day, channel, ref, started, shown }) => ({ day, channel, ref, started, shown }))).toEqual([
+      { day: "2026-11-05", channel: "embed:wholesale", ref: "", started: 2, shown: 1 },
+      { day: "2026-11-05", channel: "site", ref: "demobrkr", started: 1, shown: 0 },
+    ]);
+    // Only the counts: no address, name or deal is anywhere in them.
+    expect(JSON.stringify(rows)).not.toMatch(/@|street|\$/i);
+    const quote = { submitter: "borrower", borrower: { firstName: "Quinn", lastName: "Quote", email: "Quinn.Quote@Example.com", phone: "(954) 555-0101" }, citizenship: "us", creditBand: "720-759", experience: "1-2", address: { street: "9 Quote Court", city: "Davie", state: "FL", zip: "33314", county: "Broward" }, propertyType: "sfr", loanType: "fix_flip", purpose: "purchase", purchasePrice: 250_000, rehab: 50_000, arv: 400_000, fundingDate: "2026-12-01", comps: [], exit: "sell", notes: "" } as const;
+    const sealed = sealLead({ name: "Quinn Quote", email: "quinn.quote@example.com", phone: "", strategy: "Fix & flip", experience: "", city: "Davie", state: "FL", propertyValueCents: 25_000_000, renovationCents: 5_000_000, requestedLoanCents: 0, targetClosing: "", notes: "" });
+    await prisma.lead.create({ data: { ...sealed, channel: "embed:wholesale", quote: sealQuote(quote as never, sealed.id) } });
+    const data = await funnelData("2026-11-01", "2026-11-30");
+    expect(data.counts).toHaveLength(2);
+    // The lead was saved just now, so it only falls in this month's range when the test runs in it.
+    const { servicingDate } = await import("@/lib/servicing");
+    const today = servicingDate(new Date());
+    expect((await funnelData(today, today)).leads).toContainEqual({ day: today, channel: "embed:wholesale", brokerId: null, loanId: null });
+    expect(data.leads.every((lead) => lead.day >= "2026-11-01" && lead.day <= "2026-11-30")).toBe(true);
+    expect((await recentQuoteFor("quinn.quote@example.com"))?.address.street).toBe("9 Quote Court");
+    expect(await recentQuoteFor("someone.else@example.com")).toBeNull();
+    expect(await recentQuoteFor("quinn.quote@example.com", new Date(Date.now() + 31 * 86_400_000))).toBeNull();
+  });
+});

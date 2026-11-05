@@ -42,6 +42,8 @@ const signIn = async ({ email = EMAIL, password = PASSWORD, path = "/login" } = 
 };
 const signOut = async () => {
   await page.goto(`${BASE}/admin`);
+  // Sign-out lives in the account menu at the foot of the sidebar.
+  await page.getByTestId("account-menu").first().click();
   await page.getByRole("button", { name: "Sign out" }).first().click();
   await page.waitForURL("**/login?notice=signed_out");
 };

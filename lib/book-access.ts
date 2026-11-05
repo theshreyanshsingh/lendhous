@@ -17,6 +17,7 @@ import { reasonsProblem, requestProblem, revenueProblem } from "./adverse-action
 import { exceptionDecisionProblem, exceptionRequestProblem, issueProblem as sheetProblem, latestSheet, pricedApp, respondProblem } from "./term-sheets";
 import { MAX_PHOTOS_PER_LINK, photoRequestState, photosClosed } from "./photo-requests";
 import { evaluate } from "./engine";
+import { showcaseable } from "./showcase";
 import type { Broker, Deal, Doc, LoanPayment, LoanSale, PayoffRequest } from "./mockData";
 import { currentPricing, pricingPayload } from "./pricing-versions";
 import { ledger, servicingDate } from "./servicing";
@@ -525,6 +526,14 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       return trusted ? ok() : no("Send the notice from the loan's page.");
     case "addPropertyPhotos":
       return trusted ? ok() : no("Upload the photos themselves.");
+    case "setShowcase": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      // Only the borrower can put their loan on the website; the team can take it down.
+      if (view === "borrower" && deal.borrowerId === viewer.id) return showcaseable(deal) || !action.on ? ok({ ...action, by: viewer.name }) : no("A loan goes on the website once it's funded.");
+      if (action.on) return no(NOT_ALLOWED);
+      return staffOnlyAllowed("service_loans", "manage_roles") ? ok({ ...action, by: viewer.name }) : no(NOT_ALLOWED);
+    }
     case "removePropertyPhoto": {
       const deal = dealOf(action.dealId);
       if (!deal?.propertyPhotos?.some((photo) => photo.id === action.photoId)) return no(GONE);

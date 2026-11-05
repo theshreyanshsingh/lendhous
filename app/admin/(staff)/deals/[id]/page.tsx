@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useStore, est, inHouseAvailable, capitalSummary } from "@/lib/store";
 import { evaluate, recommendRoute, matchPartner, fullBoatReserve, dutchReserve, evenDraws, type Application } from "@/lib/engine";
 import { currentPricing, pricingFor } from "@/lib/pricing-versions";
@@ -32,6 +32,9 @@ import { TermSheetCard } from "@/components/loan/TermSheetCard";
 import { useServiceDay } from "@/components/loan/use-service-day";
 import { Badge, GradeBadge, RatioPill, Section, Stat, usd, pct, k, productLabel, statusLabel, capTone, points, ratioGrid, statGrid } from "@/components/ui";
 import { BrokerFee } from "@/components/loan/BrokerFee";
+import { LoanTimeline } from "@/components/loan/LoanTimeline";
+import { PropertyPicture } from "@/components/PropertyPicture";
+import { Showcase } from "@/components/loan/Showcase";
 
 // Closing starts once the term sheet is accepted, and stays as the record of how the money went out.
 const CLOSING_TAB = ["term_sheet_accepted", "conditions", "clear_to_close", "closing", "funded", "servicing_current", "servicing_delinquent", "matured", "default", "paid_off"];
@@ -46,6 +49,8 @@ export default function DealWorkspace() {
   const [invite, setInvite] = useState("");
   const [request, setRequest] = useState({ name: "", category: "Property" });
   const [tab, setTab] = useState<Tab>("Numbers & Ratios");
+  // The work queue links straight to the tab where its item is done (?tab=Documents).
+  useEffect(() => { const asked = new URLSearchParams(window.location.search).get("tab"); if (asked && (allTabs as readonly string[]).includes(asked)) setTab(asked as Tab); }, []);
   const today = useServiceDay();
   const [ov, setOv] = useState<Partial<Application>>({});
   const [routeSel, setRouteSel] = useState<"in_house" | "partner" | "split" | null>(null);
@@ -86,16 +91,21 @@ export default function DealWorkspace() {
     <div className="space-y-4">
       <Link href="/admin" className="text-sm text-link">← Pipeline</Link>
       <div className="glass p-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+        <PropertyPicture deal={d} variant="header" />
+        <div className="flex min-w-0 flex-1 flex-wrap items-start justify-between gap-3">
           <div className="min-w-0"><div className="text-xs text-muted-foreground">{d.loanNumber} · {productLabel[d.app.product]} · source: {d.source.replace("_", " ")}</div>
             <h1 className="text-xl font-normal tracking-tight">{d.address}, {d.city} {d.zip} <span className="font-normal text-faint">({d.app.county})</span></h1>
             <div className="text-sm text-muted-foreground">{d.borrowerName} · {d.entityName} · FICO {d.app.fico} · Tier {e.tier}</div>
             {d.app.repeat && <div className="text-sm text-muted-foreground" data-testid="deal-repeat">{d.app.repeat.pausedBy ? <span className="text-warn">Repeat borrower, pricing paused: a late payment on {d.app.repeat.pausedBy} in the 24 months before {shortDay(d.app.repeat.asOf)}</span> : <>Repeat borrower: {d.app.repeat.loans} LendHous loan{d.app.repeat.loans === 1 ? "" : "s"} paid as agreed ({d.app.repeat.counted.join(", ")}) when it was submitted</>}</div>}
             {broker && <div className="text-sm text-muted-foreground" data-testid="deal-broker">Broker: {broker.name} · {points(d.brokerPoints)} ({usd((orig.noteAmount * (d.brokerPoints ?? 0)) / 100)})</div>}
             {PRE_FUNDING.includes(d.status) && <div className="mt-1 text-sm text-muted-foreground" data-testid="loan-facts">Target closing <b className="font-medium text-foreground">{shortDay(d.closingDate)}</b>{today && <> · {closingIn(d.closingDate, today)}</>}</div>}
+            <Showcase deal={d} side="team" />
             <div className="mt-2"><LoanTeam deal={d} /></div></div>
-          <div className="flex flex-wrap items-center gap-2"><GradeBadge grade={e.score.grade} score={e.score.score} /><Badge tone="blue">{statusLabel(d.status)}</Badge><Badge tone={capTone(d.capitalStatus)}>capital: {statusLabel(d.capitalStatus)}</Badge></div>
+          <div className="flex flex-wrap items-center gap-2"><GradeBadge grade={e.score.grade} score={e.score.score} /><Badge tone="blue">{statusLabel(d.status)}</Badge><Badge tone={capTone(d.capitalStatus)}>Capital: {statusLabel(d.capitalStatus).toLowerCase()}</Badge></div>
         </div>
+        </div>
+        <LoanTimeline deal={d} side="team" />
         {d.contractorIsGtAffiliate && <div className="mt-3 rounded-lg bg-bad/10 p-3 text-sm text-bad" data-testid="coi-banner"><b>Conflict of interest:</b> LendHous&apos;s affiliated construction company is the contractor. Draw inspections must be by an independent third party, a second approver outside the construction company is required, and partners must be told.</div>}
         {unlinked && (
           <div className="mt-4 flex flex-wrap items-end gap-2 rounded-[2px] border border-border p-3" data-testid="invite-borrower">

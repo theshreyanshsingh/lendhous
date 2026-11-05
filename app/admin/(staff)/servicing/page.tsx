@@ -125,7 +125,7 @@ export default function Servicing() {
                   <td data-label="Balance" className="text-right">{usd(balanceOf(deal))}</td>
                   <td data-label="Payment" className="text-right">{usd(fundedBalances(e, deal.app, deal.disbursedDraws).nextPayment)}</td>
                   <td data-label="Due now" className={`text-right ${l.amountDue ? "text-bad" : ""}`} data-testid="serviced-due">{usd(l.amountDue, 2)}</td>
-                  <td data-label="Next due" className="whitespace-nowrap" data-testid="serviced-next-due">{l.nextDue ?? "—"}</td>
+                  <td data-label="Next due" className="whitespace-nowrap" data-testid="serviced-next-due" data-day={l.nextDue ?? ""}>{l.nextDue ? shortDay(l.nextDue) : "—"}</td>
                   <td data-label="Matures" className={`whitespace-nowrap ${l.matured ? "text-bad" : l.daysToMaturity <= 60 ? "text-warn" : ""}`}>{shortDay(l.maturity)}</td>
                   <td data-label="Status">{deal.status === "default" ? <Badge tone="rose">Default</Badge> : l.matured ? <Badge tone="rose">Matured</Badge> : deal.paymentsLate ? <Badge tone="rose">{deal.paymentsLate} past due</Badge> : <Badge tone="green">Current</Badge>}{l.daysPastDue >= 30 && <div className="mt-1 text-xs text-bad">{l.daysPastDue} days</div>}</td>
                   <td className="text-right"><button className="btn-ghost h-9! w-full px-3! text-xs! lg:w-auto" data-testid="record-payment" onClick={() => setPaying({ id: deal.id, payoff: false })}>Record payment</button></td>

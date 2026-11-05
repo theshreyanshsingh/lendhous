@@ -10,11 +10,12 @@ You're continuing work on **Lendhous**, a private (hard-money) lending platform 
 
 - **Stack:** Next.js 15 App Router, React 19, TypeScript, Tailwind 4, Prisma 6 on MongoDB (a replica set, no migrations). **Never `prisma db push`:** `npm run db:indexes` syncs indexes from the schema, and makes optional unique fields partial indexes, which `db push` gets wrong. zod, vitest, playwright-core scripts, Framer Motion 12.23.12 (pinned with `motion-dom`/`motion-utils` overrides: newer `motion-dom` breaks the build). PDFs come from pdfkit on the server.
 - **The loan book:** one reducer (`lib/book.ts`) applies every `BookAction`, and its `reducer` wrapper notes each loan's stage changes in `deal.stages`. `lib/book-access.ts` `authorize` checks each action against the viewer's role and permissions; actions that only the server may take run as `trusted`. `lib/book-actions.ts` `parseAction` is the zod shape of anything a browser sends (server-only actions are left out of it). `lib/book-store.ts` saves only the changed records, encrypted, with an optimistic version lock. `lib/book-alerts.ts` decides who is emailed. `scopeBook` strips what each role mustn't see (`blind()` for partners' teasers).
-- **Rules live in pure `lib/*.ts` modules**, and the reducer, `authorize`, the screens, the nightly jobs and the reports all call the same functions. Examples: `lib/loan-exits.ts`, `lib/closing.ts`, `lib/ofac.ts`, `lib/borrower-application.ts`, `lib/reports.ts`, `lib/capital.ts`. A new feature gets its own rules module the same way. Never import a pure helper from `lib/store.tsx`: it's a client module.
+- **Rules live in pure `lib/*.ts` modules**, and the reducer, `authorize`, the screens, the nightly jobs and the reports all call the same functions. Examples: `lib/loan-exits.ts`, `lib/closing.ts`, `lib/ofac.ts`, `lib/borrower-application.ts`, `lib/reports.ts`, `lib/capital.ts`, `lib/brokers.ts`, `lib/repeat-borrower.ts`. A new feature gets its own rules module the same way. Never import a pure helper from `lib/store.tsx`: it's a client module.
 - **Pricing is versioned:** every loan carries `app.pricingVersion` (`lib/pricing-versions.ts`). Anything that belongs in a loan's note (rates, late fees, extension terms) must be read through the loan's own version, never `pricingConfig` directly.
 - **Sensitive data:** the loan book is encrypted at rest but sent in full to staff browsers. So SSNs, dates of birth, EINs and bank account numbers stay out of it, sealed in their own records (see `lib/application-links.ts`). Showing them takes `reveal_sensitive` and writes `pii.revealed` to the audit log.
 - **Permissions:** a new permission goes in `PERMISSIONS` and `DEFAULT_MATRIX` (`lib/permissions.ts`) **and** in `PERMISSION_GROUPS` (`lib/member-rules.ts`), or the Members page can't grant it. A test checks every permission is in a group.
 - **Demo seats** (`@lendhous.test`) run a fake book in the browser; real accounts use the database. New features must work in both, or show a clear demo note. The demo book's dates are fixed around `DEMO_SERVICING_DAY` so screens render the same on the server and in the browser; anything that needs "today" sets it after the first render (`serviceDay`).
+- **Vendors sit behind an env key.** A feature that calls an outside service (Anthropic, Twilio, FEMA, NOAA) works without the key: it shows what it would do and says the key isn't set. Tests use recorded fixtures, never the live service.
 - **Copy:** plain, short sentences for borrowers and staff alike. No jargon on borrower screens. Every new screen must fit a 320px phone with no sideways scrolling.
 - **Placeholders:** every legal or money number the attorney or GT hasn't set is marked PLACEHOLDER in code and listed in the README.
 - **Browser scripts:** a click that a server reply can interrupt (lists that redraw after each save) waits for the save before the next click. Copy the waive and clear loops in `scripts/smoke-real.mjs`.
@@ -40,114 +41,130 @@ npm run db:seed && npm run smoke:real
 
 ## Built so far
 
-1. The title company's secure closing link. 2. Payoff letters under Fla. Stat. 701.04. 3. Term sheets. 4. Conditions. 5. Draw protections under Florida's lien law (ch. 713). 6. Reg B decline notices. 7. Reports at `/admin/reports` and the owners' daily email. Also property photos, self sign-up at `/login/signup`, one application for every borrower (the portal and the secure link share `components/BorrowerApplication.tsx`), and A to H below: who works each loan, the pipeline and portal fixes, reliability, partners' and buyers' portfolios and statements, tax forms, pre-approval letters, the repeat-borrower fast track and the broker program. What's left is the vendor work and the "as volume grows" list.
+1. The title company's secure closing link. 2. Payoff letters under Fla. Stat. 701.04. 3. Term sheets. 4. Conditions. 5. Draw protections under Florida's lien law (ch. 713). 6. Reg B decline notices. 7. Reports at `/admin/reports` and the owners' daily email. Also property photos, self sign-up at `/login/signup`, one application for every borrower (the portal and the secure link share `components/BorrowerApplication.tsx`), and from the 2026-11-04 list: who works each loan, the pipeline and portal fixes, reliability, partners' and buyers' portfolios and statements, tax forms, pre-approval letters, the repeat-borrower fast track and the broker program (A to H, in git history before this file was rewritten), and I, the design pass (2026-11-05: photo-led loans, the loan timeline, one next step, status words, portfolio charts, the borrower tab bar, the folded staff menu, the Florida drawing and the opt-in "Recently funded" list). And J, the instant quote: terms before contact details, the cash to close itemized, the `/embed/quote` widget for brokers' and GT's own sites, and the quote funnel in the reports. And M, the work queue: each person's queue with legal deadlines and clocks against Settings' targets in Florida business hours, the pipeline board, and the speed scoreboard in the reports and the morning email.
+
+## Where this list comes from (2026-11-05 CEO review)
+
+Start from what a loan physically needs: a value for the property, confidence the borrower can pay and exit, a clean lien, and money moved. Everything else is friction, and the product is how little of it there is. The fastest lenders now quote from an address in seconds (Kiavi's ARV and cash-to-close estimator; Lima One says its portal cut quote waits by 90%), read documents with AI (Kiavi's AI document review and scope-of-work extraction), close fix and flips in as little as 5 business days (Kiavi), and pay draws from the borrower's phone photos with no site visit for most draws (Kiavi, Easy Street, Built Inspect). Lender software (Mortgage Automator, Baseline, Liquid Logics) adds rule-based tasks, texts, monthly borrower statements, investor portals with committed/allocated/available money, and now AI connections (Mortgage Automator ships an MCP server).
+
+LendHous's targets, shown on the reports page so everyone sees them: **terms in 60 seconds, a term sheet the same day, closing in 5 business days, draws paid within 24 hours, no number typed twice.**
+
+The screen review on 2026-11-05 also found these; feature I fixed them:
+
+- The public home page's hero is the Dallas skyline (`public/images/dallas-skyline.webp`, Reunion Tower) on a Florida lender's site.
+- At a laptop's height (1440×900) the staff menu's last item (Members) is cut off under the account block, with nothing to show the menu scrolls.
+- Borrower screens still say "full-boat" under the rate, "Servicing Current", and "Term Sheet Issued" in title case. The funded loan card shows "due 2026-11-01" (an ISO date the `shortDay` sweep missed).
+- The borrower's loan page shows two next steps at once ("Upload the documents marked Requested" and "Finish your application").
+- Property photos exist, but no card or loan header shows one: every loan is a block of text.
+- Needs attention is 14 equal counters, so a payoff letter with 2 days left by law looks the same as 15 documents to review. The owner seat shows 35 unread notifications.
+- The partner portfolio is numbers only: no picture of money paid over time or when loans come due.
 
 ## The features, in priority order
 
 Build them in this order, one at a time. Finish each to the definition of done before starting the next, and stop after each one to report.
 
-### A. Who owns each loan
+### K. AI document reader
 
-> **Prompt.** Every loan gets a loan officer and a processor. Today nothing says who's working a loan: the pipeline can't be filtered to "my loans", alerts go to every owner, and a borrower's "Your team" box is empty on a real account.
+> **Prompt.** Processors read every bank statement, closing statement, insurance binder, LLC document and contractor bid by hand, and type what they find. Kiavi reads them with AI. Use Claude: load the `claude-api` skill first, use `claude-opus-5-5` by default (a `LENDHOUS_AI_MODEL` env setting can change it), behind `ANTHROPIC_API_KEY`. The reader never accepts anything by itself: it proposes, a person accepts.
 >
-> - **Data:** `deal.team?: { officer?: TeamMember; processor?: TeamMember }`, where a `TeamMember` is a snapshot of `{ id, name, email, phone, title }` taken when they're assigned (so the borrower's browser can show how to reach them). A pure `lib/loan-team.ts` holds who can be assigned (staff with `view_pipeline`), who a loan belongs to, and the "mine" test (by id, or by email for the demo book).
-> - **Assigning:** a new `assign_loans` permission (owners and underwriters by default; add it to a permission group). On the loan page, under the header, "Loan officer" and "Processor" each show the person and, for someone with `assign_loans`, a picker of the team. The server action looks the person up and runs a trusted `assignLoanTeam` action with the snapshot; the browser never sends names or emails. Anyone can take an unassigned loan as its processor with "I'll take it".
-> - **Defaults:** staff starting a loan become its loan officer, and so does the loan officer who sent an application link. Loans from the portal or a website lead start unassigned.
-> - **Pipeline:** a "My loans / No loan officer / Everyone's" filter (Everyone's by default, remembered per browser), the officer's initials on each row, and a "Loans with no loan officer" item in Needs attention.
-> - **Alerts:** team alerts about a loan go to its officer and processor as well as the owners. Being assigned emails the person.
-> - **Borrower and broker:** the loan page's "Your team" box shows the officer and processor with call, text and email links, above the wire-fraud warning.
-> - **Reports:** a "By loan officer" table: applications, term sheets, fundings and amount funded in the period.
-> - **Demo:** demo loans are spread across the demo seats' names and emails.
-> - **Tests:** the rules, `authorize` (only `assign_loans` assigns; trusted only), alert routing, the filter, and a real-account run where an owner assigns an underwriter who then sees the loan under "Mine" and gets the email.
-
-### B. Pipeline and portal fixes
-
-> **Prompt.** A set of small fixes from the screen review. Each is quick; together they make the app read as finished.
+> - **When a document is uploaded** to a loan (borrower, broker, staff or the title link), a server job sends it to Claude with a schema for its kind and stores the result as `deal.readings[]`: what it found, where (page), confidence, and checks against the loan. The document card shows "Read by AI: check it" with the fields and Accept, Fix or Ignore.
+> - **What it reads and checks:**
+>   - Bank statements: ending balance, statement date, account holder; liquidity against the cash to close plus reserves; a statement older than 90 days flagged; large recent deposits listed. Never store account numbers (last 4 at most).
+>   - Closing statements (HUDs) for the track record: address, purchase and sale dates and prices; accepted ones count toward verified deals.
+>   - Insurance binders: LendHous named as mortgagee with ISAOA/ATIMA, dwelling coverage at least the loan or the rebuild cost, dates covering closing, windstorm included, flood when the property is in a flood zone (see L).
+>   - Entity documents: the entity's exact name and state, its managers or members against the guarantors, and a link to the Sunbiz record to confirm it's active.
+>   - Contractor bids: line items and amounts proposed as the scope of work.
+>   - Appraisals: as-is value, ARV, market rent and the appraiser's license number into the loan's numbers, as a proposal.
+> - **Privacy:** documents can hold SSNs and account numbers. Send only what the reading needs (the file itself, no loan book), keep the result free of SSNs, birth dates and full account numbers, record each send in the audit log (`ai.read`), and add the AI provider to the privacy disclosure. GT confirms Anthropic's commercial data terms before turning it on. Off unless the key is set; demo seats show a recorded sample.
+> - **Cost guard:** a monthly page cap in Settings, and the count in the morning email.
+> - **Tests:** each kind's checks against recorded fixtures (no live calls), the PII scrub on results, nothing accepted without a person, and the audit entry.
 >
-> - **Needs attention:** order it by urgency (legal deadlines first: payoff letters and decline notices with days left, then wires to verify, sanctions matches, funding approvals, then reviews), and show the deadline on the items that have one.
-> - **Pipeline table:** the default view is loans not yet funded ("In the pipeline"; funded loans live on Servicing). One status label per row; the capital status shows only when it adds something (not "Not started", not "Funded" twice). Drop the LTV column (total loan ÷ as-is reads 106–269% on rehab loans, which is normal and alarming). Plain-language subtitle.
-> - **Loan page:** "Next: build and send the term sheet" instead of "Next step: Term Sheet Issued"; what's blocking it as a short checklist. A facts bar under the header: target closing date, days to close, loan officer and processor. Empty optional numbers show blank, not 0.
-> - **Dates:** one `shortDay()` format ("Nov 13, 2026") for every date a person reads, in borrower and staff screens, emails and letters. ISO dates stay in CSVs.
-> - **Borrower loan page:** one "What we need from you" checklist at the top (requested documents, their open conditions, a nudge to add property photos) with a count and progress; the scope of work collapses once submitted; a "Messages" link jumps to the thread.
-> - **Borrower menu:** one way to start a loan ("Apply for a loan"), not a nav item and a button with different names.
-> - **Staff search:** a search box in the staff sidebar (and ⌘K) that finds loans by number, borrower, entity or address from the book, and website leads from the server, each a link.
-> - **Tests:** the urgency order and `shortDay` as unit tests; screenshot checks for each change; phone check for the search and the checklist.
+> Sources: kiavi.com (AI document review, scope-of-work extraction), mortgageautomator.com/all-features.
 
-### C. Reliability
+### L. Florida property facts: flood zones and storm mode
 
-> **Prompt.** Make it safe to run unattended before real money moves.
+> **Prompt.** Every LendHous property sits in Florida, so flood and wind are the risks that matter most, and today the borrower types whether the house is in a flood zone ("I'm not sure" is allowed). Use free public data.
 >
-> - **Errors:** a server error handler that records each error (message, route, time, a hash of the stack; no request bodies, no PII) in an `ErrorEvent` collection, an owners-only `/admin/errors` page, and the count in the morning email. If `SENTRY_DSN` is set, forward them too, with PII scrubbed.
-> - **Health:** `/api/health` (no sign-in) returns 200 with the database reachable and the last run of each nightly job; 503 if the database is down or the servicing or sanctions job is over 2 days old. Owners see a banner in the panel when a job is stale. Document pointing an uptime monitor (UptimeRobot or similar) at it.
-> - **Staging:** document a staging deployment in DEPLOY.md: its own database and `NEXT_PUBLIC_APP_URL`, mail to the log, demo seats allowed.
-> - **Restore test:** `npm run restore:test` restores the latest backup (an Atlas snapshot or a `mongodump` archive) into a scratch database, opens a sample of encrypted records with the keys, and reports what it checked. Document how often to run it.
-> - **Tests:** the error recorder strips PII; the health route's 200 and 503 cases.
-
-### D. Partner and buyer portfolio and statements (Spec P7–P9, 8.6)
-
-> **Prompt.** Capital partners and loan buyers need to see their money.
+> - **Flood zone on every address:** geocode with the U.S. Census Geocoder, then query FEMA's National Flood Hazard Layer (`hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer`, the flood hazard zones layer; read the service directory for the current layer id) for the zone and whether it's a Special Flood Hazard Area. Store `deal.flood = { zone, sfha, checkedAt, source }`. An empty answer means "not mapped", not "no risk": say so. A zone A or V property gets a flood insurance condition automatically, and DSCR pricing counts a flood premium.
+> - **Storm mode:** a nightly job (and a button) reads NHC's active storms file (the tropical cyclone status JSON; get its URL from NHC's reference PDF) and each storm's 5-day cone. When any LendHous property is inside a cone, owners get an email and a banner: the loans, balances, undrawn holdbacks, insurance expiry and whether windstorm is covered. After the storm passes, each of those borrowers gets a photo request (the existing photo requests) to show the property's condition, and draws on those loans need a fresh inspection.
+> - **Portfolio view:** on Reports, balances by flood zone and by county.
+> - **Tests:** the zone parsing from recorded FEMA answers (including "not mapped"), the point-in-cone test against a recorded cone, the condition added for zones A and V, and the alert routing.
 >
-> - The winning partner sees verified funding instructions on the loan and marks funds sent; staff mark funds received (both into the closing checklist).
-> - "My portfolio" for a partner and a buyer: each funded loan's balance, rate, status, payments received, draws and payoffs, from the servicing ledger.
-> - Monthly distribution statements per partner and per loan buyer: interest, principal, fees, servicing fee withheld, balances and delinquency, as a PDF (pdfkit, like the payoff letters) and CSV, generated on the 1st by a nightly job and kept, each emailed with a link.
-> - **Tests:** the split of each payment by allocation, the statement totals against the ledger, and a partner who can't see another partner's statement.
+> Sources: FEMA NFHL GIS services (hazards.fema.gov), NHC GIS data (nhc.noaa.gov/gis) and its tropical cyclone status JSON reference, U.S. Census Geocoder (geocoding.geo.census.gov).
 
-### E. Tax forms
+### N. Draws in 24 hours, from the borrower's phone
 
-> **Prompt.** LendHous services loans for partners and buyers and pays brokers, so it files their information returns. Research (Nov 2026, sources below) gives the rules; anything marked CPA is for LendHous's CPA to confirm, and the thresholds live in one config so they can change without code.
+> **Prompt.** Kiavi pays most draws from the borrower's photos without a site visit; Easy Street sends an inspection link to a phone. LendHous already takes draw photos and records inspections; make it fast and trustworthy.
 >
-> - **W-9 first.** Collect a W-9 from every US partner, buyer and broker before the first payment: legal name, tax classification, TIN and any exempt-payee code, as an e-signed substitute form (the IRS allows a substantially similar electronic W-9). Seal the TIN like an SSN. A foreign investor gives a W-8BEN (person) or W-8BEN-E (entity) instead, valid to Dec 31 of the third year after signing; flag it for the CPA (30% withholding, Form 1042-S due March 15). Keep each form for the relationship plus 4 years.
-> - **Backup withholding.** Without a certified TIN, or after an IRS B-notice, payments to that payee are subject to 24% backup withholding (interest has a 60-day grace for an applied-for TIN; broker fees don't). The statements and broker fee screens show the hold and the amount; reported in box 4 and on Form 945.
-> - **1099-INT** for partners' and buyers' interest: LendHous files as the middleman that collects and passes it on (Treas. Reg. 1.6049-4). Box 1 interest (the investor's net interest from the monthly statements), box 4 backup withholding. Exempt: corporations (presumed from "Inc."/"Corp." in the name, not "Co."), tax-exempt organizations and IRAs, so a self-directed IRA participant gets none. Threshold $10, configurable (CPA: whether $600 applies to non-section-6049 interest, and how participations are characterized).
-> - **1099-NEC** for broker fees: $2,000 or more paid in 2026 (P.L. 119-21; indexed from 2027), box 1a; exempt if the broker is a corporation (C or S). CPA: a fee the borrower pays the broker on the settlement statement may be the borrower's payment, not LendHous's.
-> - **1098** for borrowers: $600 or more of interest in the year from an individual payer of record, on any loan secured by real property, business-purpose included; none when the borrower is an LLC, partnership, trust or estate (CPA: single-member LLCs). For a loan sold mid-year the seller reports what it received; the buyer reports principal at acquisition (box 2) and the acquisition date (box 11) when LendHous services it.
-> - **Year-end screen** (`/admin/tax`, owners): for a tax year, every form that's due, each with the payee, amounts, exemption, W-9 status and what's missing; recipients' PDFs; and an IRIS CSV export (the IRS's only e-file system from Jan 1, 2027; e-filing is required at 10 or more returns in total). Deadlines: recipients' copies Feb 1, 2027 (1099-INT, 1099-NEC, 1098); the IRS Feb 1 for 1099-NEC, March 31 e-filed for the rest. Electronic recipient copies need the recipient's consent; otherwise mail.
-> - **Florida:** no state income-tax returns (no personal income tax; Florida only collects 1099-K). An investor's home state may want a copy; IRIS's combined federal/state program covers 1099-INT and 1099-NEC, not 1098.
-> - **Tests:** who gets which form at the thresholds, exemptions, backup withholding, the CSV's columns, and a payee without a W-9 flagged.
+> - **Photo per budget line:** the draw request walks the scope of work line by line on a phone, with the camera opening for each line, last draw's photo beside the new one, and the percent complete the borrower claims.
+> - **Proof it's the property:** at each capture, ask for the phone's location (`navigator.geolocation`) and record the distance from the property's geocode and the time; phones' browsers often strip photo GPS, so don't rely on EXIF. Over 200 meters (PLACEHOLDER) or older than 48 hours is flagged on the staff side, never blocked.
+> - **Inspector's link:** like the title company's link, a secure link for a third-party inspector with no account: the draw's lines, the borrower's photos, and a form for observed percent complete, their own photos (same location check) and notes, which records the inspection.
+> - **The clock:** the 24-hour target from M on every draw, and a borrower-facing "We'll decide by" time.
+> - **Tests:** the distance and freshness flags, the inspector link's scope (one draw, expires), and the existing lien-law holds still apply.
 >
-> Sources: IRS W-9 instructions (irs.gov/instructions/iw9), 1099-INT (irs.gov/instructions/i1099int), 1099-MISC/NEC (irs.gov/instructions/i1099mec), 1098 (irs.gov/instructions/i1098), General Instructions (irs.gov/instructions/i1099gi), IRIS (irs.gov/filing/e-file-information-returns-with-iris), 26 CFR 1.6049-4 and 1.6049-5, 26 USC 6041, Rev. Proc. 2025-32 (penalties: $60/$130/$340 per return for 2027 filings).
+> Sources: kiavi.com (mobile draws, photo verification), easystreetcap.com/draw-request-faqs, Built Inspect (App Store).
 
-### F. Pre-approval and proof-of-funds letters (Spec 12.3)
+### O. Text messages and notification settings
 
-> **Prompt.** For repeat borrowers and GT's wholesale and realty clients making offers. Research found lenders (Kiavi, RCN, Lima One, New Silver) give a letter number, the borrower or LLC, a maximum loan and price, the program, an expiry (30 to 60 days; sellers want one under 30 days old), conditions and "not a commitment, subject to underwriting" language; sellers verify by calling, and QR verification isn't standard, so a verify page sets LendHous apart.
+> **Prompt.** Investors live on their phones; email nudges for a missing bank statement get lost. And the owner seat has 35 unread notifications. Use Twilio behind `TWILIO_*` env keys.
 >
-> - A staff page to issue one (it takes term sheet authority for the amount), a PDF with a QR code to a public verify page that shows only whether it's genuine and valid, whom it's for, the limits and the expiry, withdrawal, and the borrower's copy in the portal.
-> - Business-purpose and non-owner-occupied wording on every letter (Florida makes calling a consumer loan business-purpose a felony).
-> - **Reg B:** a written pre-approval request for a set amount and period is a credit application, so declining one needs a decline notice. Say so on the issue screen.
->
-> Sources: albeca.com and rcncapital.com articles on letters, kiavi.com/how-it-works, help.newsilver.com POF article, 12 CFR 1002 commentary 2(f) (consumerfinance.gov), Fla. Stat. 494.0025.
+> - **Consent first:** a separate, unchecked opt-in for texts on the application and in Account, with the wording, time and number stored (TCPA). STOP, HELP and START handled. Note in DEPLOY.md that US business texting needs A2P 10DLC brand and campaign registration before launch.
+> - **Two-way:** texts to and from the borrower land in the loan's Messages thread, marked as texts; staff reply from the thread.
+> - **What gets texted** (each can be turned off by the person): a document requested, a condition sent back, the term sheet ready, a draw decided, a payment due in 3 days or late, the closing date set. No loan amounts, account details or links that sign someone in.
+> - **Notification settings:** per person and per event, choose email, text, in-app or a daily summary. The notification list groups by loan and marks a group read at once.
+> - **Tests:** no text without consent, STOP stops everything, inbound texts match the right loan by number and are rejected when two loans' borrowers share it, and per-event settings.
 
-### G. Repeat-borrower fast track
+### P. Maturity desk and the bridge-to-rental refinance
 
-> **Prompt.** Research: lenders tier by deals closed (Kiavi 0–2 / 3+ in 24 months; RCN 5+ in 36 months for more leverage), and give repeat borrowers rate and fee cuts (New Silver: 3 loans 0.50% rate / 0.25% origination, 6 loans 0.75% / 0.50%, 10 loans 1.00% / 0.75%; Backflip up to 0.50% origination over 24 months, paused by a late payment), faster closings and less paperwork, while re-pulling anything stale (credit and bank statements over 90 days, appraisals over 120).
+> **Prompt.** Every bridge and fix and flip loan ends in a sale, a refinance, an extension or trouble. Mortgage Automator reports maturities at 30/60/90 days; Kiavi refinances rentals after 90 days of ownership. LendHous makes DSCR loans, so its own borrowers finishing a rehab are its best rental-loan leads.
 >
-> - The portal application starts from the borrower's last signed one: entity, guarantors and track record, with Social Security numbers and birth dates entered again.
-> - Loans funded with LendHous count toward pricing automatically: the `repeatBorrower` adjuster becomes a tier table in the pricing config (PLACEHOLDER numbers until GT sets them), by loans paid as agreed in the last 24 months, and a late payment in that window pauses it.
-> - Documents still fresh on the last loan (entity documents, good standing under 90 days, IDs) carry over as received; the ones that go stale are asked for again.
-> - "New loan on another property" from a funded loan.
->
-> Sources: kiavi.com/solutions/high-volume-real-estate-investors, rcncapital.com repeat-investor article, limaone.com/lower-flip-interest-rates, backflip.com rewards, anchorloans.com portal announcement.
+> - **Outreach:** 120, 90, 60 and 30 days before maturity the borrower gets a message asking how they'll exit: selling (list price and date), refinancing (with LendHous or elsewhere), extending (the existing extension request) or paying off (the payoff letter). Their answer goes on the loan.
+> - **Refinance with LendHous:** one button starts a DSCR application prefilled from the loan (the repeat-borrower flow), with the rehab counted as track record and the new loan paying off the old one at closing.
+> - **Maturity desk:** a servicing view of loans by months to maturity, each with its exit and how sure it is, and loans with no answer at 60 days in My queue (M).
+> - **Reports:** the exit mix, refinances kept in-house, and extensions.
+> - **Tests:** the outreach schedule, the prefilled refinance, and the payoff of the old loan from the new loan's closing.
 
-### H. Broker program (Spec R1–R6)
+### Q. Borrower money page and monthly statements
 
-> **Prompt.** Research (Florida attorney to confirm): business-purpose loans on investment property aren't Chapter 494 "mortgage loans", so brokering them needs no Florida license or NMLS ID (OFR declaratory statement, 2016; s. 494.001(4), (25)); Reg Z's loan-originator compensation rules and RESPA don't apply to business-purpose credit. But calling a consumer loan business-purpose is a felony, and a broker's home state (Nevada, Utah) may license commercial brokering.
+> **Prompt.** Partners get monthly statements; borrowers don't. Mortgage Automator emails both every month.
 >
-> - **Sign-up and approval:** entity documents and good standing, a W-9 (see E), an NMLS ID or state license if they have one, OFAC screening of the firm and its principals, and an e-signed broker agreement: business-purpose loans only, accuracy of what they submit (occupancy, use of funds), the compensation schedule, every borrower-paid fee disclosed on the term sheet and settlement statement, non-circumvention with a borrower-protection window, indemnity, and no authority to bind LendHous. Staff approve before deals can be submitted.
-> - **Fees:** tracked per loan as expected, paid or unpaid (typical 1 to 2 points; RCN reports 1.2% on average), shown on the term sheet, and counted toward 1099-NEC (E).
-> - **Usury check:** Florida counts commissions and discounts as interest spread over the term (18% simple up to $500,000; 25% criminal). Short loans with points can cross it (5 points on a 6-month loan adds about 10%). Warn before a term sheet goes out when rate plus points annualized passes the limit (attorney: whether an independent broker's fee counts).
-> - **White-label quote PDFs** with the broker's name, still naming LendHous as the lender and saying it isn't a commitment.
-> - **Referral links** with attribution on the quote form (a borrower stays the broker's for the window in the agreement), counted in the reports. Pay a real estate agent's referral through their broker (Fla. Stat. 475.42).
+> - **Monthly borrower statement** on the 1st for every funded loan, by the nightly job, as a PDF (pdfkit, like the investor statements) and kept: principal, interest rate, payment due and date, payments received, fees, holdback and draws, late charges, and the payoff estimate with its date. Emailed with a link.
+> - **Money page** on the borrower's funded loan: what's due and when, how to pay (the verified payment instructions, and ACH once a vendor is chosen), history, statements, last year's 1098 if one was issued, and "Request a payoff letter".
+> - **Tests:** statement totals against the ledger, a borrower who can't open another borrower's statement, and the job running once per month.
+
+### R. Investor buy-box and the money forecast
+
+> **Prompt.** Partners bid loan by loan today. Groundfloor's Auto Investor and Baseline's investor portal show the next step: investors say what they want and are offered it first. GT also needs to see whether there's enough money for what's coming.
 >
-> Sources: Fla. Stat. 494.001, 494.0025, 494.00115, 687.03, 687.071, 475.42; 12 CFR 1026.3, 1026.36, 1024.5; thewbkfirm.com and legal500.com summaries of the 2016 OFR ruling and 2018 law; rcncapital.com and kiavi.com broker pages; easystreetcap.com broker program.
+> - **Buy-box:** each partner sets products, counties, maximum LTV/LTARV, minimum rate, size per loan and a total cap. A loan that fits is offered to matching partners first, for a set number of hours (PLACEHOLDER), before the open deal feed; they still confirm each one. A partner sees committed, allocated and available money.
+> - **Money forecast** for owners: the next 90 days of fundings (pipeline loans weighted by stage), undrawn holdbacks by expected draw date, and expected payoffs, against cash and partners' available money; a shortfall shows a warning and goes in the morning email.
+> - **Attorney:** if participations are ever offered to people who aren't existing relationships, securities rules apply (Reg D); keep the buy-box for invited partners only until the attorney says otherwise.
+> - **Tests:** matching rules, the first-look window, the forecast's weights against a fixture book, and a partner who can't see another's buy-box.
+>
+> Sources: groundfloor.com Auto Investor, mortgageautomator.com investor portal, Baseline (privatelenderlink.com interview).
+
+### S. Fraud and concentration checks
+
+> **Prompt.** Cheap checks catch most fraud in this business: the same person under different names, the same property twice, and a quick flip at a much higher price.
+>
+> - **Duplicates:** on every application and lead, look for the same phone, email, property, entity or guarantor on other loans and leads, and show matches on the loan with links.
+> - **Price jumps:** when a property data vendor is chosen, compare the purchase price with the last recorded sale; until then, the processor enters the last sale and the check runs on it.
+> - **Statement tampering:** the AI reader (K) flags statements whose totals don't add up or whose fonts and dates are inconsistent.
+> - **Concentration:** on Reports, balances by borrower, county, product and flood zone, with limits in Settings (PLACEHOLDER) that warn before a term sheet goes out.
+> - **Tests:** duplicate matching (normalized phones and addresses), the price-jump rule and the concentration warning.
+
+### T. Ask LendHous (later)
+
+> **Prompt.** A staff assistant that answers questions about the book in plain words ("which loans mature in 60 days with no exit chosen?", "what's left before LH-1003 can close?") and drafts replies to borrowers, using Claude (load the `claude-api` skill). It only sees what `scopeBook` gives the person asking, links every loan it mentions, never takes an action itself, and each question is in the audit log. Mortgage Automator now offers an MCP server for the same idea; an MCP server for LendHous can follow once this works.
 
 ### Needs a vendor chosen first
 
-Build the adapter behind an env key, and test with recorded fixtures.
+These gate the biggest speed wins (terms from a real value, closing in days, money in without chasing), so choose them now. Build the adapter behind an env key, and test with recorded fixtures.
 
-- **Credit, ID and background checks:** a soft pull plus ID and KYC for each guarantor, with the consent record the application already captures.
-- **ACH payments:** autopay and one-time ACH through a payment processor, with NSF returns reversing the payment and pausing autopay after two returns.
-- **Automated comps and ARV:** a property-data provider (RentCast or ATTOM) that fills an AVM and comparables on the quote form and the loan's numbers tab, labelled as an estimate.
+- **Automated comps and ARV:** a property-data provider (RentCast or ATTOM) that fills an AVM and comparables on the quote (J) and the loan's numbers tab, labelled as an estimate, and gives S its last-sale check.
 - **E-signature:** for term sheets, extension agreements and guaranties.
+- **ACH payments:** autopay and one-time ACH through a payment processor, with NSF returns reversing the payment and pausing autopay after two returns.
+- **Credit, ID and background checks:** a soft pull plus ID and KYC for each guarantor, with the consent record the application already captures.
 
 ### As volume grows
 
@@ -160,18 +177,23 @@ Build the adapter behind an env key, and test with recorded fixtures.
 ## Launch checklist (not code: for GT and whoever runs the server)
 
 - **Email from LendHous's own domain.** Add and verify the domain in Resend (a few DNS records), then set `EMAIL_FROM`. Until then every sign-up, password and payoff email comes from another company's address.
-- **Real numbers and wording.** Publish real pricing at `/admin/pricing`; the attorney supplies the application consents, the decline notice, the payoff letter, lien waiver forms, the extension agreement, and the default and late-fee numbers.
+- **Real numbers and wording.** Publish real pricing at `/admin/pricing`; the attorney supplies the application consents, the decline notice, the payoff letter, lien waiver forms, the extension agreement, the broker agreement, and the default and late-fee numbers.
 - **Its own database login.** A dedicated Atlas user with read and write on the `lendhous` database only, instead of the shared admin login.
 - **Settings.** LendHous's mailing address and phone (decline letters need them); whether borrowers can sign up on their own; turn off sample data before real clients sign in.
 - **Deploy and HTTPS.** Sign-in needs https behind the proxy, and nginx has to let uploads over 1 MB through.
+- **Brokers.** After deploying the broker program, existing brokers sign the agreement from their portal and an owner approves them on `/admin/brokers` before they can send new deals.
 
 ## Open decisions to ask GT about (don't guess)
 
-- Which vendors to use for credit and KYC, ACH, property data, e-sign and error monitoring.
+- A licensed Florida photograph for the home page, to replace the drawing (I). Borrowers already choose whether to show their funded loan in "Recently funded".
+- Whether to send borrower documents to Anthropic for reading, after reading its commercial data terms, and the monthly page cap (K).
+- Texting: a Twilio account, the A2P 10DLC registration, and which events text by default (O).
+- The speed targets (M) and the first-look window and caps for partners' buy-boxes (R).
+- Which vendors to use for property data, e-sign, ACH, and credit and KYC.
 - The second approver for funding and draws on jobs GT's construction company does (Spec 7.6).
 - Who should have `assign_loans` and `view_reports` beyond the defaults.
 - The repeat-borrower tiers (`adjusters.repeatTiers`, editable at `/admin/pricing`), and how long each carried-over document stays good (`CARRY_OVER` in `lib/repeat-borrower.ts`).
 - The broker agreement's wording, its borrower-protection window (`PROTECTION_MONTHS`, 12 months), and whether an independent broker's fee counts toward Florida's usury cap (the attorney).
 - Whether the CPA wants 1099-NECs for broker fees the title company pays out of the settlement, or only for fees LendHous pays itself.
 
-Start with feature A. Before writing code, read the files it touches and outline the plan in a few lines.
+Build next, in this order, the features that need no vendor or outside decision: Q, P, N, S, then L. K, O and R wait on GT (sending documents to Anthropic, a Twilio account, and the attorney on partner first looks). Before writing code, read the files it touches and outline the plan in a few lines.

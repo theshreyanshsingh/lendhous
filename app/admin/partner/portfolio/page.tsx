@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { InvestorStatements } from "@/components/InvestorStatements";
+import { PortfolioCharts } from "@/components/charts/PortfolioCharts";
 import { PageIntro } from "@/components/page-intro";
 import { Badge, Section, Stat, k, productLabel, statusLabel, usd } from "@/components/ui";
 import { evaluate } from "@/lib/engine";
@@ -28,6 +29,7 @@ export default function PartnerPortfolio() {
         <div className="glass p-4" data-testid="portfolio-received"><Stat label="Paid to you so far" value={usd(sum((row) => row.received.net), 2)} sub="after servicing" /></div>
         <div className="glass p-4"><Stat label="Monthly interest to you" value={usd(sum((row) => row.monthly), 2)} sub="at your rate, on today's balance" /></div>
       </div>
+      <PortfolioCharts investor={{ type: "partner", id: me.id }} />
       <Section title={`Funded loans (${rows.length})`}>
         {rows.length === 0 && <p className="text-sm text-muted-foreground">No funded loans yet. <Link className="text-link underline" href="/admin/partner">See the deal feed</Link>.</p>}
         <ul className="divide-y divide-border">

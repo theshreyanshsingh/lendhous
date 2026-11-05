@@ -15,6 +15,8 @@ import { unansweredLeads } from "@/lib/lead-store";
 import { payoffReminders } from "@/lib/payoffs";
 import { noticeReminders } from "@/lib/adverse-action";
 import { dailyDigest } from "@/lib/reports";
+import { targetsFrom } from "@/lib/sla";
+import { pastTarget } from "@/lib/work-queue";
 import { recentErrors, recordError } from "@/lib/errors";
 import { previousMonth } from "@/lib/investor-statements";
 import { makeStatements } from "@/lib/statement-store";
@@ -128,7 +130,8 @@ async function sendDigest(now: Date) {
   const book = (await readBook()).book;
   if (!book.deals.length) return "no loans yet; nothing sent";
   const link = `${(process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "")}/admin/reports`;
-  const digest = dailyDigest(book, servicingDate(now), attentionItems(book, await unansweredLeads()), link, await recentErrors(new Date(now.getTime() - 86_400_000)));
+  const targets = targetsFrom((await getSettings()).slaTargets as never);
+  const digest = dailyDigest(book, servicingDate(now), attentionItems(book, await unansweredLeads()), link, await recentErrors(new Date(now.getTime() - 86_400_000)), pastTarget(book, now, targets));
   await notifyTeam(digest.subject, digest.body, "digest.daily");
   return digest.subject;
 }

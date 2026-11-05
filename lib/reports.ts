@@ -215,7 +215,7 @@ const longDay = (day: string) => new Date(`${day}T12:00:00Z`).toLocaleDateString
  * The owner's morning email: what happened yesterday, what's waiting on the team, what's stuck, and where the
  * portfolio and capital stand. Numbers and loan numbers only: no borrower names or addresses.
  */
-export function dailyDigest(book: Book, today: string, waiting: { label: string; count: number }[], link: string, errors = 0) {
+export function dailyDigest(book: Book, today: string, waiting: { label: string; count: number }[], link: string, errors = 0, overdue: string[] = []) {
   const yesterday = addDays(today, -1);
   const report = businessReport(book, { from: yesterday, to: yesterday }, today);
   const { pipeline, portfolio, capital } = report;
@@ -232,6 +232,7 @@ export function dailyDigest(book: Book, today: string, waiting: { label: string;
     `Yesterday (${longDay(yesterday)}): ${done.join(", ")}.`,
     "",
     waiting.length ? `Waiting on the team:\n${waiting.map((item) => `- ${item.label}: ${item.count}`).join("\n")}` : "Nothing is waiting on the team.",
+    ...(overdue.length ? ["", `Past their target:\n${overdue.slice(0, 10).map((line) => `- ${line}`).join("\n")}${overdue.length > 10 ? `\n- and ${overdue.length - 10} more` : ""}`] : []),
     ...(pipeline.stuck.length ? ["", `In the same stage for over ${STUCK_DAYS} days:\n${pipeline.stuck.slice(0, 5).map((row) => `- ${row.deal.loanNumber}: ${row.deal.status.replace(/_/g, " ")}, ${row.days} days`).join("\n")}${pipeline.stuck.length > 5 ? `\n- and ${pipeline.stuck.length - 5} more` : ""}`] : []),
     "",
     `Portfolio: ${money(portfolio.outstanding)} outstanding across ${plural(portfolio.loans, "loan")}${portfolio.loans ? ` at ${portfolio.averageRate.toFixed(2)}% on average` : ""}. ${lateCount ? `${plural(lateCount, "loan")} past due.` : "None past due."} ${plural(portfolio.maturing[0].count, "loan")} maturing in the next 30 days${portfolio.pastMaturity ? `, ${portfolio.pastMaturity} past maturity` : ""}.`,

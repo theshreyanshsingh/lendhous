@@ -3,6 +3,7 @@
 // payoff and the release of the mortgage after it. The reducer, the access rules and the screens all ask these, so the
 // button a screen offers and the rule the server applies can't disagree.
 import { evaluate } from "./engine";
+import { shortDay } from "./format";
 import type { Closure, Deal, DefaultKind, LoanExtension, LoanStatus, PayoffLetter } from "./mockData";
 import { currentPricing, pricingFor } from "./pricing-versions";
 import { addDays, daysBetween, ledgerOf, maturityOf, openDefault, payoffFor, SERVICED, type Ledger } from "./servicing";
@@ -92,7 +93,7 @@ export function extensionRequestError(deal: Deal, months: number, today: string,
   if (openExtension(deal)) return "An extension is already being looked at.";
   if (extensionsUsed(deal) >= maxCount) return `This loan has had the most extensions allowed (${maxCount}).`;
   if (!Number.isInteger(months) || months < 1 || months > monthsEach) return `An extension is 1 to ${monthsEach} months.`;
-  if (!byTeam && today < extensionWindowOpens(deal)) return `You can ask for an extension from ${extensionWindowOpens(deal)}, ${requestWindowDays} days before maturity.`;
+  if (!byTeam && today < extensionWindowOpens(deal)) return `You can ask for an extension from ${shortDay(extensionWindowOpens(deal))}, ${requestWindowDays} days before maturity.`;
   return null;
 }
 

@@ -36,10 +36,9 @@ const dollars = z.number().finite().min(0).max(MAX);
 const optionalDollars = dollars.optional();
 const day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 
-export const quoteSchema = z.object({
-  submitter: z.enum(["borrower", "broker"]),
-  broker: z.object({ name, company: z.string().trim().max(120), email, phone: phone.min(7) }).optional(),
-  borrower: z.object({ firstName: name, lastName: name, email, phone }),
+// The deal on its own, without the people: enough for indicative terms, which the visitor sees before giving any
+// contact details. Nothing about it is stored until they save the terms.
+const dealShape = {
   citizenship: z.enum(["us", "resident", "foreign"]),
   creditBand: z.enum(Object.keys(CREDIT_BANDS) as [keyof typeof CREDIT_BANDS]),
   experience: z.enum(Object.keys(EXPERIENCE_BANDS) as [keyof typeof EXPERIENCE_BANDS]),
@@ -59,19 +58,39 @@ export const quoteSchema = z.object({
   comps: z.array(z.object({ address: z.string().trim().min(3).max(200), price: dollars.min(1), soldOn: z.string().regex(/^\d{4}-\d{2}$/) })).max(3),
   exit: z.enum(["sell", "refinance", "hold", "cash"]),
   notes: z.string().trim().max(1500),
+};
+const dealChecks = (quote: { loanType: LoanType; arv?: number; monthlyRent?: number }, context: z.RefinementCtx) => {
+  if ((quote.loanType === "fix_flip" || quote.loanType === "ground_up") && !quote.arv) context.addIssue({ code: "custom", path: ["arv"], message: "Add the after-repair value (ARV)." });
+  if (quote.loanType.startsWith("dscr") && !quote.monthlyRent) context.addIssue({ code: "custom", path: ["monthlyRent"], message: "Add the monthly rent." });
+};
+export const dealSchema = z.object(dealShape).superRefine(dealChecks);
+export type QuoteDeal = z.infer<typeof dealSchema>;
+
+export const quoteSchema = z.object({
+  submitter: z.enum(["borrower", "broker"]),
+  broker: z.object({ name, company: z.string().trim().max(120), email, phone: phone.min(7) }).optional(),
+  borrower: z.object({ firstName: name, lastName: name, email, phone }),
+  ...dealShape,
 }).superRefine((quote, context) => {
   if (quote.submitter === "broker" && !quote.broker) context.addIssue({ code: "custom", path: ["broker"], message: "Add your broker details." });
   if (quote.submitter === "borrower" && quote.borrower.phone.replace(/\D/g, "").length < 10) context.addIssue({ code: "custom", path: ["borrower", "phone"], message: "Add a phone number we can reach you on." });
-  if ((quote.loanType === "fix_flip" || quote.loanType === "ground_up") && !quote.arv) context.addIssue({ code: "custom", path: ["arv"], message: "Add the after-repair value (ARV)." });
-  if (quote.loanType.startsWith("dscr") && !quote.monthlyRent) context.addIssue({ code: "custom", path: ["monthlyRent"], message: "Add the monthly rent." });
+  dealChecks(quote, context);
 });
 export type Quote = z.infer<typeof quoteSchema>;
 
 /** What a quote fails on, said for a person: the first problem only. */
 export function quoteProblem(raw: unknown): { quote: Quote } | { error: string } {
   const parsed = quoteSchema.safeParse(raw);
-  if (parsed.success) return { quote: parsed.data };
-  const issue = parsed.error.issues[0];
+  return parsed.success ? { quote: parsed.data } : { error: problemWords(parsed.error.issues[0]) };
+}
+
+/** What the deal alone fails on, before the visitor's terms can be shown. */
+export function dealProblem(raw: unknown): { deal: QuoteDeal } | { error: string } {
+  const parsed = dealSchema.safeParse(raw);
+  return parsed.success ? { deal: parsed.data } : { error: problemWords(parsed.error.issues[0]) };
+}
+
+function problemWords(issue: z.ZodIssue) {
   const where = issue.path.join(".");
   const said: Record<string, string> = {
     "borrower.firstName": "Add the borrower's first name.", "borrower.lastName": "Add the borrower's last name.", "borrower.email": "Add an email address we can reach.",
@@ -79,11 +98,11 @@ export function quoteProblem(raw: unknown): { quote: Quote } | { error: string }
     "address.street": "Add the property's street address.", "address.city": "Add the property's city.", "address.state": "Add the property's state as two letters.", "address.zip": "Add the property's 5-digit ZIP.",
     purchasePrice: "Add the purchase price or current value.", fundingDate: "Pick the date you'd like to fund.",
   };
-  return { error: said[where] ?? issue.message ?? "Check the highlighted details." };
+  return said[where] ?? issue.message ?? "Check the highlighted details.";
 }
 
 /** The quote as the engine sees it, or null for a loan type it doesn't price. */
-export function quoteApplication(quote: Quote): Application | null {
+export function quoteApplication(quote: QuoteDeal): Application | null {
   const product = PRICED[quote.loanType];
   if (!product) return null;
   const florida = quote.address.state === "FL";
@@ -101,9 +120,27 @@ export function quoteApplication(quote: Quote): Application | null {
 }
 
 /** Indicative terms for a quote on the current pricing, or null when the loan type needs a person to look at it. */
-export function indicativeTerms(quote: Quote, pricing: PricingConfig): Estimate | null {
+export function indicativeTerms(quote: QuoteDeal, pricing: PricingConfig): Estimate | null {
   const app = quoteApplication(quote);
   return app ? evaluate(app, pricing) : null;
+}
+
+export type CashLine = { label: string; amount: number };
+
+/**
+ * Where the cash to close goes, so the visitor sees why: the price less what the loan pays at closing, the points, the
+ * lender's fees and the estimated closing costs. They add up to the estimate's cash to close.
+ */
+export function cashToCloseParts(quote: QuoteDeal, terms: Estimate, pricing: PricingConfig): CashLine[] {
+  const closingCosts = quote.purchasePrice * pricing.assumptions.buyClosingCostPct;
+  const costs: CashLine[] = [
+    { label: `Points (${terms.pointsPct}%)`, amount: terms.points },
+    { label: "Lender fees (processing and underwriting)", amount: terms.lenderFees },
+    { label: `Closing costs, about ${Math.round(pricing.assumptions.buyClosingCostPct * 1000) / 10}% (title, recording, taxes)`, amount: closingCosts },
+  ];
+  return quote.purpose === "purchase"
+    ? [{ label: "Down payment (the price less what the loan pays at closing)", amount: quote.purchasePrice - terms.initialAdvance }, ...costs]
+    : [{ label: "Loan money at closing", amount: -terms.initialAdvance }, ...costs];
 }
 
 const money = (amount: number) => `$${Math.round(amount).toLocaleString("en-US")}`;

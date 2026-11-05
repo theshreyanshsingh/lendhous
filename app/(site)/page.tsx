@@ -1,7 +1,13 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { ArrowRight } from "lucide-react";
+import { FloridaScene } from "@/components/art/FloridaScene";
 import { FAQS, PROGRAMS } from "@/lib/site-content";
 import { QuickCheck } from "./quick-check";
+import { RecentlyFunded } from "./recently-funded";
+
+// The recently funded list comes from the loan book (cached for ten minutes), so the page is rendered on request.
+export const dynamic = "force-dynamic";
 
 const STEPS = [
   { title: "The conversation", body: "Tell us about the property, your budget, experience, and intended exit." },
@@ -24,9 +30,9 @@ export default function Landing() {
           <p className="hero-note">A short form, not an application. No credit check.</p>
           <div className="hero-foot">First property or established portfolio.<br /> You’re in the right place.</div>
         </div>
-        <figure className="hero-visual city-view">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/images/dallas-skyline.webp" width={1500} height={1156} fetchPriority="high" alt="Dallas skyline at twilight, with Reunion Tower and Bank of America Plaza; photograph by Carol M. Highsmith" />
+        {/* PLACEHOLDER: a drawing until LendHous chooses a licensed photograph of South Florida. */}
+        <figure className="hero-visual city-view hero-art">
+          <FloridaScene />
         </figure>
       </section>
 
@@ -35,6 +41,8 @@ export default function Landing() {
         <div><span className="metric-label">LOAN-TO-VALUE¹</span><strong><small>Up to</small> 75<span>%</span></strong></div>
         <div><span className="metric-label">COLLECTIVELY FUNDED²</span><strong>$500<span>M+</span></strong></div>
       </section>
+
+      <Suspense fallback={null}><RecentlyFunded /></Suspense>
 
       <section className="section lending-section">
         <div className="lending-intro">

@@ -5,6 +5,8 @@ import { teaserOf } from "@/lib/teaser";
 import { matchPartner } from "@/lib/engine";
 import { PageIntro } from "@/components/page-intro";
 import { Badge, GradeBadge, ColorDot, usd, pct, productLabel } from "@/components/ui";
+import { EmptyArt } from "@/components/art/HouseArt";
+import { PropertyPicture } from "@/components/PropertyPicture";
 
 export default function PartnerFeed() {
   const { s, dispatch } = useStore();
@@ -25,19 +27,22 @@ export default function PartnerFeed() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-2"><div className="min-w-0"><PageIntro eyebrow={me.name} title="Deal feed" lede="Blind teasers routed to you, sorted by buy-box match." /></div>
         <div className="glass mb-6 min-w-0 px-3 py-2 text-xs text-muted-foreground">Buy box: {me.buyBox.products.map((p) => productLabel[p]).join(", ")} · {me.buyBox.states.join("/")} · {usd(me.buyBox.minLoan)}–{usd(me.buyBox.maxLoan)} · min FICO {me.buyBox.minFico}</div></div>
-      {feed.length === 0 && <div className="glass p-6 text-sm text-muted-foreground">No teasers yet. They appear here when LendHous sends you a deal that fits your buy box.</div>}
+      {feed.length === 0 && <div className="glass flex flex-col items-center gap-2 p-8 text-center text-sm text-muted-foreground" data-testid="no-teasers"><EmptyArt className="h-24 w-32" />No teasers yet. They appear here when LendHous sends you a deal that fits your buy box.</div>}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {feed.map((d) => {
           const t = teaserOf(d); const myBid = s.bids.find((b) => b.dealId === d.id && b.partnerId === me.id);
           const won = myBid?.status === "accepted"; const lost = !won && s.bids.some((b) => b.dealId === d.id && b.status === "accepted");
           const m = matchPartner(me.buyBox, { product: d.app.product, state: d.app.state, noteAmount: t.noteAmount, ltarv: t.ratios.find((r) => r.key === "ltarv")?.actual, ltv: t.ratios.find((r) => r.key === "ltv")?.actual, fico: d.app.fico, tier: t.tier, rate: t.rate });
           return (
-            <Link key={d.id} href={`/admin/partner/teasers/${d.id}`} className="glass block p-5 transition-colors hover:border-faint" data-testid="teaser-card">
+            <Link key={d.id} href={`/admin/partner/teasers/${d.id}`} className="glass block overflow-hidden transition-colors hover:border-faint" data-testid="teaser-card">
+              <PropertyPicture deal={d} variant="card" blind={!won} />
+              <div className="p-5">
               <div className="flex items-start justify-between gap-2"><div className="min-w-0"><div className="text-xs text-muted-foreground">{t.teaserId} · {productLabel[t.product]}</div><div className="text-lg font-semibold">{t.county} County · ZIP {t.zip3}</div></div><GradeBadge grade={t.grade} score={t.score} /></div>
               <div className="mt-1 text-2xl font-semibold tracking-tight text-foreground">{usd(t.noteAmount)}</div>
               <div className="text-sm text-muted-foreground">Lender yield {t.lenderYieldOffered.toFixed(2)}% · {t.termMonths} mo · exit: {t.exit}</div>
               <div className="mt-3 flex flex-wrap gap-3 text-sm">{t.ratios.map((r) => <span key={r.key} className="inline-flex items-center gap-1"><ColorDot color={r.color} />{r.label} {r.key === "dscr" ? r.actual.toFixed(2) + "x" : pct(r.actual)}</span>)}</div>
-              <div className="mt-3 flex flex-wrap items-center gap-2"><Badge tone="blue">match {m.match}%</Badge><Badge>FICO {t.ficoBand}</Badge><Badge>Tier {t.tier}</Badge>{t.affiliatedContractor && <Badge tone="rose">Affiliated contractor</Badge>}{won ? <Badge tone="green">WON</Badge> : lost ? <Badge>lost</Badge> : myBid ? <Badge tone="violet">bid placed</Badge> : <Badge tone="amber">new</Badge>}</div>
+              <div className="mt-3 flex flex-wrap items-center gap-2"><Badge tone="blue">match {m.match}%</Badge><Badge>FICO {t.ficoBand}</Badge><Badge>Tier {t.tier}</Badge>{t.affiliatedContractor && <Badge tone="rose">Affiliated contractor</Badge>}{won ? <Badge tone="green">Won</Badge> : lost ? <Badge>Lost</Badge> : myBid ? <Badge tone="violet">Bid placed</Badge> : <Badge tone="amber">New</Badge>}</div>
+              </div>
             </Link>);
         })}
       </div>

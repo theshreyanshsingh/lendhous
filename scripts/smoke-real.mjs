@@ -25,6 +25,8 @@ const wipe = async () => {
   await prisma.bookVersion.deleteMany();
   await prisma.document.deleteMany({ where: { ownerType: { in: ["LOAN", "LEAD", "BROKER"] } } });
   await prisma.lead.deleteMany();
+  await prisma.quoteCount.deleteMany();
+  await prisma.platformSettings.updateMany({ data: { slaTargets: null } });
   await prisma.pricingVersion.deleteMany();
   await prisma.sanctionsList.deleteMany();
   await prisma.photoLink.deleteMany();
@@ -34,6 +36,7 @@ const wipe = async () => {
   await prisma.rateWindow.deleteMany({ where: { key: { startsWith: "payoff-form:" } } });
   await prisma.rateWindow.deleteMany({ where: { key: { startsWith: "lead-photos:" } } });
   await prisma.rateWindow.deleteMany({ where: { key: { startsWith: "signup-ip:" } } });
+  await prisma.rateWindow.deleteMany({ where: { key: { startsWith: "quote-event:" } } });
   await prisma.user.deleteMany({ where: { email: { endsWith: DOMAIN } } });
   await prisma.rateWindow.deleteMany({ where: { key: { contains: DOMAIN } } });
   await prisma.platformSettings.update({ where: { id: "default" }, data: { offerSampleData: true, allowSignup: true } });
@@ -113,12 +116,9 @@ try {
   const visitorContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const visitor = await visitorContext.newPage();
   visitor.on("pageerror", (error) => errors.push(`visitor: ${error.message}`));
-  const fillQuote = async (first, email, notes, path = "/start", page = visitor) => {
+  // The deal first and its terms, then who's asking: the contact details only come with saving.
+  const fillDeal = async (path = "/start", page = visitor) => {
     await page.goto(`${BASE}${path}`);
-    await page.getByTestId("quote-first").fill(first);
-    await page.getByTestId("quote-last").fill("Visitor");
-    await page.getByTestId("quote-email").fill(email);
-    await page.getByTestId("quote-phone").fill("(555) 010-0300");
     await page.getByTestId("quote-citizen").selectOption("us");
     await page.getByTestId("quote-credit").selectOption("720-759");
     await page.getByTestId("quote-experience").selectOption("1-2");
@@ -132,8 +132,27 @@ try {
     await page.getByTestId("quote-arv").fill("480000");
     await page.getByTestId("quote-requestedAmount").fill("270000");
     await page.getByTestId("quote-date").fill("2027-01-15");
+    await page.getByTestId("quote-see-terms").click();
+    await page.getByTestId("quote-first").waitFor();
+  };
+  const fillQuote = async (first, email, notes, path = "/start", page = visitor) => {
+    await fillDeal(path, page);
+    await page.getByTestId("quote-first").fill(first);
+    await page.getByTestId("quote-last").fill("Visitor");
+    await page.getByTestId("quote-email").fill(email);
+    await page.getByTestId("quote-phone").fill("(555) 010-0300");
     await page.locator("textarea").first().fill(notes);
   };
+  // Terms come before any contact details, and nothing about the visitor is kept until they save them.
+  const leadsBefore = await prisma.lead.count();
+  const countsBefore = await prisma.quoteCount.aggregate({ _sum: { started: true, shown: true } });
+  await fillDeal();
+  ok("a visitor sees indicative terms before giving a name, email or phone", (await seen(visitor.getByTestId("quote-live"))) && (await visitor.getByTestId("quote-amount").innerText()).startsWith("up to $") && (await visitor.getByTestId("quote-cash-parts").count()) === 1);
+  ok("and nothing about them is kept yet", (await prisma.lead.count()) === leadsBefore);
+  // The counts are sent as the page goes, so give the second one a moment to land.
+  let countsAfter = countsBefore;
+  for (let tries = 0; tries < 20 && (countsAfter._sum.shown ?? 0) === (countsBefore._sum.shown ?? 0); tries++) { await visitor.waitForTimeout(250); countsAfter = await prisma.quoteCount.aggregate({ _sum: { started: true, shown: true } }); }
+  ok("only an anonymous count that someone started a quote and saw terms", (countsAfter._sum.started ?? 0) === (countsBefore._sum.started ?? 0) + 1 && (countsAfter._sum.shown ?? 0) === (countsBefore._sum.shown ?? 0) + 1);
   await fillQuote("Vera", `vera@${DOMAIN}`, "Refinance into a rental next spring.");
   const housePhoto = await cameraJpeg(visitor);
   await visitor.getByTestId("quote-photos-input").setInputFiles({ name: "vera-front-yard.jpg", mimeType: "image/jpeg", buffer: housePhoto });
@@ -172,6 +191,10 @@ try {
   await seen(visitor.getByTestId("quote-sent"));
   ok("a bot filling the hidden field gets a normal reply and nothing is kept", (await prisma.lead.count()) === before);
 
+  // A visitor saves a quote, then makes an account with the same email: their first application starts from it.
+  await fillQuote("Sage", `sage@${DOMAIN}`, "Saving this one for later.");
+  await visitor.getByTestId("quote-submit").click();
+  await seen(visitor.getByTestId("quote-sent"));
   // A contractor creates their own account from a phone, confirms the email, and signs in.
   await visitor.goto(`${BASE}/login`);
   await visitor.getByTestId("signup-link").click();
@@ -201,6 +224,10 @@ try {
   await visitor.getByTestId("login-password").fill(PASSWORD);
   await visitor.getByRole("button", { name: "Sign in" }).click();
   ok("and they can sign in to their own portal", await visitor.waitForURL("**/admin/borrower").then(() => true, () => false));
+  await go(visitor, "/admin/apply");
+  ok("their first application starts from the quote they saved", (await seen(visitor.getByTestId("app-from-quote"))) && (await visitor.getByTestId("app-email").inputValue()) === `sage@${DOMAIN}`);
+  await visitor.getByTestId("app-next").click();
+  ok("with its property and numbers filled in", (await visitor.getByTestId("app-address-street").inputValue()) === "44 Visitor Lane");
   ok("the team hears about the new account", (await prisma.notification.count({ where: { eventCode: "auth.signup", toEmail: `owner@${DOMAIN}` } })) === 1);
   await go(owner, "/admin/settings");
   await owner.getByTestId("setting-signup").uncheck();
@@ -213,8 +240,11 @@ try {
   ok("and takes the link off the login page", (await visitor.getByTestId("login-email").count()) === 1 && (await visitor.getByTestId("signup-link").count()) === 0);
   await go(owner, "/admin/settings");
   await owner.getByTestId("setting-signup").check();
+  // The work queue's targets: GT sets how long a new application may wait, and it sticks.
+  await owner.getByTestId("setting-sla-firstLook").fill("3");
   await owner.getByRole("button", { name: "Save settings" }).click();
   await seen(owner.getByText("Settings saved."));
+  ok("an owner sets how long things may wait", (await owner.getByTestId("setting-sla-firstLook").inputValue()) === "3");
 
   await visitorContext.close();
 
@@ -296,12 +326,15 @@ try {
   await borrower.reload({ waitUntil: "networkidle" });
   ok("they're saved with the loan and show as pictures", (await borrower.getByTestId("property-photo").count()) === 2 && (await loaded(borrower.getByTestId("property-photo").locator("img"))));
   ok("there's no remove button on the borrower's side", (await borrower.getByTestId("remove-property-photo").count()) === 0);
+  ok("and the loan page now leads with their photo", (await borrower.locator("[data-testid=property-picture][data-kind=photo]").count()) === 1 && (await loaded(borrower.locator("[data-testid=property-picture] img"))));
 
   await go(under, "/admin");
   const row = under.getByTestId("pipeline-table").locator("tr", { hasText: "Bonnie Borrower" });
   ok("it reaches the team in another browser", await seen(row));
   ok("it gets a real loan number", (await row.innerText()).includes("LH-1001"));
   ok("the pipeline flags it", (await under.getByTestId("attention-applications").innerText()).includes("New applications"));
+  const newItem = under.getByTestId("queue-item").filter({ hasText: "LH-1001" }).filter({ hasText: "Look at the new application" });
+  ok("and it's in the work queue, with its clock against the 3-hour target", (await seen(newItem)) && (await newItem.getByTestId("queue-clock").getAttribute("title")) === "Target: 3 business hours");
   const dealHref = await row.getByRole("link").first().getAttribute("href");
   const dealId = dealHref.split("/").pop();
   await go(under, dealHref);
@@ -826,14 +859,14 @@ try {
   // Payments and payoff
   await go(owner, "/admin/servicing");
   const loanRow = owner.getByTestId("serviced-loan").filter({ hasText: "LH-1001" });
-  const dueBefore = await loanRow.getByTestId("serviced-next-due").innerText();
+  const dueBefore = await loanRow.getByTestId("serviced-next-due").getAttribute("data-day");
   await loanRow.getByTestId("record-payment").click();
   ok("a payment before the first due date pays ahead", (await owner.getByTestId("payment-preview").innerText()).includes(`Pays ahead the ${new Date(`${dueBefore}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })} payment`));
   await owner.getByTestId("payment-reference").fill("FED-SMOKE-1");
   await owner.getByTestId("save-payment").click();
-  await owner.waitForFunction((due) => !document.querySelector("[data-testid=serviced-loan]")?.innerText.includes(due), dueBefore).catch(() => {});
+  await owner.waitForFunction((due) => document.querySelector("[data-testid=serviced-next-due]")?.getAttribute("data-day") !== due, dueBefore).catch(() => {});
   await go(borrower, `/admin/borrower/${dealId}`);
-  ok("a recorded payment shows for the borrower", (await borrower.getByTestId("next-due").innerText()) !== dueBefore);
+  ok("a recorded payment shows for the borrower", (await borrower.getByTestId("next-due").getAttribute("data-day")) !== dueBefore);
   ok("the borrower gets a receipt for the payment", (await prisma.notification.count({ where: { toEmail: `borrower@${DOMAIN}`, eventCode: "payment.received" } })) === 1);
   ok("the payment's reference is encrypted in the database", !(await rawRows("BookRecord")).includes("FED-SMOKE-1"));
   await go(owner, `/admin/deals/${dealId}`);
@@ -844,7 +877,25 @@ try {
   await owner.getByTestId("confirm-servicing").click();
   await seen(owner.getByText("Reversed by"));
   await go(borrower, `/admin/borrower/${dealId}`);
-  ok("a reversed payment puts the due date back for the borrower", (await borrower.getByTestId("next-due").innerText()) === dueBefore);
+  ok("a reversed payment puts the due date back for the borrower", (await borrower.getByTestId("next-due").getAttribute("data-day")) === dueBefore);
+  // The website's "Recently funded" list: the borrower chooses to show the loan; a visitor sees the city, the program,
+  // the amount and the photo, never a name or street address; the team can take it down.
+  await borrower.getByTestId("showcase-toggle").click();
+  await seen(borrower.getByTestId("showcase-on"));
+  const passerby = await (await browser.newContext({ viewport: { width: 1440, height: 1000 } })).newPage();
+  await go(passerby, "/");
+  const fundedList = passerby.getByTestId("recently-funded");
+  ok("a funded loan shows on the home page once its borrower agrees", (await seen(fundedList)) && (await fundedList.innerText()).includes("Hollywood"));
+  ok("without the borrower's name, company or street address", !/Bonnie|Real Flips|100 Real Street/.test(await fundedList.innerText()));
+  await fundedList.scrollIntoViewIfNeeded();
+  ok("with the borrower's photo, served publicly only for this", (await fundedList.locator("img").count()) === 1 && (await loaded(fundedList.locator("img"))));
+  await go(owner, `/admin/deals/${dealId}`);
+  await owner.getByTestId("showcase-take-down").click();
+  await owner.getByTestId("showcase-team").waitFor({ state: "detached", timeout: 10_000 }).catch(() => {});
+  await go(passerby, "/");
+  ok("the team can take it down, and it leaves the site", (await passerby.getByTestId("recently-funded").count()) === 0);
+  ok("and its photo stops being served", (await passerby.request.get(`${BASE}/api/showcase/${dealId}`)).status() === 404);
+  await passerby.context().close();
   // Payoff letters (Fla. Stat. 701.04): the borrower asks in the portal, servicing sends an itemized letter as a PDF.
   await borrower.getByTestId("request-payoff").click();
   ok("the borrower asks for a payoff letter and sees when it's due", (await seen(borrower.getByTestId("my-payoffs"))) && (await borrower.getByTestId("my-payoffs").innerText()).includes("send it by"));
@@ -1131,6 +1182,19 @@ try {
   ok("the request is attributed to the brokerage", referredLead.brokerId === (await prisma.user.findUniqueOrThrow({ where: { email: `broker@${DOMAIN}` } })).id);
   await go(owner, "/admin/leads");
   ok("and the team sees who referred it", await seen(owner.getByTestId("leads-table").locator("tr", { hasText: "Riya Visitor" }).getByTestId("lead-referral").getByText(/Brook Capital LLC/)));
+  // The broker's quote widget, as it sits on their own site: framed, terms first, saved with their code and the site's name.
+  await go(broker, "/admin/broker");
+  const referralCode = new URL(referralUrl).searchParams.get("ref");
+  await broker.waitForFunction(() => (document.querySelector("[data-testid=embed-code]")?.value ?? "").length > 0, null, { timeout: 5000 }).catch(() => {});
+  ok("the broker gets the widget's code with their referral code in it", (await seen(broker.getByTestId("embed-code"))) && (await broker.getByTestId("embed-code").inputValue()).includes(`/embed/quote?ref=${referralCode}`));
+  await fillQuote("Wade", `wade@${DOMAIN}`, "From the widget.", `/embed/quote?ref=${referralCode}&site=brookweb`, client);
+  ok("the widget is the quote without the site around it", (await seen(client.getByTestId("embed-quote"))) && (await client.locator("header").count()) === 0 && (await client.getByTestId("quote-referral").innerText()).includes("Brook Capital LLC"));
+  await client.getByTestId("quote-submit").click();
+  await seen(client.getByTestId("quote-sent"));
+  const widgetLead = await prisma.lead.findFirstOrThrow({ orderBy: { createdAt: "desc" } });
+  ok("a quote saved in the widget keeps where it came from and who referred it", widgetLead.channel === "embed:brookweb" && widgetLead.brokerId === referredLead.brokerId);
+  await go(owner, "/admin/reports");
+  ok("the reports count the quote funnel by channel and broker", (await seen(owner.getByTestId("quote-funnel"))) && (await owner.getByTestId("quote-funnel-row").filter({ hasText: "Quote widget on brookweb, referred by Brook Capital LLC" }).count()) === 1);
   await client.goto(`${BASE}/start?ref=notacode`);
   ok("a made-up code is ignored", (await seen(client.getByTestId("quote-form"))) && (await client.getByTestId("quote-referral").count()) === 0);
 

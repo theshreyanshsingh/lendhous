@@ -11,6 +11,7 @@ const DEFAULTS: Omit<PlatformSettings, "updatedAt"> = {
   dualApprovalDistributionCents: 25_000_000,
   lenderAddress: "",
   lenderPhone: "",
+  slaTargets: null,
 };
 
 let cached: { at: number; value: Omit<PlatformSettings, "updatedAt"> } | null = null;

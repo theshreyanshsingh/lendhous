@@ -1,8 +1,8 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
-import { BarChart3, Bell, Briefcase, FileCheck, FileText, TriangleAlert, Percent, Building2, ClipboardList, FilePlus, Hammer, Inbox, Landmark, LayoutDashboard, ListChecks, BookOpen, Lock, LogOut, Menu, ReceiptText, RotateCcw, ScrollText, Settings, Store, Tag, Users, type LucideIcon } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { BarChart3, Bell, Briefcase, ChevronDown, ChevronsUpDown, FileCheck, FileText, TriangleAlert, Percent, Building2, ClipboardList, FilePlus, Hammer, Inbox, Landmark, LayoutDashboard, ListChecks, BookOpen, Lock, LogOut, Menu, MessageSquare, ReceiptText, RotateCcw, ScrollText, Settings, Store, Tag, Upload, UserRound, Users, type LucideIcon } from "lucide-react";
 import { logout } from "@/actions/auth";
 import { attentionCounts } from "@/lib/attention";
 import { useStore } from "@/lib/store";
@@ -14,6 +14,9 @@ import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 
 type NavItem = { href: string; label: string; icon: LucideIcon; section?: string; count?: number };
+/** The owners' tools: folded away until opened, so the menu fits a laptop's screen. */
+const ADMIN = "Admin";
+const FOLDED_KEY = "lendhous-nav-folded";
 
 // Layout follows UPB Capital's AppShell: fixed left sidebar on desktop, a sheet on mobile. The signed-in
 // account's role picks the workspace; there is no switching between them.
@@ -49,17 +52,16 @@ export default function Shell({ children, account, view }: { children: React.Rea
     ...(account.canManageBrokers && view === "admin" ? [{ href: "/admin/brokers", label: "Brokers", icon: Briefcase, section: "Money", count: s.brokers.filter((broker) => broker.status === "applied").length || undefined }] : []),
     ...(account.canManagePricing && view === "admin" ? [{ href: "/admin/pricing", label: "Pricing", icon: Percent, section: "Money" }] : []),
     { href: "/admin/account/notifications", label: "Notifications", icon: Bell, section: "Account", count: account.unread },
-    ...(account.canManageMembers ? [{ href: "/admin/members", label: "Members", icon: Users, section: "Account" }] : []),
-    ...(account.canViewAudit ? [{ href: "/admin/audit", label: "Audit log", icon: ScrollText, section: "Account" }] : []),
-    ...(account.canManageSettings ? [{ href: "/admin/conditions", label: "Conditions library", icon: ListChecks, section: "Account" }, { href: "/admin/settings", label: "Settings", icon: Settings, section: "Account" }, { href: "/admin/errors", label: "Errors", icon: TriangleAlert, section: "Account", count: account.openErrors }, { href: "/admin/tax", label: "Tax forms", icon: FileText, section: "Account" }] : []),
+    ...(account.canManageMembers ? [{ href: "/admin/members", label: "Members", icon: Users, section: ADMIN }] : []),
+    ...(account.canViewAudit ? [{ href: "/admin/audit", label: "Audit log", icon: ScrollText, section: ADMIN }] : []),
+    ...(account.canManageSettings ? [{ href: "/admin/conditions", label: "Conditions library", icon: ListChecks, section: ADMIN }, { href: "/admin/settings", label: "Settings", icon: Settings, section: ADMIN }, { href: "/admin/errors", label: "Errors", icon: TriangleAlert, section: ADMIN, count: account.openErrors }, { href: "/admin/tax", label: "Tax forms", icon: FileText, section: ADMIN }] : []),
     ...(view === "partner" || view === "buyer" || view === "broker" ? [{ href: "/admin/account/tax", label: "Tax form", icon: FileText, section: "Account" }] : []),
-    { href: "/admin/account/security", label: "Security", icon: Lock, section: "Account" },
   ];
   const logoHref = view ? VIEW_HOME[view] : "/admin/account/security";
   return (
     <div className="min-h-screen">
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-72 flex-col border-r border-sidebar-border bg-sidebar px-3 pt-3.5 pb-3 lg:flex">
-        <div className="px-2 pt-2 pb-5"><Logo href={logoHref} /></div>
+        <div className="px-2 pt-2 pb-4"><Logo href={logoHref} /></div>
         {view === "admin" && <StaffSearch />}
         <SideNav items={items} path={path} />
         <Controls account={account} />
@@ -68,7 +70,7 @@ export default function Shell({ children, account, view }: { children: React.Rea
         <div className="sticky top-0 z-30 flex items-center justify-between border-b border-rule bg-background px-4 py-3 lg:hidden">
           <Logo href={logoHref} />
           <Sheet open={open} onOpenChange={setOpen}>
-            <SheetTrigger className="inline-flex size-9 items-center justify-center rounded-[2px] border border-rule bg-background" aria-label="Open navigation">
+            <SheetTrigger className={cn("size-9 items-center justify-center rounded-[2px] border border-rule bg-background", view === "borrower" ? "hidden md:inline-flex" : "inline-flex")} aria-label="Open navigation">
               <Menu className="size-4" />
             </SheetTrigger>
             <SheetContent side="left" className="flex flex-col bg-sidebar px-3 pt-10 pb-3">
@@ -78,9 +80,34 @@ export default function Shell({ children, account, view }: { children: React.Rea
             </SheetContent>
           </Sheet>
         </div>
-        <main id="desk" className="mx-auto min-w-0 max-w-7xl px-4 pt-5 pb-10 md:px-[22px] md:pt-7 md:pb-12">{account.staleJobs.length > 0 && <div role="alert" className="mb-4 rounded-[2px] border border-bad/40 bg-bad/10 px-4 py-3 text-sm text-bad" data-testid="stale-jobs">The nightly {account.staleJobs.join(" and the ")} {account.staleJobs.length === 1 ? "hasn't" : "haven't"} run in over two days. Check that the jobs process is running on the server (<code>pm2 ls</code> shows <code>lendhous-jobs</code>), or run <code>npm run jobs</code>.</div>}{error && <div role="alert" className="mb-4 flex items-start justify-between gap-3 rounded-[2px] border border-bad/40 bg-bad/10 px-4 py-3 text-sm text-bad" data-testid="book-error"><span className="min-w-0">{error}</span><button type="button" className="shrink-0 underline" onClick={clearError}>Dismiss</button></div>}<SampleDataBar path={path} demo={account.demo} offer={account.offerSample} />{children}</main>
+        <main id="desk" className={cn("mx-auto min-w-0 max-w-7xl px-4 pt-5 md:px-[22px] md:pt-7 md:pb-12", view === "borrower" ? "pb-28" : "pb-10")}>{account.staleJobs.length > 0 && <div role="alert" className="mb-4 rounded-[2px] border border-bad/40 bg-bad/10 px-4 py-3 text-sm text-bad" data-testid="stale-jobs">The nightly {account.staleJobs.join(" and the ")} {account.staleJobs.length === 1 ? "hasn't" : "haven't"} run in over two days. Check that the jobs process is running on the server (<code>pm2 ls</code> shows <code>lendhous-jobs</code>), or run <code>npm run jobs</code>.</div>}{error && <div role="alert" className="mb-4 flex items-start justify-between gap-3 rounded-[2px] border border-bad/40 bg-bad/10 px-4 py-3 text-sm text-bad" data-testid="book-error"><span className="min-w-0">{error}</span><button type="button" className="shrink-0 underline" onClick={clearError}>Dismiss</button></div>}<SampleDataBar path={path} demo={account.demo} offer={account.offerSample} />{children}</main>
       </div>
+      {view === "borrower" && <BorrowerTabs path={path} onAccount={() => setOpen(true)} />}
     </div>
+  );
+}
+
+/**
+ * A borrower's phone: the four things they come for, under their thumb. Upload and Messages go to the loan they're on,
+ * or else the loan that needs something from them.
+ */
+function BorrowerTabs({ path, onAccount }: { path: string; onAccount: () => void }) {
+  const { s } = useStore();
+  const mine = s.deals.filter((deal) => deal.borrowerId === s.borrowerId);
+  const here = mine.find((deal) => path.startsWith(`/admin/borrower/${deal.id}`));
+  const owes = mine.find((deal) => deal.docs.some((doc) => doc.status === "requested" || doc.status === "rejected"));
+  const loan = here ?? owes ?? mine[0];
+  const tab = "flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 text-[11px]";
+  const tabs = [
+    { key: "loans", label: "My loans", icon: LayoutDashboard, href: "/admin/borrower", on: path === "/admin/borrower" },
+    { key: "upload", label: "Upload", icon: Upload, href: loan ? `/admin/borrower/${loan.id}#needs-from-you` : "/admin/apply", on: false },
+    { key: "messages", label: "Messages", icon: MessageSquare, href: loan ? `/admin/borrower/${loan.id}#messages` : "/admin/borrower", on: false },
+  ];
+  return (
+    <nav className="fixed inset-x-0 bottom-0 z-30 flex border-t border-rule bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden" aria-label="Borrower" data-testid="borrower-tabs">
+      {tabs.map((item) => { const Icon = item.icon; return <Link key={item.key} href={item.href} className={cn(tab, item.on ? "font-medium text-foreground" : "text-muted-foreground")} data-testid={`tab-bar-${item.key}`}><Icon className="size-5" aria-hidden="true" />{item.label}</Link>; })}
+      <button type="button" className={cn(tab, "text-muted-foreground")} onClick={onAccount} data-testid="tab-bar-account"><UserRound className="size-5" aria-hidden="true" />Account</button>
+    </nav>
   );
 }
 
@@ -110,54 +137,97 @@ function SideNav({ items, path }: { items: NavItem[]; path: string }) {
     if (found) found.items.push(item);
     else sections.push({ label, items: [item] });
   }
+  // Which groups are folded, remembered per browser. Admin starts folded; a group with the open page never is.
+  const [folded, setFolded] = useState<string[]>([ADMIN]);
+  useEffect(() => { try { const saved = localStorage.getItem(FOLDED_KEY); if (saved) setFolded(JSON.parse(saved) as string[]); } catch {} }, []);
+  const toggle = (label: string) => setFolded((now) => { const next = now.includes(label) ? now.filter((item) => item !== label) : [...now, label]; try { localStorage.setItem(FOLDED_KEY, JSON.stringify(next)); } catch {} return next; });
+  // A soft fade at the bottom while there's more of the menu below.
+  const list = useRef<HTMLElement>(null);
+  const [more, setMore] = useState(false);
+  useEffect(() => {
+    const nav = list.current;
+    if (!nav) return;
+    const check = () => setMore(nav.scrollHeight - nav.scrollTop - nav.clientHeight > 4);
+    check();
+    const observer = new ResizeObserver(check);
+    observer.observe(nav);
+    nav.addEventListener("scroll", check, { passive: true });
+    return () => { observer.disconnect(); nav.removeEventListener("scroll", check); };
+  }, [folded, items.length]);
   return (
-    <nav className="mt-1 min-h-0 flex-1 overflow-y-auto overscroll-contain">
-      {sections.map((section) => (
-        <div key={section.label || "main"} className={section.label ? "mt-4" : ""}>
-          {section.label && <p className="px-2.5 pt-1 pb-1.5 text-[10.5px] font-medium tracking-[0.14em] text-eyebrow uppercase">{section.label}</p>}
-          {section.items.map((item) => {
-            const on = active(path, item.href);
-            const Icon = item.icon;
-            return (
-              <Link key={item.href} href={item.href} className={cn("mb-0.5 flex min-h-11 items-center gap-2.5 rounded-[2px] px-2.5 text-[13.5px] transition-colors lg:min-h-9", on ? "bg-active font-medium text-foreground shadow-[inset_2px_0_0_var(--primary)]" : "text-nav hover:bg-hover")}>
-                <Icon className="size-4 shrink-0 text-muted-foreground" />
-                <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                {item.count ? <span className="shrink-0 rounded-full bg-primary px-1.5 text-[11px] font-medium text-primary-foreground" data-testid="nav-count">{item.count}</span> : null}
-              </Link>
-            );
-          })}
-        </div>
-      ))}
+    <nav ref={list} className={cn("mt-1 min-h-0 flex-1 overflow-y-auto overscroll-contain", more && "[mask-image:linear-gradient(to_bottom,black_calc(100%-36px),transparent)]")} data-testid="side-nav" data-more={more ? "1" : undefined}>
+      {sections.map((section) => {
+        const open = !section.label || !folded.includes(section.label) || section.items.some((item) => active(path, item.href));
+        const waiting = section.items.reduce((sum, item) => sum + (item.count ?? 0), 0);
+        return (
+          <div key={section.label || "main"} className={section.label ? "mt-2.5" : ""}>
+            {section.label && (
+              <button type="button" className="flex w-full items-center gap-1.5 rounded-[2px] px-2.5 pt-1 pb-1 text-left text-[10.5px] font-medium tracking-[0.14em] text-eyebrow uppercase hover:text-foreground" aria-expanded={open} data-testid={`nav-group-${section.label}`} onClick={() => toggle(section.label)}>
+                <span className="flex-1">{section.label}</span>
+                {!open && waiting > 0 && <span className="rounded-full bg-primary px-1.5 text-[10px] tracking-normal text-primary-foreground normal-case">{waiting}</span>}
+                <ChevronDown className={cn("size-3 transition-transform", !open && "-rotate-90")} aria-hidden="true" />
+              </button>
+            )}
+            {open && section.items.map((item) => {
+              const on = active(path, item.href);
+              const Icon = item.icon;
+              return (
+                <Link key={item.href} href={item.href} className={cn("mb-0.5 flex min-h-11 items-center gap-2.5 rounded-[2px] px-2.5 text-[13.5px] transition-colors lg:min-h-8", on ? "bg-active font-medium text-foreground shadow-[inset_2px_0_0_var(--primary)]" : "text-nav hover:bg-hover")}>
+                  <Icon className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                  {item.count ? <span className="shrink-0 rounded-full bg-primary px-1.5 text-[11px] font-medium text-primary-foreground" data-testid="nav-count">{item.count}</span> : null}
+                </Link>
+              );
+            })}
+          </div>
+        );
+      })}
     </nav>
   );
 }
 
-/** Theme, sign-out and the signed-in account, docked where UPB shows them. Demo seats can also reset the demo book. */
+/** The signed-in account, docked where UPB shows it. Its menu holds the theme, sign-out and, on demo seats, the reset. */
 function Controls({ account }: { account: ShellAccount }) {
   const { dispatch } = useStore();
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (event: MouseEvent) => { if (!box.current?.contains(event.target as Node)) setOpen(false); };
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", away);
+    document.addEventListener("keydown", escape);
+    return () => { document.removeEventListener("mousedown", away); document.removeEventListener("keydown", escape); };
+  }, [open]);
   return (
-    <div className="shrink-0 space-y-2 border-t border-sidebar-border pt-3">
-      <div>
-        <ThemeToggle />
-        {account.demo && (
-          <button type="button" onClick={() => dispatch({ t: "reset" })} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-[13px] hover:bg-hover">
-            <RotateCcw className="size-[15px] text-muted-foreground" /> Reset demo data
-          </button>
-        )}
-        <form action={logout}>
-          <button type="submit" className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-[13px] hover:bg-hover">
-            <LogOut className="size-[15px] text-muted-foreground" /> Sign out
-          </button>
-        </form>
-      </div>
-      <div className="flex items-center gap-2 rounded-[2px] p-2" data-testid="signed-in-as">
-        <span className="grid size-7 shrink-0 place-items-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground">{account.name.split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("")}</span>
-        <span className="min-w-0 flex-1">
+    <div ref={box} className="relative shrink-0 border-t border-sidebar-border pt-2">
+      {open && (
+        <div className="absolute inset-x-0 bottom-full mb-1 rounded-[2px] border border-border bg-popover p-1 shadow-[var(--shadow)]" data-testid="account-menu-items">
+          <Link href="/admin/account/security" onClick={() => setOpen(false)} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-[13px] hover:bg-hover">
+            <Lock className="size-[15px] text-muted-foreground" /> Password and security
+          </Link>
+          <ThemeToggle />
+          {account.demo && (
+            <button type="button" onClick={() => { setOpen(false); dispatch({ t: "reset" }); }} className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-[13px] hover:bg-hover">
+              <RotateCcw className="size-[15px] text-muted-foreground" /> Reset demo data
+            </button>
+          )}
+          <form action={logout}>
+            <button type="submit" className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-[13px] hover:bg-hover">
+              <LogOut className="size-[15px] text-muted-foreground" /> Sign out
+            </button>
+          </form>
+        </div>
+      )}
+      <button type="button" className="flex w-full items-center gap-2 rounded-[2px] p-2 text-left hover:bg-hover" aria-expanded={open} aria-label={`Account menu for ${account.name}`} data-testid="account-menu" onClick={() => setOpen(!open)}>
+        <span className="grid size-7 shrink-0 place-items-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground" aria-hidden="true">{account.name.split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase()).join("")}</span>
+        <span className="min-w-0 flex-1" data-testid="signed-in-as">
           <strong className="block truncate text-[13px]">{account.name}</strong>
           <em className="block truncate text-xs not-italic text-muted-foreground">{account.roles.join(" · ")}</em>
         </span>
         {account.demo && <span className="shrink-0 rounded-[2px] border border-rule px-1.5 py-0.5 text-[9.5px] font-medium tracking-[0.14em] text-eyebrow" data-testid="demo-account">DEMO</span>}
-      </div>
+        <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+      </button>
     </div>
   );
 }

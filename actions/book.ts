@@ -1,7 +1,7 @@
 "use server";
 
 import { createHash, randomUUID } from "crypto";
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { audit } from "@/lib/audit";
 import { canUploadFile, docOf, scopeBook, type Viewer } from "@/lib/book-access";
 import { parseAction } from "@/lib/book-actions";
@@ -22,6 +22,7 @@ import { isFinalDraw, partiesFor } from "@/lib/lien-law";
 import { moveLeadPhotos, storePropertyPhoto } from "@/lib/property-photos";
 import { viewFor } from "@/lib/permissions";
 import { screenDeal } from "@/lib/sanctions-store";
+import { SHOWCASE_TAG } from "@/lib/showcase-store";
 import { servicingDate } from "@/lib/servicing";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import { extensionOf, mimeFor, putBytes, safeBasename } from "@/lib/storage";
@@ -95,7 +96,10 @@ export async function dispatchBook(raw: unknown): Promise<BookReply> {
   if (isDemoEmail(viewer.email)) return { error: "Demo accounts keep their records in the browser." };
   const action = parseAction(raw);
   if (!action) return { error: "That request wasn't valid." };
-  return perform(viewer, action);
+  const reply = await perform(viewer, action);
+  // The public home page keeps a copy of the recently funded list; showing or hiding a loan clears it.
+  if (action.t === "setShowcase" && !reply.error) revalidateTag(SHOWCASE_TAG);
+  return reply;
 }
 
 export async function refreshBook(): Promise<Book | null> {

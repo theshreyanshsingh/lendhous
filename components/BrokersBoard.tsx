@@ -1,4 +1,5 @@
 "use client";
+import { EmptyState } from "@/components/EmptyState";
 import { useEffect, useState } from "react";
 import { brokerTaxForms, screenBroker } from "@/actions/brokers";
 import { Badge, Section, usd } from "@/components/ui";
@@ -26,7 +27,7 @@ export function BrokersBoard() {
     if (reply.error) return setError(reply.error);
     applyReply({ book: reply.book });
   };
-  if (!s.brokers.length) return <div className="glass p-6 text-sm text-muted-foreground" data-testid="brokers-empty">No brokerages yet. A broker you invite on the Members page signs the broker agreement from their portal, and shows up here for approval.</div>;
+  if (!s.brokers.length) return <EmptyState testid="brokers-empty">No brokerages yet. A broker you invite on the Members page signs the broker agreement from their portal, and shows up here for approval.</EmptyState>;
   return (
     <div className="space-y-4" data-testid="brokers-board">
       {waiting.length > 0 && <p className="text-sm text-warn" data-testid="brokers-waiting">{waiting.length} brokerage{waiting.length === 1 ? " is" : "s are"} waiting for approval.</p>}

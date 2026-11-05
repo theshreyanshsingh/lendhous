@@ -141,6 +141,7 @@ export type BookAction =
   /** Photos of the property, listed on the loan once the server has stored them. Only the server adds them. */
   | { t: "addPropertyPhotos"; dealId: string; photos: { id: string; name: string; at: string }[]; by: string }
   | { t: "removePropertyPhoto"; dealId: string; photoId: string }
+  | { t: "setShowcase"; dealId: string; on: boolean; by: string }
   /** Keeps the loan's records past retention while an investigation or lawsuit is pending. An empty reason lifts it. */
   | { t: "setLegalHold"; dealId: string; reason: string; by: string }
   | { t: "reopenApplication"; dealId: string; by: string }
@@ -624,9 +625,9 @@ function apply(s: Book, a: BookAction): Book {
       const amount = reviewDraw(deal, draw).approved;
       const approvers = [...draw.approvers, a.by];
       const done = approvers.length >= approversNeeded(deal, amount);
-      return { ...s, draws: s.draws.map((d) => (d.id === a.drawId ? { ...d, approvers, status: done ? "approved" : d.status, approved: done ? amount : undefined } : d)), audit: log(`${deal.loanNumber}: draw approved by ${a.by}${done ? "" : "; second approver needed"}`) };
+      return { ...s, draws: s.draws.map((d) => (d.id === a.drawId ? { ...d, approvers, status: done ? "approved" : d.status, approved: done ? amount : undefined, decidedAt: done ? now() : d.decidedAt } : d)), audit: log(`${deal.loanNumber}: draw approved by ${a.by}${done ? "" : "; second approver needed"}`) };
     }
-    case "rejectDraw": return { ...s, draws: s.draws.map((d) => (d.id === a.drawId ? { ...d, status: "rejected", reason: a.reason } : d)), audit: log(`Draw rejected: ${a.reason}`) };
+    case "rejectDraw": return { ...s, draws: s.draws.map((d) => (d.id === a.drawId ? { ...d, status: "rejected", reason: a.reason, decidedAt: now() } : d)), audit: log(`Draw rejected: ${a.reason}`) };
     case "releaseDraw": {
       const draw = s.draws.find((d) => d.id === a.drawId)!; const deal = s.deals.find((d) => d.id === draw.dealId)!;
       // No money goes out to anyone not screened in the last few days.
@@ -734,6 +735,11 @@ function apply(s: Book, a: BookAction): Book {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
       if (!deal.propertyPhotos?.some((photo) => photo.id === a.photoId)) return s;
       return { ...s, deals: upd(a.dealId, (d) => ({ ...d, propertyPhotos: d.propertyPhotos!.filter((photo) => photo.id !== a.photoId) })), audit: log(`${deal.loanNumber}: a photo of the property removed`) };
+    }
+    case "setShowcase": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (Boolean(deal.showcase?.on) === a.on) return s;
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, showcase: { on: a.on, by: a.by, at: now() } })), audit: log(`${deal.loanNumber}: ${a.on ? "shown on" : "taken off"} the website's recently funded list by ${a.by}`) };
     }
     case "setLegalHold": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
@@ -902,7 +908,7 @@ function apply(s: Book, a: BookAction): Book {
       if (!text) return s;
       return { ...s, messages: [...s.messages, { id: `msg${uid()}`, dealId: a.dealId, from: a.from, side: a.side, text, at: now() }] };
     }
-    case "uploadDoc": return { ...s, deals: upd(a.dealId, (d) => ({ ...d, docs: d.docs.map((x) => (x.id === a.docId ? { ...x, status: "uploaded", fileName: a.fileName, documentId: a.documentId } : x)) })), audit: log(`Document uploaded: ${a.fileName}`) };
+    case "uploadDoc": return { ...s, deals: upd(a.dealId, (d) => ({ ...d, docs: d.docs.map((x) => (x.id === a.docId ? { ...x, status: "uploaded", fileName: a.fileName, documentId: a.documentId, uploadedAt: now() } : x)) })), audit: log(`Document uploaded: ${a.fileName}`) };
     case "docStatus": return { ...s, deals: upd(a.dealId, (d) => ({ ...d, docs: d.docs.map((x) => (x.id === a.docId ? { ...x, status: a.status, acceptedOn: a.status === "accepted" ? serviceDay(s) : undefined, carriedFrom: undefined, ...(x.carriedFrom && a.status === "requested" ? { fileName: undefined, documentId: undefined } : {}) } : x)) })), audit: log(`Document ${a.docId} → ${a.status}`) };
     case "route": {
       const deal = s.deals.find((d) => d.id === a.dealId)!; const L = evaluate(deal.app).noteAmount;

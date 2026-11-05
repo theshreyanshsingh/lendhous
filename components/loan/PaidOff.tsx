@@ -34,12 +34,12 @@ export function PaidOff({ deal, side }: { deal: Deal; side: "team" | "borrower" 
       <div className="mt-3 border-t border-border pt-3 text-sm" data-testid="lien-release">
         <p className="font-medium">Release of the mortgage</p>
         {release?.recordedOn ? (
-          <p className="mt-1 text-good" data-testid="lien-recorded">Recorded {release.recordedOn}{release.reference ? ` (${release.reference})` : ""}.</p>
+          <p className="mt-1 text-good" data-testid="lien-recorded">Recorded {shortDay(release.recordedOn)}{release.reference ? ` (${release.reference})` : ""}.</p>
         ) : side === "borrower" ? (
-          <p className="mt-1 text-muted-foreground">{release?.sentOn ? `Sent to be recorded on ${release.sentOn}.` : "We're preparing the satisfaction of your mortgage."} We&apos;ll tell you once it&apos;s recorded.</p>
+          <p className="mt-1 text-muted-foreground">{release?.sentOn ? `Sent to be recorded on ${shortDay(release.sentOn)}.` : "We're preparing the satisfaction of your mortgage."} We&apos;ll tell you once it&apos;s recorded.</p>
         ) : (
           <>
-            <p className={`mt-1 ${left < 0 ? "text-bad" : left <= 14 ? "text-warn" : "text-muted-foreground"}`} data-testid="lien-due">{release?.sentOn ? `Sent for recording ${release.sentOn}. ` : ""}Due out by {due}{today ? ` (${left < 0 ? `${-left} days late` : `${left} days left`})` : ""}.</p>
+            <p className={`mt-1 ${left < 0 ? "text-bad" : left <= 14 ? "text-warn" : "text-muted-foreground"}`} data-testid="lien-due">{release?.sentOn ? `Sent for recording ${shortDay(release.sentOn)}. ` : ""}Due out by {due}{today ? ` (${left < 0 ? `${-left} days late` : `${left} days left`})` : ""}.</p>
             {!step ? (
               <div className="mt-2 flex flex-wrap gap-2">
                 {!release?.sentOn && <button type="button" className="btn-ghost h-9! px-3! text-xs!" data-testid="lien-sent" onClick={() => setStep("sent")}>Sent for recording</button>}
