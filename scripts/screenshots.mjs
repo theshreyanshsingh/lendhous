@@ -295,16 +295,30 @@ const newLoan = (await page.getByTestId("borrower-loan-card").first().innerText(
 
 // 2. Borrower dashboard + doc upload
 await shot(page, "02-borrower-dashboard.png");
+ok("a loan with documents owed says how many, with a way straight to them", (await page.getByTestId("card-send-docs").first().innerText()).includes("still needed from you"));
 ok("each loan card leads with the property and its one next step", (await page.getByTestId("borrower-loan-card").first().getByTestId("property-picture").count()) === 1 && (await page.getByTestId("card-next-step").count()) >= 3);
 ok("the dashboard's dates are written out, never ISO", !/\b20\d\d-\d\d-\d\d\b/.test(await page.locator("main").innerText()));
 await page.getByTestId("borrower-loan-card").filter({ hasText: newLoan }).click();
+// Papers already in sit under Submitted.
+await page.getByTestId("docs-tab-submitted").click();
 ok("the entity's papers accepted on the funded loan carry over to the new one", (await seen(page.getByTestId("doc-entity").getByTestId("doc-carried"))) && (await page.getByTestId("doc-ein").getByTestId("doc-carried").count()) === 1 && (await page.getByTestId("doc-bank").getByTestId("doc-carried").count()) === 0);
 await page.goto(BASE + "/admin/borrower/d1");
 const fileInput = page.getByTestId("file-input");
+ok("the borrower's documents open on what's still to send", (await page.getByTestId("docs-tab-todo").getAttribute("aria-selected")) === "true" && (await page.getByTestId("docs-todo").getByTestId("doc-bank").isVisible()) && (await page.getByTestId("doc-bank").innerText()).includes("Needed"));
 await page.getByTestId("doc-bank").getByRole("button", { name: "Upload" }).click().catch(() => {});
 await fileInput.setInputFiles({ name: "FAKE-bank-statement-sep-2026.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 fake") });
 await page.waitForTimeout(250);
 ok("document upload changes status to Uploaded", (await page.getByTestId("doc-bank").innerText()).includes("Uploaded"));
+ok("and moves it to Submitted", (await page.getByTestId("docs-submitted").getByTestId("doc-bank").count()) === 1);
+// Something the team didn't ask for: the borrower names it and uploads it in one go.
+await page.getByTestId("own-doc-add").click();
+await page.getByTestId("own-doc-send").click();
+ok("adding a document needs a name and a file", await seen(page.getByTestId("own-doc-error")));
+await page.getByTestId("own-doc-name").fill("Contractor's license (FAKE)");
+await page.getByTestId("own-doc-file").setInputFiles({ name: "FAKE-license.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 fake") });
+await page.getByTestId("own-doc-send").click();
+ok("the borrower adds a document nobody asked for", await seen(page.getByTestId("docs-submitted").getByText("Contractor's license (FAKE)")));
+await page.getByTestId("docs-tab-todo").click();
 ok("the borrower's loan starts with what's needed from them", (await page.getByTestId("need-item").count()) >= 1 && (await page.getByTestId("needs-progress").innerText()).includes("documents in"));
 ok("and there's one way to apply, in plain words", (await page.getByRole("link", { name: "Apply for a loan" }).count()) >= 1 && (await page.getByRole("link", { name: "New application" }).count()) === 0);
 ok("the borrower sees who's on their loan and how to reach them", (await page.getByTestId("your-team").innerText()).includes("Uma Underwriter (FAKE)") && (await page.getByTestId("your-team").getByRole("link", { name: /^Call/ }).count()) === 2);
@@ -642,8 +656,22 @@ await page.getByTestId("term-sheet-agree").check();
 await shot(page, "16-borrower-term-sheet.png");
 await page.getByTestId("accept-term-sheet").click();
 ok("the borrower accepts the term sheet online", (await seen(page.getByTestId("term-sheet-signed"))) && (await page.getByTestId("term-sheet-signed").innerText()).includes("Alex Sample"));
+// With the term sheet accepted, the closing needs the borrower's title/escrow and insurance agents: asked for once.
+ok("the borrower is asked for their title and insurance agents", await seen(page.getByTestId("agents-prompt")));
+await page.getByTestId("agents-prompt-save").click();
+ok("which needs at least one", await seen(page.getByTestId("agents-prompt-error")));
+await page.getByTestId("prompt-title-name").fill("Tess Title (FAKE)");
+await page.getByTestId("prompt-title-company").fill("Sample Title Co (FAKE)");
+await page.getByTestId("prompt-title-phone").fill("(954) 555-0170");
+await page.getByTestId("prompt-insurance-company").fill("Placeholder Insurance (FAKE)");
+await page.getByTestId("prompt-insurance-email").fill("binders@example.org");
+await shot(page, "16c-borrower-agents.png", false);
+await page.getByTestId("agents-prompt-save").click();
+ok("and keeps them on the loan", (await page.getByTestId("agents-prompt").waitFor({ state: "detached", timeout: 5000 }).then(() => true, () => false)) && (await page.getByTestId("agent-title-saved").innerText()).includes("Sample Title Co (FAKE)"));
 
 await page.goto(BASE + "/admin/borrower/d1");
+// A scope sent for review folds away; the borrower opens it to change it.
+if (await page.getByTestId("scope-folded").count()) await page.getByTestId("scope-folded").locator("summary").click();
 await seen(page.getByTestId("scope-lines"));
 await page.getByTestId("scope-demolition").fill("1");
 ok("a scope of work that doesn't add up is refused", (await seen(page.getByTestId("scope-error"))) && (await page.getByTestId("save-scope").isDisabled()));
@@ -703,10 +731,28 @@ await page.getByTestId("close-reason").selectOption("fell_through");
 await page.getByTestId("confirm-close").click();
 ok("the borrower withdraws their own application", (await seen(page.getByTestId("application-closed"))) && (await page.getByTestId("application-closed").innerText()).includes("purchase fell through"));
 await page.goto(BASE + "/admin/borrower");
-ok("a withdrawn application has no steps left", (await page.getByTestId("borrower-loan-card").filter({ hasText: newLoan }).getByTestId("tracker").innerText()).includes("withdrawn"));
+await page.getByTestId("loans-tab-closed").click();
+ok("a withdrawn application moves to the closed loans, with no steps left", (await page.getByTestId("borrower-loan-card").filter({ hasText: newLoan }).getByTestId("tracker").innerText()).includes("withdrawn"));
 
 // 9. The same loans from the staff side: draws, servicing, moving a loan forward, and the conversation
 await actAs(SEATS.staff);
+// The team sends a document back with what's still needed, and the borrower sees it on the document.
+await page.goto(BASE + "/admin/deals/d1?tab=Documents");
+await page.getByTestId("send-back-bank").click();
+await page.getByTestId("send-back-note").fill("All pages of the September statement, please");
+await page.getByTestId("send-back-confirm").click();
+await seen(page.getByText("Sent back: All pages of the September statement, please"));
+await actAs(SEATS.borrower);
+await page.goto(BASE + "/admin/borrower/d1");
+ok("a document sent back says what the team still needs", (await seen(page.getByTestId("doc-bank").getByTestId("doc-team-note"))) && (await page.getByTestId("doc-bank").innerText()).includes("All pages of the September statement") && (await page.getByTestId("doc-bank").getByRole("button", { name: "Upload a corrected version" }).count()) === 1);
+await actAs(SEATS.staff);
+// The borrower's agents, on the Closing tab, ready to use as the closing agent.
+await page.goto(BASE + "/admin/deals/d18?tab=Closing");
+ok("the team sees the borrower's insurance agent for the binder", (await seen(page.getByTestId("borrower-insurance-agent"))) && (await page.getByTestId("borrower-insurance-agent").innerText()).includes("Placeholder Insurance (FAKE)"));
+if (await page.getByTestId("use-borrower-agent").count()) {
+  await page.getByTestId("use-borrower-agent").click();
+  ok("and can fill the closing agent from the borrower's title agent", (await page.getByTestId("agent-company").inputValue()) === "Sample Title Co (FAKE)");
+}
 await page.goto(BASE + "/admin/deals/d2");
 ok("the team sees the borrower put the loan on the website", await seen(page.getByTestId("showcase-team")));
 await page.getByTestId("showcase-take-down").click();

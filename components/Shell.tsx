@@ -70,7 +70,7 @@ export default function Shell({ children, account, view }: { children: React.Rea
         <div className="sticky top-0 z-30 flex items-center justify-between border-b border-rule bg-background px-4 py-3 lg:hidden">
           <Logo href={logoHref} />
           <Sheet open={open} onOpenChange={setOpen}>
-            <SheetTrigger className={cn("size-9 items-center justify-center rounded-[2px] border border-rule bg-background", view === "borrower" ? "hidden md:inline-flex" : "inline-flex")} aria-label="Open navigation">
+            <SheetTrigger className={cn("size-9 items-center justify-center rounded-[2px] border border-rule bg-background", view === "borrower" && !path.startsWith("/admin/apply") ? "hidden md:inline-flex" : "inline-flex")} aria-label="Open navigation">
               <Menu className="size-4" />
             </SheetTrigger>
             <SheetContent side="left" className="flex flex-col bg-sidebar px-3 pt-10 pb-3">
@@ -82,7 +82,8 @@ export default function Shell({ children, account, view }: { children: React.Rea
         </div>
         <main id="desk" className={cn("mx-auto min-w-0 max-w-7xl px-4 pt-5 md:px-[22px] md:pt-7 md:pb-12", view === "borrower" ? "pb-28" : "pb-10")}>{account.staleJobs.length > 0 && <div role="alert" className="mb-4 rounded-[2px] border border-bad/40 bg-bad/10 px-4 py-3 text-sm text-bad" data-testid="stale-jobs">The nightly {account.staleJobs.join(" and the ")} {account.staleJobs.length === 1 ? "hasn't" : "haven't"} run in over two days. Check that the jobs process is running on the server (<code>pm2 ls</code> shows <code>lendhous-jobs</code>), or run <code>npm run jobs</code>.</div>}{error && <div role="alert" className="mb-4 flex items-start justify-between gap-3 rounded-[2px] border border-bad/40 bg-bad/10 px-4 py-3 text-sm text-bad" data-testid="book-error"><span className="min-w-0">{error}</span><button type="button" className="shrink-0 underline" onClick={clearError}>Dismiss</button></div>}<SampleDataBar path={path} demo={account.demo} offer={account.offerSample} />{children}</main>
       </div>
-      {view === "borrower" && <BorrowerTabs path={path} onAccount={() => setOpen(true)} />}
+      {/* While applying, Back and Next own the bottom of the screen. */}
+      {view === "borrower" && !path.startsWith("/admin/apply") && <BorrowerTabs path={path} onAccount={() => setOpen(true)} />}
     </div>
   );
 }

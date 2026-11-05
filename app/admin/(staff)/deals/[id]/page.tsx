@@ -50,6 +50,8 @@ export default function DealWorkspace() {
   const d = s.deals.find((x) => x.id === id);
   const [invite, setInvite] = useState("");
   const [request, setRequest] = useState({ name: "", category: "Property" });
+  // Sending a document back says what's still needed, which the borrower sees on it.
+  const [sendBack, setSendBack] = useState<{ docId: string; note: string } | null>(null);
   const [tab, setTab] = useState<Tab>("Numbers & Ratios");
   // The work queue links straight to the tab where its item is done (?tab=Documents).
   useEffect(() => { const asked = new URLSearchParams(window.location.search).get("tab"); if (asked && (allTabs as readonly string[]).includes(asked)) setTab(asked as Tab); }, []);
@@ -93,7 +95,7 @@ export default function DealWorkspace() {
     <div className="space-y-4">
       <Link href="/admin" className="text-sm text-link">← Pipeline</Link>
       <div className="glass p-5">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+        <div className="flex items-start gap-3 sm:gap-4">
         <PropertyPicture deal={d} variant="header" />
         <div className="flex min-w-0 flex-1 flex-wrap items-start justify-between gap-3">
           <div className="min-w-0"><div className="text-xs text-muted-foreground">{d.loanNumber} · {productLabel[d.app.product]} · source: {d.source.replace("_", " ")}</div>
@@ -276,8 +278,14 @@ export default function DealWorkspace() {
         {(d.scope?.length ?? 0) > 0 && <Section title="Site photos"><PhotoRequests deal={d} /></Section>}
         <Section title="Documents">
           <ul className="divide-y divide-border">{d.docs.map((x) => (
-            <li key={x.id} className="flex flex-wrap items-center justify-between gap-2 py-2"><div className="min-w-0"><div className="text-sm font-medium">{x.name}</div><div className="text-xs text-muted-foreground">{x.category}{x.fileName && !x.documentId && ` · ${x.fileName}`}{x.documentId && <> · <a className="text-link underline underline-offset-2" href={`/api/documents/${x.documentId}`} data-testid="doc-file">{x.fileName}</a></>}{x.carriedFrom && <> · <span className="text-good" data-testid="doc-carried">carried over from {x.carriedFrom}</span> <button type="button" className="text-link underline underline-offset-2" data-testid="doc-ask-again" onClick={() => dispatch({ t: "docStatus", dealId: d.id, docId: x.id, status: "requested" })}>ask again</button></>}</div></div>
-              <div className="flex flex-wrap items-center gap-2"><Badge>{statusLabel(x.status)}</Badge><DocUpload dealId={d.id} doc={x} />{(x.status === "uploaded" || x.status === "in_review") && <><button className="btn-ghost py-1 text-xs" onClick={() => dispatch({ t: "docStatus", dealId: d.id, docId: x.id, status: "accepted" })}>Accept</button><button className="btn-ghost py-1 text-xs" onClick={() => dispatch({ t: "docStatus", dealId: d.id, docId: x.id, status: "rejected" })}>Reject</button></>}{x.status === "requested" && <button className="btn-ghost py-1 text-xs" data-testid={`waive-${x.id}`} onClick={() => dispatch({ t: "docStatus", dealId: d.id, docId: x.id, status: "waived" })}>Waive</button>}</div></li>))}</ul>
+            <li key={x.id} className="flex flex-wrap items-center justify-between gap-2 py-2"><div className="min-w-0"><div className="text-sm font-medium">{x.name}{x.addedBy === "borrower" && <span className="ml-2 text-xs font-normal text-link">added by the borrower</span>}</div>{x.status === "rejected" && x.teamNote && <div className="text-xs text-bad">Sent back: {x.teamNote}</div>}<div className="text-xs text-muted-foreground">{x.category}{x.fileName && !x.documentId && ` · ${x.fileName}`}{x.documentId && <> · <a className="text-link underline underline-offset-2" href={`/api/documents/${x.documentId}`} data-testid="doc-file">{x.fileName}</a></>}{x.carriedFrom && <> · <span className="text-good" data-testid="doc-carried">carried over from {x.carriedFrom}</span> <button type="button" className="text-link underline underline-offset-2" data-testid="doc-ask-again" onClick={() => dispatch({ t: "docStatus", dealId: d.id, docId: x.id, status: "requested" })}>ask again</button></>}</div></div>
+              <div className="flex flex-wrap items-center gap-2"><Badge>{statusLabel(x.status)}</Badge><DocUpload dealId={d.id} doc={x} />{(x.status === "uploaded" || x.status === "in_review") && <><button className="btn-ghost py-1 text-xs" onClick={() => dispatch({ t: "docStatus", dealId: d.id, docId: x.id, status: "accepted" })}>Accept</button><button className="btn-ghost py-1 text-xs" data-testid={`send-back-${x.id}`} onClick={() => setSendBack({ docId: x.id, note: "" })}>Send back</button></>}{x.status === "requested" && <button className="btn-ghost py-1 text-xs" data-testid={`waive-${x.id}`} onClick={() => dispatch({ t: "docStatus", dealId: d.id, docId: x.id, status: "waived" })}>Waive</button>}</div>{sendBack?.docId === x.id && (
+                <div className="mt-2 flex w-full flex-wrap items-end gap-2" data-testid="send-back-form">
+                  <label className="block min-w-0 flex-1 basis-56"><span className="label">What the borrower still needs to send (they see this)</span><input className="desk-input" data-testid="send-back-note" maxLength={300} placeholder="e.g. All pages of the October statement" value={sendBack.note} onChange={(event) => setSendBack({ ...sendBack, note: event.target.value })} /></label>
+                  <button className="btn-primary h-9! px-3! text-xs!" data-testid="send-back-confirm" onClick={async () => { if (await dispatch({ t: "docStatus", dealId: d.id, docId: x.id, status: "rejected", note: sendBack.note })) setSendBack(null); }}>Send back</button>
+                  <button className="btn-ghost h-9! px-3! text-xs!" onClick={() => setSendBack(null)}>Cancel</button>
+                </div>
+              )}</li>))}</ul>
           <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-border pt-3" data-testid="request-doc">
             <label className="block min-w-0 flex-1 basis-48"><span className="label">Ask for another document</span><input data-testid="request-doc-name" className="desk-input" placeholder="e.g. Updated insurance binder" value={request.name} onChange={(ev) => setRequest({ ...request, name: ev.target.value })} /></label>
             <label className="block"><span className="label">Category</span><select className="desk-input w-auto!" value={request.category} onChange={(ev) => setRequest({ ...request, category: ev.target.value })}>{["Identity", "Entity", "Property", "Liquidity", "Closing", "Experience"].map((category) => <option key={category}>{category}</option>)}</select></label>

@@ -1,5 +1,6 @@
 // The loan book's rules: one set of records and one reducer, with no React and no database. Demo seats and sample data
 // run it in the browser; real accounts run it on the server (lib/book-store.ts), after lib/book-access.ts checks them.
+import { AGENT_LABEL, type AgentInput, type AgentRole } from "./borrower-docs";
 import { CONFIDENCE, EXIT_CHOICES, exitPlanProblem, type ExitPlan } from "./exit-plans";
 import { evaluate, fundedBalances, round2, type Application, type BuyBox } from "./engine";
 import { countedDeals, missingDocs, needsList, withSponsor } from "./credit";
@@ -155,7 +156,9 @@ export type BookAction =
   | { t: "executeExtension"; dealId: string; extensionId: string; on: string; method: PaymentMethod; reference: string; by: string }
   | { t: "sendMessage"; dealId: string; from: string; side: LoanMessage["side"]; text: string }
   | { t: "uploadDoc"; dealId: string; docId: string; fileName: string; documentId?: string }
-  | { t: "docStatus"; dealId: string; docId: string; status: DocStatus }
+  | { t: "docStatus"; dealId: string; docId: string; status: DocStatus; note?: string }
+  | { t: "addOwnDoc"; dealId: string; docId: string; name: string; by: string }
+  | { t: "setAgent"; dealId: string; role: AgentRole; contact: AgentInput; by: string }
   | { t: "route"; dealId: string; route: "in_house" | "partner" | "split"; inHouseAmount: number }
   | { t: "sendTeaser"; dealId: string; partnerIds: string[] }
   | { t: "bid"; bid: Omit<Bid, "id" | "at" | "status"> }
@@ -409,6 +412,17 @@ function apply(s: Book, a: BookAction): Book {
       // A new rehab budget starts its scope of work over, because the old split no longer adds up.
       const scope = holdback === evaluate(deal.app).holdback ? deal.scope : defaultScope(app.product, holdback);
       return { ...s, deals: upd(a.dealId, (d) => ({ ...d, app, scope })), audit: log(`${deal.loanNumber}: underwriting numbers updated`) };
+    }
+    case "addOwnDoc": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (deal.docs.some((doc) => doc.id === a.docId)) return s;
+      const doc = { id: a.docId, name: a.name.trim(), category: "Other", status: "requested" as const, note: "Something you added", addedBy: "borrower" as const };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, docs: [...d.docs, doc] })), audit: log(`${deal.loanNumber}: ${a.by} added a document: ${doc.name}`) };
+    }
+    case "setAgent": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const contact = { name: a.contact.name.trim(), company: a.contact.company.trim(), email: a.contact.email.trim(), phone: a.contact.phone.trim(), by: a.by, at: now() };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, agents: { ...d.agents, [a.role]: contact } })), audit: log(`${deal.loanNumber}: ${AGENT_LABEL[a.role].toLowerCase()} saved by ${a.by}`) };
     }
     case "addDocRequest": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
@@ -925,7 +939,7 @@ function apply(s: Book, a: BookAction): Book {
       return { ...s, messages: [...s.messages, { id: `msg${uid()}`, dealId: a.dealId, from: a.from, side: a.side, text, at: now() }] };
     }
     case "uploadDoc": return { ...s, deals: upd(a.dealId, (d) => ({ ...d, docs: d.docs.map((x) => (x.id === a.docId ? { ...x, status: "uploaded", fileName: a.fileName, documentId: a.documentId, uploadedAt: now() } : x)) })), audit: log(`Document uploaded: ${a.fileName}`) };
-    case "docStatus": return { ...s, deals: upd(a.dealId, (d) => ({ ...d, docs: d.docs.map((x) => (x.id === a.docId ? { ...x, status: a.status, acceptedOn: a.status === "accepted" ? serviceDay(s) : undefined, carriedFrom: undefined, ...(x.carriedFrom && a.status === "requested" ? { fileName: undefined, documentId: undefined } : {}) } : x)) })), audit: log(`Document ${a.docId} → ${a.status}`) };
+    case "docStatus": return { ...s, deals: upd(a.dealId, (d) => ({ ...d, docs: d.docs.map((x) => (x.id === a.docId ? { ...x, status: a.status, teamNote: a.status === "rejected" ? a.note?.trim() || undefined : undefined, acceptedOn: a.status === "accepted" ? serviceDay(s) : undefined, carriedFrom: undefined, ...(x.carriedFrom && a.status === "requested" ? { fileName: undefined, documentId: undefined } : {}) } : x)) })), audit: log(`Document ${a.docId} → ${a.status}`) };
     case "route": {
       const deal = s.deals.find((d) => d.id === a.dealId)!; const L = evaluate(deal.app).noteAmount;
       const inH = a.route === "in_house" ? L : a.route === "partner" ? 0 : Math.min(L, Math.max(0, a.inHouseAmount));

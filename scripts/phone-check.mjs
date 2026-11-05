@@ -18,7 +18,7 @@ const SEATS = {
   "bella.buyer@lendhous.test": ["/admin/buyer", "/admin/buyer/loans/s-d9", "/admin/buyer/portfolio"],
 };
 // Tabs and steps that only render after a click.
-const CLICKS = { "/start": ["add-comp"], "/embed/quote": ["add-comp"], "/admin/reports": ["range-custom"], "/apply/demo": ["app-next", "app-next"], "/admin/deals/d13": ["tab-Servicing", "waive-fee", "declare-default", "start-payoff"], "/admin/deals/d14": ["tab-Servicing", "approve-extension"], "/admin/deals/d16": ["close-application"], "/admin/deals/d7": ["tab-Closing", "change-wire"], "/admin/borrower/d1": ["close-application"], "/admin/servicing": ["record-payment"], "/admin/apply": ["app-next"], "/admin/deals/d1": ["tab-Credit review", "fill-sponsor"], "/admin/deals/d5": ["tab-Credit review"], "/admin/deals/d6": ["tab-Credit review", "edit-sponsor"], "/photos/demo": ["photo-start", "photo-next", "photo-next", "photo-next", "photo-next"], "/admin/deals/d2": ["tab-Documents", "ask-photos"], "/admin/draws": ["ask-photos"], "/admin/deals/d3": ["tab-Credit review", "tab-Score & Flags", "tab-Capital Routing", "tab-Documents", "tab-Messages"], "/admin/borrower/d2": ["request-draw"] };
+const CLICKS = { "/admin": ["attention-toggle", "filters-toggle", "layout-board"], "/start": ["add-comp"], "/embed/quote": ["add-comp"], "/admin/reports": ["range-custom"], "/apply/demo": ["app-next", "app-next"], "/admin/deals/d13": ["tab-Servicing", "waive-fee", "declare-default", "start-payoff"], "/admin/deals/d14": ["tab-Servicing", "approve-extension"], "/admin/deals/d16": ["close-application"], "/admin/deals/d7": ["tab-Closing", "change-wire"], "/admin/borrower/d1": ["close-application", "doc-category-toggle", "timeline-summary"], "/admin/servicing": ["record-payment"], "/admin/apply": ["app-next"], "/admin/deals/d1": ["tab-Credit review", "fill-sponsor"], "/admin/deals/d5": ["tab-Credit review"], "/admin/deals/d6": ["tab-Credit review", "edit-sponsor"], "/photos/demo": ["photo-start", "photo-next", "photo-next", "photo-next", "photo-next"], "/admin/deals/d2": ["tab-Documents", "ask-photos"], "/admin/draws": ["ask-photos"], "/admin/deals/d3": ["tab-Credit review", "tab-Score & Flags", "tab-Capital Routing", "tab-Documents", "tab-Messages"], "/admin/borrower/d2": ["request-draw"] };
 
 // Reads the page in the browser: anything past the right edge, and anything that scrolls sideways.
 const measure = () => {
@@ -50,7 +50,10 @@ async function sweep(context, routes) {
     const states = [[route, null], ...(CLICKS[route] ?? []).map((tab) => [`${route} ${tab}`, tab])];
     for (const [label, tab] of states) {
       if (tab) {
-        await page.getByTestId(tab).first().click();
+        // Some toggles only exist at phone widths (folds a desktop shows open); at other widths there's no such state.
+        const target = page.getByTestId(tab).first();
+        if (!(await target.isVisible())) continue;
+        await target.click();
         await page.waitForTimeout(100);
       }
       const result = await page.evaluate(measure);

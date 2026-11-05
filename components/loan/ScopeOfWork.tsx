@@ -11,19 +11,22 @@ export function ScopeOfWork({ deal, editable }: { deal: Deal; editable: boolean 
   const budget = est(deal.app).holdback;
   const [lines, setLines] = useState(deal.scope ?? []);
   const [summary, setSummary] = useState(deal.scopeSummary ?? "");
+  // Kept as the details' own open state, so typing in a line doesn't fold it shut again.
+  const [unfolded, setUnfolded] = useState(false);
   const [saved, setSaved] = useState(false);
   if (!deal.scope?.length) return null;
   const sow = deal.docs.find((doc) => doc.id === "sow");
   const open = editable && !["clear_to_close", "closing", "funded", "servicing_current", "servicing_delinquent", "matured", "default", "paid_off"].includes(deal.status);
   const error = scopeError(lines, budget);
   const released = lines.reduce((sum, line) => sum + line.released, 0);
-  // Once it's approved the borrower doesn't need the lines in the way; they open it to look.
-  const folded = editable && sow?.status === "accepted";
-  const Fold = ({ children }: { children: React.ReactNode }) => (folded ? <details data-testid="scope-folded"><summary className="cursor-pointer text-sm text-link">Approved: {usd(scopeTotal(lines))} across {lines.length} lines</summary><div className="mt-2">{children}</div></details> : <>{children}</>);
+  // Once it's sent the borrower doesn't need the lines in the way; they open it to look, or to change it while it's in review.
+  const folded = editable && (sow?.status === "accepted" || sow?.status === "in_review" || sow?.status === "uploaded");
+  const showing = !folded || unfolded;
   return (
     <Section title="Scope of work" right={sow?.status === "accepted" ? <Badge tone="green">Approved</Badge> : sow?.status === "in_review" ? <Badge tone="blue">In review</Badge> : undefined}>
       {open && <p className="mb-3 text-sm text-muted-foreground">Split your {usd(budget)} budget by type of work. Draws are paid against these lines, so don&apos;t list the same work twice.</p>}
-      <Fold>
+      {folded && <details data-testid="scope-folded" open={unfolded} onToggle={(event) => setUnfolded((event.currentTarget as HTMLDetailsElement).open)}><summary className="cursor-pointer text-sm text-link">{sow?.status === "accepted" ? "Approved" : "Sent for review"}: {usd(scopeTotal(lines))} across {lines.length} lines{sow?.status === "accepted" ? "" : ". Open it to change it."}</summary></details>}
+      {showing && <div className={folded ? "mt-2" : ""}>
       <ul className="divide-y divide-border" data-testid="scope-lines">
         {lines.map((line, index) => (
           <li key={line.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-2 text-sm">
@@ -35,8 +38,8 @@ export function ScopeOfWork({ deal, editable }: { deal: Deal; editable: boolean 
         ))}
       </ul>
       <div className="mt-2 flex flex-wrap justify-between gap-2 border-t border-border pt-2 text-sm font-semibold"><span>Total</span><span data-testid="scope-total">{usd(scopeTotal(lines))}{!open && released > 0 ? ` · ${usd(released)} released` : ""}</span></div>
-      </Fold>
-      {open && (
+      </div>}
+      {open && showing && (
         <div className="mt-3 space-y-3">
           <label className="block"><span className="label">Project summary</span><textarea data-testid="scope-summary" rows={3} className="desk-input h-auto! py-2" placeholder="The home's condition today and the work you plan. Mention any added square footage or layout changes." value={summary} onChange={(event) => { setSaved(false); setSummary(event.target.value); }} /></label>
           {error && <p role="alert" className="text-sm text-bad" data-testid="scope-error">{error}</p>}

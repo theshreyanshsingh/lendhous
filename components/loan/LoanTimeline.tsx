@@ -15,14 +15,28 @@ export function LoanTimeline({ deal, side }: { deal: Deal; side: "team" | "clien
   const timeline = loanTimeline(deal, s.draws, today);
   if (!timeline) return null;
   const { points, draws } = timeline;
+  const now = points.find((point) => point.state === "now");
+  const at = now ? points.indexOf(now) : -1;
+  const target = points.find((point) => point.target);
   return (
-    <div className="mt-5 border-t border-border pt-4" data-testid="loan-timeline">
-      <ol className="grid gap-x-1 gap-y-3 sm:flex sm:items-start">
+    <div className="mt-4 border-t border-border pt-3 sm:mt-5 sm:pt-4" data-testid="loan-timeline">
+      {/* A phone gets one line, with every step a tap away. */}
+      <details className="text-xs sm:hidden" data-testid="timeline-summary">
+        <summary className="flex cursor-pointer list-none items-center gap-2 py-1">
+          <span aria-hidden="true" className="size-2.5 shrink-0 rounded-full border-2 border-link bg-card ring-4 ring-link/15" />
+          <span className="min-w-0 flex-1"><b className="font-semibold text-foreground">{now?.label ?? "Done"}</b>{at >= 0 ? <span className="text-muted-foreground"> · step {at + 1} of {points.length}{now?.days !== undefined ? ` · ${now.days} day${now.days === 1 ? "" : "s"} so far` : ""}{target ? ` · target close ${shortDay(target.on)}` : ""}</span> : null}</span>
+          <span className="shrink-0 text-link">All steps</span>
+        </summary>
+        <ol className="mt-2 space-y-1.5 border-l border-rule pl-3">
+          {points.map((point) => <li key={point.label} className={point.state === "now" ? "font-semibold text-foreground" : point.state === "done" ? "text-foreground" : "text-muted-foreground"}>{point.label}{point.on ? <span className="font-normal text-muted-foreground"> · {point.target ? "target " : ""}{shortDay(point.on)}</span> : null}{point.days !== undefined ? <span className="font-normal text-faint"> · {point.days === 0 ? "same day" : `${point.days} day${point.days === 1 ? "" : "s"}`}</span> : null}</li>)}
+        </ol>
+      </details>
+      <ol className="hidden sm:flex sm:items-start">
         {points.map((point, i) => (
-          <li key={point.label} className="relative flex min-w-0 gap-3 sm:flex-1 sm:flex-col sm:gap-2" data-testid="timeline-point" data-state={point.state}>
-            {/* the line to the next step: down the side on a phone, across on a wider screen */}
-            {i < points.length - 1 && <span aria-hidden="true" className={`absolute top-3 left-[5px] h-full w-px sm:top-[5px] sm:left-3 sm:h-px sm:w-full ${point.state === "done" ? "bg-primary" : "bg-rule"}`} />}
-            <span aria-hidden="true" className={`relative z-10 mt-1 size-[11px] shrink-0 rounded-full border-2 sm:mt-0 ${DOT[point.state]}`} />
+          <li key={point.label} className="relative flex min-w-0 flex-1 flex-col gap-2" data-testid="timeline-point" data-state={point.state}>
+            {/* the line across to the next step */}
+            {i < points.length - 1 && <span aria-hidden="true" className={`absolute top-[5px] left-3 h-px w-full ${point.state === "done" ? "bg-primary" : "bg-rule"}`} />}
+            <span aria-hidden="true" className={`relative z-10 size-[11px] shrink-0 rounded-full border-2 ${DOT[point.state]}`} />
             <div className="min-w-0 text-xs leading-snug">
               <p className={point.state === "now" ? "font-semibold text-foreground" : point.state === "done" ? "text-foreground" : "text-muted-foreground"}>{point.label}{point.state === "now" && <span className="sr-only"> (now)</span>}</p>
               {point.on && <p className="text-muted-foreground tabular-nums">{point.target ? "Target " : ""}{shortDay(point.on)}</p>}

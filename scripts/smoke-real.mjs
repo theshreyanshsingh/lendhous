@@ -382,6 +382,8 @@ try {
   ok("a file that isn't what it claims is refused", await seen(borrower.getByTestId("book-error").filter({ hasText: "do not match" })));
   await bank.getByRole("button", { name: "Upload" }).click();
   await borrower.getByTestId("file-input").setInputFiles(PDF);
+  // Once it's sent it sits under Submitted.
+  await borrower.getByTestId("docs-tab-submitted").click();
   ok("a real document of 3 MB uploads", await seen(bank.getByTestId("doc-file")));
   const fileUrl = await bank.getByTestId("doc-file").getAttribute("href");
   const mine = await borrower.request.get(BASE + fileUrl);
@@ -479,6 +481,16 @@ try {
   await borrower.getByTestId("term-sheet-agree").check();
   await borrower.getByTestId("accept-term-sheet").click();
   ok("the borrower accepts it from their own browser", await seen(borrower.getByTestId("term-sheet-signed")));
+  // The closing now needs their title/escrow and insurance agents: asked for straight away.
+  ok("the borrower is asked for their title and insurance agents", await seen(borrower.getByTestId("agents-prompt")));
+  await borrower.getByTestId("prompt-title-name").fill("Tia Title");
+  await borrower.getByTestId("prompt-title-company").fill("Borrower's Title LLC");
+  await borrower.getByTestId("prompt-title-email").fill(`tia@${DOMAIN}`);
+  await borrower.getByTestId("prompt-insurance-company").fill("Real Insurance Co");
+  await borrower.getByTestId("prompt-insurance-phone").fill("(555) 010-0700");
+  await borrower.getByTestId("agents-prompt-save").click();
+  ok("and they're kept on the loan", (await borrower.getByTestId("agents-prompt").waitFor({ state: "detached", timeout: 10_000 }).then(() => true, () => false)) && (await seen(borrower.getByTestId("agent-insurance-saved").getByText("Real Insurance Co"))));
+  ok("encrypted with the rest of the loan", !(await rawRows("BookRecord")).includes("Borrower's Title LLC"));
   await go(under, dealHref);
   await under.getByTestId("tab-Term sheet").click();
   ok("acceptance locks the rate and points", (await under.getByTestId("term-sheet-builder").innerText()).includes("locked at what the borrower accepted"));
@@ -571,6 +583,9 @@ try {
 
   // The title company's secure link: it sends the closing documents and its own wire instructions; nobody here types them.
   await under.getByTestId("tab-Closing").click();
+  await seen(under.getByTestId("borrower-title-agent"));
+  await under.getByTestId("use-borrower-agent").click();
+  ok("the team can start the closing agent from the borrower's title agent", (await under.getByTestId("agent-company").inputValue()) === "Borrower's Title LLC" && (await under.getByTestId("agent-email").inputValue()) === `tia@${DOMAIN}`);
   await under.getByTestId("agent-company").fill("Real Title LLC");
   await under.getByTestId("agent-contact").fill("Terry Title");
   await under.getByTestId("agent-email").fill(`title@${DOMAIN}`);
@@ -1365,6 +1380,7 @@ try {
   await borrower.getByTestId("app-sign").click();
   ok("the repeat borrower signs it", await borrower.waitForURL("**/admin/borrower/d*").then(() => true, () => false));
   const repeatId = borrower.url().split("/").pop();
+  await borrower.getByTestId("docs-tab-submitted").click();
   ok("the past deal confirmed on LH-1001 isn't asked for again", repeatId !== dealId && (await seen(borrower.getByTestId("doc-track").getByText("Accepted"))));
   await go(under, `/admin/deals/${repeatId}`);
   ok("the team sees the repeat record it was priced on", (await under.getByTestId("deal-repeat").innerText()).includes("1 LendHous loan paid as agreed (LH-1001)"));

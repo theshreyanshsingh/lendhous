@@ -128,9 +128,14 @@ export function BorrowerApplication({ token, initial, startStep, savedAt, office
       <>
         <section className="glass p-5">
           <h1 className="text-2xl font-normal tracking-tight">{done ? "Your application is signed" : portal ? "Apply for a loan" : "Complete your loan application"}</h1>
-          {!done && portal && <p className="mt-1 text-sm text-muted-foreground">Tell us about you, the property and the loan, then review it and sign. <b className="text-foreground">Your progress saves automatically</b>: close this page and pick up where you left off any time.</p>}
+          {!done && portal && <p className="mt-1 text-sm text-muted-foreground"><span className="max-sm:hidden">Tell us about you, the property and the loan, then review it and sign. </span><b className="text-foreground">Your progress saves automatically</b>: close this page and pick up where you left off any time.</p>}
           {!done && !portal && <p className="mt-1 text-sm text-muted-foreground">Your loan officer <b className="text-foreground">{officer}</b> has asked for the details below to finish your application. <b className="text-foreground">Your progress saves automatically</b>: close this page and come back any time until {longDay(expiresAt)}.</p>}
           {address.street && <p className="mt-3 inline-flex items-center gap-1.5 rounded-[2px] bg-muted px-2.5 py-1 font-mono text-xs text-muted-foreground"><MapPin size={12} aria-hidden="true" /> {[address.street, address.city, address.state, address.zip].filter(Boolean).join(", ")}</p>}
+          {/* Where they are in the five steps, in the same card, so the first question shows sooner. */}
+          {!done && <div className="mt-4 border-t border-border pt-3">
+              <div className="flex items-center justify-between text-[11px] font-medium tracking-wider uppercase"><span className="text-muted-foreground">{STEPS[step]}</span><span className="text-link" data-testid="app-step">Step {step + 1} of {STEPS.length}</span></div>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted"><motion.div className="h-full rounded-full bg-link" initial={false} animate={{ width: `${((step + 1) / STEPS.length) * 100}%` }} transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }} /></div>
+            </div>}
         </section>
 
         {done ? (
@@ -143,10 +148,7 @@ export function BorrowerApplication({ token, initial, startStep, savedAt, office
           </Arrive>
         ) : (
           <>
-            <section className="glass p-4">
-              <div className="flex items-center justify-between text-[11px] font-medium tracking-wider uppercase"><span className="text-muted-foreground">{STEPS[step]}</span><span className="text-link" data-testid="app-step">Step {step + 1} of {STEPS.length}</span></div>
-              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted"><motion.div className="h-full rounded-full bg-link" initial={false} animate={{ width: `${((step + 1) / STEPS.length) * 100}%` }} transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }} /></div>
-            </section>
+
 
             <StepSwap step={step} direction={direction} className="glass space-y-5 p-5">
               {step === 0 && (<>
@@ -291,7 +293,8 @@ export function BorrowerApplication({ token, initial, startStep, savedAt, office
               <div className="rounded-[2px] border border-bad/30 bg-bad/5 p-3 text-sm" role="alert" data-testid="app-problems"><p className="font-medium text-bad">Before you go on:</p><ul className="mt-1 list-disc space-y-0.5 pl-5 text-bad">{problems.slice(0, 8).map((problem) => <li key={problem}>{problem}</li>)}</ul>{problems.length > 8 && <p className="mt-1 text-xs text-bad">and {problems.length - 8} more.</p>}</div>
             </Reveal>
 
-            <div className="flex items-center justify-between gap-3">
+            {/* On a phone, Back and Next stay under the thumb at the foot of the screen. */}
+            <div className="flex items-center justify-between gap-3 max-sm:sticky max-sm:bottom-0 max-sm:z-20 max-sm:border-t max-sm:border-rule max-sm:bg-background/95 max-sm:py-3 max-sm:backdrop-blur">
               <motion.button whileTap={{ scale: 0.97 }} type="button" className="btn-ghost rounded-full! px-5!" data-testid="app-back" disabled={step === 0} onClick={() => go(step - 1)}>← Back</motion.button>
               <span className="min-w-0 truncate text-center text-xs text-good" data-testid="app-saved" aria-live="polite">{saved}</span>
               {step < STEPS.length - 1

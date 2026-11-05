@@ -19,6 +19,7 @@ import { MAX_PHOTOS_PER_LINK, photoRequestState, photosClosed } from "./photo-re
 import { evaluate } from "./engine";
 import { showcaseable } from "./showcase";
 import { exitPlanProblem } from "./exit-plans";
+import { agentProblem, OWN_DOC_ID, ownDocProblem } from "./borrower-docs";
 import type { Broker, Deal, Doc, LoanPayment, LoanSale, PayoffRequest } from "./mockData";
 import { currentPricing, pricingPayload } from "./pricing-versions";
 import { ledger, servicingDate } from "./servicing";
@@ -72,7 +73,7 @@ const quietPayoff = (payoff: PayoffRequest): PayoffRequest => ({
 
 /** Removes what identifies the borrower, for a partner or buyer who hasn't closed on the loan. */
 function blind(deal: Deal): Deal {
-  return { ...deal, borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined, closure: undefined, defaults: undefined, extensions: undefined, paidOff: undefined, closing: undefined, wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, termSheets: undefined, pricingException: undefined, conditions: undefined, lienFile: undefined, completed: undefined, revenue: undefined, adverseAction: undefined, legalHold: undefined, propertyPhotos: undefined, partnerFunding: undefined, ...quietPayments(deal, false) };
+  return { ...deal, borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined, closure: undefined, defaults: undefined, extensions: undefined, paidOff: undefined, closing: undefined, wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, termSheets: undefined, pricingException: undefined, conditions: undefined, lienFile: undefined, completed: undefined, revenue: undefined, adverseAction: undefined, legalHold: undefined, propertyPhotos: undefined, partnerFunding: undefined, agents: undefined, ...quietPayments(deal, false) };
 }
 
 /** The conditions that are the borrower's to meet (Spec B17), without who on the team handled them or why one was waived. */
@@ -94,9 +95,14 @@ const latestForClient = (deal: Deal): Partial<Deal> => {
   return { termSheets: sheet ? [{ ...sheet, issuedBy: "", matrix: { rate: [0, 0], points: [0, 0] }, exception: undefined }] : undefined, pricingException: undefined };
 };
 
+/** The borrower's agents without who wrote them down, which may be someone on the team. */
+const clientAgents = (deal: Deal): Partial<Deal> => ({
+  agents: deal.agents && Object.fromEntries(Object.entries(deal.agents).map(([role, contact]) => [role, contact && { ...contact, by: "" }])),
+});
+
 /** What only the team sees on a loan it shares with a client. Wire instructions never leave the team: a client who sees them is a client who can be sent fake ones. */
 function forClient(deal: Deal): Deal {
-  return { ...deal, ...latestForClient(deal), ...clientConditions(deal), ...clientRecords(deal), partnerFunding: undefined, allocations: [], teaserSentTo: [], route: undefined, capitalStatus: "not_started", contractorIsGtAffiliate: undefined, source: "", fundingApprovers: undefined, creditReview: undefined, ...quietPayments(deal, true), ...quietExits(deal), wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined };
+  return { ...deal, ...latestForClient(deal), ...clientConditions(deal), ...clientRecords(deal), ...clientAgents(deal), partnerFunding: undefined, allocations: [], teaserSentTo: [], route: undefined, capitalStatus: "not_started", contractorIsGtAffiliate: undefined, source: "", fundingApprovers: undefined, creditReview: undefined, ...quietPayments(deal, true), ...quietExits(deal), wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined };
 }
 
 /** The part of the book this account may see. Nothing else leaves the server. */
@@ -305,6 +311,23 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
     case "addDocRequest":
       if (!dealOf(action.dealId)) return no(GONE);
       return staffOnly("review_documents", "manage_conditions");
+    case "addOwnDoc": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      if (!(view === "borrower" && deal.borrowerId === viewer.id)) return no(NOT_ALLOWED);
+      if (isClosedApplication(deal.status) || deal.status === "paid_off") return no("This loan isn't taking documents any more.");
+      if (!OWN_DOC_ID.test(action.docId) || deal.docs.some((doc) => doc.id === action.docId)) return no("That didn't go through. Try again.");
+      const problem = ownDocProblem(action.name);
+      return problem ? no(problem) : ok({ ...action, by: viewer.name });
+    }
+    case "setAgent": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      const problem = agentProblem(action.contact);
+      if (problem) return no(problem);
+      if (view === "borrower" && deal.borrowerId === viewer.id) return isClosedApplication(deal.status) ? no("This application has ended.") : ok({ ...action, by: viewer.name });
+      return staffOnlyAllowed("review_documents", "manage_conditions", "service_loans") ? ok({ ...action, by: viewer.name }) : no(NOT_ALLOWED);
+    }
     case "docStatus":
       if (!dealOf(action.dealId)) return no(GONE);
       return staffOnly("review_documents");

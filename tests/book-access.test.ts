@@ -73,6 +73,13 @@ describe("what each account receives", () => {
     expect([...new Set(scoped.bids.map((bid) => bid.partnerId))]).toEqual(["partner-firm"]);
     expect(scoped.partners.map((item) => item.id)).toEqual(["partner-firm"]);
   });
+  it("a blind teaser carries none of the borrower's agents, and a client never sees who wrote them down", () => {
+    const contact = { name: "Tia Title", company: "Shore Title LLC", email: "tia@example.org", phone: "" };
+    const named = reducer(reducer(live(), { t: "setAgent", dealId: "d5", role: "title", contact, by: "Jordan Demo (FAKE)" }), { t: "setAgent", dealId: "d3", role: "insurance", contact, by: "Riley Placeholder" });
+    const text = JSON.stringify(scopeBook(named, partner).deals.filter((deal) => deal.id !== "d11"));
+    for (const secret of ["Tia Title", "Shore Title LLC", "Jordan Demo", "Riley Placeholder"]) expect(text).not.toContain(secret);
+    expect(scopeBook(reducer(named, { t: "acceptBid", bidId: "bid1" }), partner).deals.find((deal) => deal.id === "d3")?.agents?.insurance).toMatchObject({ company: "Shore Title LLC", by: "" });
+  });
   it("a partner sees nothing before signing, and the whole file only after winning", () => {
     const unsigned = live();
     unsigned.partners = unsigned.partners.map((item) => (item.id === "partner-firm" ? { ...item, ndaSigned: false } : item));

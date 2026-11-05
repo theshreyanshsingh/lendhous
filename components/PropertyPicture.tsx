@@ -4,7 +4,7 @@ import { HouseArt } from "@/components/art/HouseArt";
 import type { Deal } from "@/lib/mockData";
 import { useStore } from "@/lib/store";
 
-const FRAME = { card: "aspect-[16/7] w-full sm:aspect-[3/1]", header: "aspect-[16/7] w-full sm:aspect-[16/10] sm:w-56 sm:shrink-0", thumb: "size-14 shrink-0" } as const;
+const FRAME = { card: "aspect-[16/7] w-full sm:aspect-[3/1]", header: "aspect-[4/3] w-24 shrink-0 sm:aspect-[16/10] sm:w-56", thumb: "size-14 shrink-0" } as const;
 
 /**
  * The picture a loan leads with: its first property photo; else, when the server has a Maps key, Street View of the

@@ -1,5 +1,6 @@
 "use client";
 import Link from "next/link";
+import { useState } from "react";
 import { isClosedApplication } from "@/lib/loan-exits";
 import { ledger, SERVICED } from "@/lib/servicing";
 import { useStore, est } from "@/lib/store";
@@ -11,11 +12,16 @@ import { BorrowerLetters } from "@/components/BorrowerLetters";
 import { EmptyArt } from "@/components/art/HouseArt";
 import { PropertyPicture } from "@/components/PropertyPicture";
 import { shortDay } from "@/lib/format";
-import { nextStepFor } from "@/lib/next-step";
+import { itemsOwed, nextStepFor } from "@/lib/next-step";
+
+const ENDED = ["declined", "withdrawn", "paid_off"];
 
 export default function BorrowerHome() {
   const { s, viewerName } = useStore();
-  const mine = s.deals.filter((d) => d.borrowerId === s.borrowerId);
+  const all = s.deals.filter((d) => d.borrowerId === s.borrowerId);
+  const closedLoans = all.filter((d) => ENDED.includes(d.status));
+  const [shown, setShown] = useState<"active" | "closed">("active");
+  const mine = shown === "closed" ? closedLoans : all.filter((d) => !ENDED.includes(d.status));
   const tasks = mine.flatMap((d) => d.docs.filter((x) => x.status === "requested" || x.status === "rejected").map((x) => ({ d, x })));
   return (
     <div className="space-y-5">
@@ -25,15 +31,22 @@ export default function BorrowerHome() {
       </div>
       {tasks.length > 0 && <div className="glass border-warn/30 bg-warn/12 p-4 text-sm text-warn"><b>{tasks.length} document{tasks.length > 1 ? "s" : ""} needed</b> across your loans. Open a loan to upload.</div>}
       <BorrowerLetters />
-      {mine.length === 0 && <div className="glass flex flex-col items-center gap-2 p-8 text-center text-sm text-muted-foreground" data-testid="no-loans"><EmptyArt className="h-24 w-32" />No loans yet. Start an application to get an instant estimate.</div>}
+      {closedLoans.length > 0 && (
+        <div className="flex gap-2" role="tablist" aria-label="Your loans">
+          {([["active", "Active", all.length - closedLoans.length], ["closed", "Paid off, declined and withdrawn", closedLoans.length]] as const).map(([key, label, count]) => <button key={key} type="button" role="tab" aria-selected={shown === key} data-testid={`loans-tab-${key}`} onClick={() => setShown(key)} className={`rounded-full px-3 py-1.5 text-xs font-medium ${shown === key ? "bg-primary text-primary-foreground" : "border border-rule text-muted-foreground hover:text-foreground"}`}>{label} ({count})</button>)}
+        </div>
+      )}
+      {all.length === 0 && <div className="glass flex flex-col items-center gap-2 p-8 text-center text-sm text-muted-foreground" data-testid="no-loans"><EmptyArt className="h-24 w-32" />No loans yet. Start an application to get an instant estimate.</div>}
       <div className="grid gap-4 lg:grid-cols-2">
         {mine.map((d) => {
           const e = est(d.app); const funded = SERVICED.includes(d.status);
           const open = d.docs.filter((x) => x.status === "requested" || x.status === "rejected").length;
           const b = fundedBalances(e, d.app, d.disbursedDraws);
           const step = nextStepFor(d);
+          const owed = itemsOwed(d);
           return (
-            <Link key={d.id} href={`/admin/borrower/${d.id}`} className="glass block min-w-0 overflow-hidden transition-colors hover:border-faint" data-testid="borrower-loan-card">
+            <div key={d.id} className="min-w-0">
+            <Link href={`/admin/borrower/${d.id}`} className="glass block min-w-0 overflow-hidden transition-colors hover:border-faint" data-testid="borrower-loan-card">
               <PropertyPicture deal={d} variant="card" />
               <div className="p-5">
               <div className="flex items-start justify-between gap-2">
@@ -57,6 +70,13 @@ export default function BorrowerHome() {
               {step && <p className="mt-4 border-t border-border pt-3 text-sm" data-testid="card-next-step"><span className="text-muted-foreground">Next: </span>{step.title}</p>}
               </div>
             </Link>
+            {owed > 0 && (
+              <Link href={`/admin/borrower/${d.id}#documents`} className="-mt-px flex flex-wrap items-center justify-between gap-2 rounded-b-[2px] border border-warn/30 bg-warn/12 px-5 py-3 text-sm text-warn hover:bg-warn/20" data-testid="card-send-docs">
+                <span><b className="font-semibold">{owed} item{owed === 1 ? "" : "s"}</b> still needed from you</span>
+                <span className="font-medium">Send documents for this loan →</span>
+              </Link>
+            )}
+            </div>
           );
         })}
       </div>

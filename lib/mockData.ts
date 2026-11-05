@@ -21,6 +21,12 @@ export interface Doc {
   carriedFrom?: string;
   /** When the borrower last sent it, which starts the review clock (lib/sla.ts). */
   uploadedAt?: string;
+  /** Only if it applies to this borrower: shown as such, and listed after what's needed. */
+  optional?: boolean;
+  /** What the team still needs, said when it sent the document back. */
+  teamNote?: string;
+  /** The borrower added it without being asked. */
+  addedBy?: "borrower";
 }
 /** Someone who personally guarantees the loan. Everyone owning 20% or more of the borrowing entity should be one. */
 export interface Guarantor { name: string; ownershipPct: number; fico: number; citizenship: "us" | "resident" | "foreign" }
@@ -123,6 +129,8 @@ export interface Deal {
   exitAsked?: number[];
   /** The LendHous loan this one refinances: it's paid off from this loan's money when this one funds. */
   refinances?: string;
+  /** The borrower's title/escrow and insurance agents, as they gave them (lib/borrower-docs.ts). */
+  agents?: Partial<Record<import("./borrower-docs").AgentRole, import("./borrower-docs").AgentContact>>;
 }
 export interface ClosingAgent {
   company: string; contact: string; phone: string; email: string; fileNumber: string;

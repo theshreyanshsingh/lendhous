@@ -20,8 +20,9 @@ function Row({ item, today }: { item: QueueItem; today: string }) {
   const due = item.due ? dueText(item.due, today) : null;
   return (
     <li data-testid="queue-item" data-key={item.key}>
-      <Link href={item.href} className="flex min-h-12 items-center gap-3 py-2 text-sm hover:bg-hover/60">
-        <span className="min-w-0 flex-1">
+      <Link href={item.href} className="flex min-h-12 flex-wrap items-center gap-x-3 gap-y-1 py-2 text-sm hover:bg-hover/60">
+        {/* On a phone the label takes the line and its deadline or clock sits under it. */}
+        <span className="min-w-0 basis-full sm:flex-1 sm:basis-auto">
           <span className="block font-medium">{item.label}</span>
           {item.deal && <span className="block truncate text-xs text-muted-foreground">{item.deal.loanNumber} · {item.deal.borrowerName} · {item.deal.address}</span>}
         </span>

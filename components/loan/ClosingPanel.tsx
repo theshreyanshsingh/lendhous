@@ -28,6 +28,7 @@ export function ClosingPanel({ deal }: { deal: Deal }) {
   return (
     <div className="space-y-4" data-testid="closing-panel">
       <PartnerFunds deal={deal} side="team" />
+      {deal.agents?.insurance && <p className="text-sm" data-testid="borrower-insurance-agent"><span className="text-muted-foreground">The borrower&apos;s insurance agent, for the binder:</span> {[deal.agents.insurance.name, deal.agents.insurance.company].filter(Boolean).join(", ")}<span className="text-muted-foreground"> · {[deal.agents.insurance.phone, deal.agents.insurance.email].filter(Boolean).join(" · ")}</span></p>}
       <Section title="Closing agent" right={open && deal.closing && !editingAgent ? <button type="button" className="text-xs text-link underline" onClick={() => setEditingAgent(true)}>Change</button> : undefined}>
         {deal.closing && !editingAgent ? (
           <div className="text-sm" data-testid="closing-agent">
@@ -36,6 +37,12 @@ export function ClosingPanel({ deal }: { deal: Deal }) {
           </div>
         ) : open ? (
           <div className="space-y-3">
+            {deal.agents?.title && (
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-[2px] bg-muted/50 p-2 text-sm" data-testid="borrower-title-agent">
+                <span className="min-w-0"><span className="text-muted-foreground">The borrower&apos;s title/escrow agent:</span> {[deal.agents.title.name, deal.agents.title.company].filter(Boolean).join(", ")}{deal.agents.title.phone || deal.agents.title.email ? <span className="text-muted-foreground"> · {[deal.agents.title.phone, deal.agents.title.email].filter(Boolean).join(" · ")}</span> : null}</span>
+                <button type="button" className="btn-ghost h-8! px-3! text-xs!" data-testid="use-borrower-agent" onClick={() => setAgent({ ...agent, company: deal.agents!.title!.company || deal.agents!.title!.name, contact: deal.agents!.title!.name, phone: deal.agents!.title!.phone, email: deal.agents!.title!.email })}>Use these details</button>
+              </div>
+            )}
             <div className="grid gap-3 sm:grid-cols-2">{field("company", "Title company or closing attorney")}{field("contact", "Closer")}{field("phone", "Phone", "tel")}{field("email", "Email", "email")}{field("fileNumber", "Their file number")}</div>
             <div className="flex flex-wrap gap-2">
               <button type="button" className="btn-primary" data-testid="save-agent" disabled={!agent.company.trim()} onClick={saveAgent}>Save</button>

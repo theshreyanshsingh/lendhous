@@ -50,6 +50,9 @@ export default function Pipeline() {
   const chooseTeam = (next: typeof team) => { setTeam(next); try { localStorage.setItem(TEAM_VIEW, next); } catch {} };
   // A list or a board of columns by stage, remembered per browser.
   const [layout, setLayout] = useState<"list" | "board">("list");
+  // On a phone the counts by kind and the filters fold away behind a tap; a desktop shows them.
+  const [kindsOpen, setKindsOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   useEffect(() => { try { if (localStorage.getItem(LAYOUT) === "board") setLayout("board"); } catch {} }, []);
   const chooseLayout = (next: typeof layout) => { setLayout(next); try { localStorage.setItem(LAYOUT, next); } catch {} };
   const rows = useMemo(() => s.deals.map((d) => ({ d, e: est(d.app) })).filter(({ d }) => inView(d, view) && (product === "all" || d.app.product === product) && (q === "" || (d.borrowerName + d.address + d.loanNumber).toLowerCase().includes(q.toLowerCase())) && (team === "all" || (team === "mine" ? isMine(d, viewer) : !d.team?.officer))), [s.deals, product, q, view, team, viewer]);
@@ -74,8 +77,8 @@ export default function Pipeline() {
       <WorkQueue />
       {attention.length > 0 && (
         <section className="glass min-w-0 px-4 py-3" data-testid="attention">
-          <h2 className="eyebrow mb-1">Everything waiting, by kind</h2>
-          <ul className="grid gap-x-6 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="flex items-baseline justify-between gap-2"><h2 className="eyebrow mb-1">Everything waiting, by kind</h2><button type="button" className="text-xs text-link sm:hidden" aria-expanded={kindsOpen} data-testid="attention-toggle" onClick={() => setKindsOpen(!kindsOpen)}>{kindsOpen ? "Hide" : `Show ${attention.length}`}</button></div>
+          <ul className={`grid gap-x-6 sm:grid-cols-2 xl:grid-cols-3 ${kindsOpen ? "" : "max-sm:hidden"}`}>
             {attention.map((item) => <li key={item.key} className="border-b border-border last:border-0 sm:border-0"><Link href={item.href} className="flex min-h-9 items-center justify-between gap-3 py-0.5 text-[13px] text-muted-foreground hover:text-foreground hover:underline" data-testid={`attention-${item.key}`}><span className="min-w-0">{item.label}{item.due && (() => { const due = dueText(item.due, today); return <span className={`ml-1.5 text-xs font-medium ${due.urgent ? "text-bad" : "text-warn"}`} data-testid="attention-due">{due.text}</span>; })()}</span><b className="shrink-0">{item.count}</b></Link></li>)}
           </ul>
         </section>
@@ -84,7 +87,8 @@ export default function Pipeline() {
         {counts.map((c) => <div key={c.code} className="glass min-w-0 px-2.5 py-2"><div className="min-h-8 text-xs leading-tight text-muted-foreground">{c.label}</div><div className="font-heading text-2xl font-semibold">{c.n}</div><div className="text-xs text-faint">{c.amt ? k(c.amt) : "—"}</div></div>)}
       </div>
       <div className="glass overflow-hidden">
-        <div className="flex flex-wrap gap-2 border-b border-border p-3">
+        <button type="button" className="flex w-full items-center justify-between border-b border-border px-3 py-3 text-sm sm:hidden" aria-expanded={filtersOpen} data-testid="filters-toggle" onClick={() => setFiltersOpen(!filtersOpen)}><span className="font-medium">Search and filters</span><span className="text-xs text-muted-foreground">{rows.length} loan{rows.length === 1 ? "" : "s"} · {filtersOpen ? "Hide" : "Show"}</span></button>
+        <div className={`flex-wrap gap-2 border-b border-border p-3 ${filtersOpen ? "flex" : "hidden sm:flex"}`}>
           <input className="desk-input w-full sm:w-56" placeholder="Search borrower, address, loan #" value={q} onChange={(e) => setQ(e.target.value)} />
           <select className="desk-input w-full sm:w-auto" value={product} onChange={(e) => setProduct(e.target.value)}><option value="all">All products</option>{Object.entries(productLabel).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
           <select className="desk-input w-full sm:w-auto" data-testid="pipeline-team" aria-label="Whose loans" value={team} onChange={(e) => chooseTeam(e.target.value as typeof team)}><option value="all">Everyone&apos;s loans</option><option value="mine">My loans</option><option value="unassigned">No loan officer</option></select>
