@@ -189,8 +189,10 @@ export function dealScore(i: ScoreInput, cfg: PricingConfig = currentPricing()) 
   const loc = (i.location === "core" ? 10 : i.location === "expansion" ? 5 : 0) * (w.location / 10);
   const dq = ({ appraisal: 5, bpo: 3, avm: 1, borrower_estimate: 1 } as const)[i.valuationSource] * (w.dataQuality / 5);
   const factors = { leverage: lev, credit, experience, economics: econ, liquidity: liq, location: loc, dataQuality: dq };
-  const score = Math.round(Object.values(factors).reduce((a, b) => a + b, 0));
-  const grade = cfg.score.grades.find((g) => score >= g.min)!.grade as Grade;
+  // A factor with nothing to go on yet (a rental with no rent, a borrower with no score) adds nothing rather than
+  // making the whole score unreadable.
+  const score = Math.round(Object.values(factors).reduce((a, b) => a + (Number.isFinite(b) ? b : 0), 0));
+  const grade = (cfg.score.grades.find((g) => score >= g.min) ?? cfg.score.grades[cfg.score.grades.length - 1]).grade as Grade;
   return { score, grade, factors };
 }
 export type Grade = "A" | "B" | "C" | "D" | "E";

@@ -44,7 +44,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const account = { name: user.name, email: user.email, roles: user.roleCodes.map((role) => ROLE_LABEL[role]), demo, canManageMembers, canViewAudit, canManageSettings, canManageFirms: canRouteCapital || canManageCapital, canManagePricing, canViewReports, canIssueLetters, canManageBrokers, staleJobs: stale.map((job) => JOB_LABEL[job]), openErrors, unread, offerSample: settings.offerSampleData !== false };
   return (
     // Every page, demo seats too, prices new quotes on the version the server does, so the two render the same.
-    <StoreProvider demo={demo} accountId={user.id} viewerName={user.name} viewerEmail={user.email} initialBook={demo ? undefined : await scopedBook(user)} pricing={(await loadPricing(), pricingPayload([]))} newLeads={newLeads} streetView={!demo && streetViewOn()} targets={targetsFrom(settings.slaTargets as never)}>
+    <StoreProvider demo={demo} accountId={user.id} viewerName={user.name} viewerEmail={user.email} initialBook={demo ? undefined : await scopedBook(user)} pricing={(await loadPricing(), pricingPayload([]))} newLeads={newLeads} streetView={!demo && streetViewOn()} targets={targetsFrom(settings.slaTargets as never)} paymentInstructions={demo ? "" : settings.paymentInstructions}>
       <Shell account={account} view={view}>{children}</Shell>
     </StoreProvider>
   );

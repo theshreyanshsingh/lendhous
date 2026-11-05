@@ -117,6 +117,12 @@ export interface Deal {
   referredBy?: { brokerId: string; on: string };
   /** The borrower's choice to show this loan on the website's "Recently funded" list (lib/showcase.ts). Off unless they turn it on. */
   showcase?: { on: boolean; by: string; at: string };
+  /** How the borrower says the loan will end, and when they said it (lib/exit-plans.ts). */
+  exitPlan?: import("./exit-plans").ExitPlan;
+  /** The days before maturity the borrower has been asked for that plan. */
+  exitAsked?: number[];
+  /** The LendHous loan this one refinances: it's paid off from this loan's money when this one funds. */
+  refinances?: string;
 }
 export interface ClosingAgent {
   company: string; contact: string; phone: string; email: string; fileNumber: string;

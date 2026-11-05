@@ -1387,3 +1387,27 @@ describe("the instant quote", () => {
     expect(await recentQuoteFor("quinn.quote@example.com", new Date(Date.now() + 31 * 86_400_000))).toBeNull();
   });
 });
+
+describe("borrower statements", () => {
+  it("are made once a month for each funded loan, kept sealed, emailed to the borrower, and open as a PDF", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const { demoBook } = await import("@/lib/book");
+    const store = await import("@/lib/borrower-statement-store");
+    const { borrowerStatementPdf } = await import("@/lib/borrower-statement-pdf");
+    const borrower = await prisma.user.create({ data: { email: "bo.statement@example.com", name: "Bo Statement", passwordHash: "x", accountStatus: "APPROVED", roles: { create: [{ role: "BORROWER" }] } } });
+    const d2 = demoBook().deals.find((deal) => deal.id === "d2")!;
+    await prisma.bookRecord.create({ data: { id: "deals:bstmt-loan", kind: "deals", data: JSON.parse(JSON.stringify({ ...d2, id: "bstmt-loan", loanNumber: "LH-7101", borrowerId: borrower.id })) } });
+    expect(await store.makeBorrowerStatements("2026-10")).toBeGreaterThanOrEqual(1);
+    expect(await store.makeBorrowerStatements("2026-10")).toBe(0);
+    const [row] = await store.statementsForLoan("bstmt-loan");
+    expect(row).toMatchObject({ month: "2026-10", paidOff: null });
+    const raw = JSON.stringify(((await prisma.$runCommandRaw({ find: "BorrowerStatement", filter: { _id: row.id } })) as { cursor: { firstBatch: unknown[] } }).cursor.firstBatch);
+    expect(raw).not.toContain("LH-7101");
+    expect(await prisma.notification.count({ where: { toEmail: "bo.statement@example.com", eventCode: "statement.ready" } })).toBe(1);
+    const opened = (await store.openBorrowerStatement(row.id))!;
+    expect(opened.row.borrowerId).toBe(borrower.id);
+    expect(opened.statement.loanNumber).toBe("LH-7101");
+    expect((await borrowerStatementPdf(opened.statement, "LendHous", "")).subarray(0, 5).toString()).toBe("%PDF-");
+    vi.restoreAllMocks();
+  });
+});

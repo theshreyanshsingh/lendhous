@@ -48,7 +48,7 @@ export async function signPortalApplication(raw: unknown, consents: Record<Conse
   const problem = signatureProblem(draft, consents, signatureName, servicingDate(new Date()));
   if (problem) return { error: problem };
   const loan = toLoan(draft);
-  const result = await runAction(user, { t: "submitApp", app: loan.app, address: loan.address, city: loan.city, zip: loan.zip, entityName: loan.entityName, exitStrategy: loan.exitStrategy, closingDate: loan.closingDate, sponsor: loan.sponsor });
+  const result = await runAction(user, { t: "submitApp", app: loan.app, address: loan.address, city: loan.city, zip: loan.zip, entityName: loan.entityName, exitStrategy: loan.exitStrategy, closingDate: loan.closingDate, sponsor: loan.sponsor, refinances: loan.refinances });
   if ("error" in result) return { error: result.error };
   const dealId = result.after.deals.find((item) => !result.before.deals.some((old) => old.id === item.id))!.id;
   await sendAlerts(result.before, result.after, result.action);

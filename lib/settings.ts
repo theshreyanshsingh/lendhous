@@ -12,6 +12,7 @@ const DEFAULTS: Omit<PlatformSettings, "updatedAt"> = {
   lenderAddress: "",
   lenderPhone: "",
   slaTargets: null,
+  paymentInstructions: "",
 };
 
 let cached: { at: number; value: Omit<PlatformSettings, "updatedAt"> } | null = null;

@@ -41,7 +41,7 @@ npm run db:seed && npm run smoke:real
 
 ## Built so far
 
-1. The title company's secure closing link. 2. Payoff letters under Fla. Stat. 701.04. 3. Term sheets. 4. Conditions. 5. Draw protections under Florida's lien law (ch. 713). 6. Reg B decline notices. 7. Reports at `/admin/reports` and the owners' daily email. Also property photos, self sign-up at `/login/signup`, one application for every borrower (the portal and the secure link share `components/BorrowerApplication.tsx`), and from the 2026-11-04 list: who works each loan, the pipeline and portal fixes, reliability, partners' and buyers' portfolios and statements, tax forms, pre-approval letters, the repeat-borrower fast track and the broker program (A to H, in git history before this file was rewritten), and I, the design pass (2026-11-05: photo-led loans, the loan timeline, one next step, status words, portfolio charts, the borrower tab bar, the folded staff menu, the Florida drawing and the opt-in "Recently funded" list). And J, the instant quote: terms before contact details, the cash to close itemized, the `/embed/quote` widget for brokers' and GT's own sites, and the quote funnel in the reports. And M, the work queue: each person's queue with legal deadlines and clocks against Settings' targets in Florida business hours, the pipeline board, and the speed scoreboard in the reports and the morning email.
+1. The title company's secure closing link. 2. Payoff letters under Fla. Stat. 701.04. 3. Term sheets. 4. Conditions. 5. Draw protections under Florida's lien law (ch. 713). 6. Reg B decline notices. 7. Reports at `/admin/reports` and the owners' daily email. Also property photos, self sign-up at `/login/signup`, one application for every borrower (the portal and the secure link share `components/BorrowerApplication.tsx`), and from the 2026-11-04 list: who works each loan, the pipeline and portal fixes, reliability, partners' and buyers' portfolios and statements, tax forms, pre-approval letters, the repeat-borrower fast track and the broker program (A to H, in git history before this file was rewritten), and I, the design pass (2026-11-05: photo-led loans, the loan timeline, one next step, status words, portfolio charts, the borrower tab bar, the folded staff menu, the Florida drawing and the opt-in "Recently funded" list). And J, the instant quote: terms before contact details, the cash to close itemized, the `/embed/quote` widget for brokers' and GT's own sites, and the quote funnel in the reports. And M, the work queue: each person's queue with legal deadlines and clocks against Settings' targets in Florida business hours, the pipeline board, and the speed scoreboard in the reports and the morning email. And Q, borrower statements: a monthly statement for every funded loan, emailed and kept, how to pay from Settings, and the year's interest for the 1098. And P, the maturity desk: borrowers' exit plans asked at 120, 90, 60 and 30 days, the rental-loan refinance started from the loan that pays the old one off when it funds, the desk on Servicing and the exits report.
 
 ## Where this list comes from (2026-11-05 CEO review)
 
@@ -114,24 +114,6 @@ Build them in this order, one at a time. Finish each to the definition of done b
 > - **Notification settings:** per person and per event, choose email, text, in-app or a daily summary. The notification list groups by loan and marks a group read at once.
 > - **Tests:** no text without consent, STOP stops everything, inbound texts match the right loan by number and are rejected when two loans' borrowers share it, and per-event settings.
 
-### P. Maturity desk and the bridge-to-rental refinance
-
-> **Prompt.** Every bridge and fix and flip loan ends in a sale, a refinance, an extension or trouble. Mortgage Automator reports maturities at 30/60/90 days; Kiavi refinances rentals after 90 days of ownership. LendHous makes DSCR loans, so its own borrowers finishing a rehab are its best rental-loan leads.
->
-> - **Outreach:** 120, 90, 60 and 30 days before maturity the borrower gets a message asking how they'll exit: selling (list price and date), refinancing (with LendHous or elsewhere), extending (the existing extension request) or paying off (the payoff letter). Their answer goes on the loan.
-> - **Refinance with LendHous:** one button starts a DSCR application prefilled from the loan (the repeat-borrower flow), with the rehab counted as track record and the new loan paying off the old one at closing.
-> - **Maturity desk:** a servicing view of loans by months to maturity, each with its exit and how sure it is, and loans with no answer at 60 days in My queue (M).
-> - **Reports:** the exit mix, refinances kept in-house, and extensions.
-> - **Tests:** the outreach schedule, the prefilled refinance, and the payoff of the old loan from the new loan's closing.
-
-### Q. Borrower money page and monthly statements
-
-> **Prompt.** Partners get monthly statements; borrowers don't. Mortgage Automator emails both every month.
->
-> - **Monthly borrower statement** on the 1st for every funded loan, by the nightly job, as a PDF (pdfkit, like the investor statements) and kept: principal, interest rate, payment due and date, payments received, fees, holdback and draws, late charges, and the payoff estimate with its date. Emailed with a link.
-> - **Money page** on the borrower's funded loan: what's due and when, how to pay (the verified payment instructions, and ACH once a vendor is chosen), history, statements, last year's 1098 if one was issued, and "Request a payoff letter".
-> - **Tests:** statement totals against the ledger, a borrower who can't open another borrower's statement, and the job running once per month.
-
 ### R. Investor buy-box and the money forecast
 
 > **Prompt.** Partners bid loan by loan today. Groundfloor's Auto Investor and Baseline's investor portal show the next step: investors say what they want and are offered it first. GT also needs to see whether there's enough money for what's coming.
@@ -196,4 +178,4 @@ These gate the biggest speed wins (terms from a real value, closing in days, mon
 - The broker agreement's wording, its borrower-protection window (`PROTECTION_MONTHS`, 12 months), and whether an independent broker's fee counts toward Florida's usury cap (the attorney).
 - Whether the CPA wants 1099-NECs for broker fees the title company pays out of the settlement, or only for fees LendHous pays itself.
 
-Build next, in this order, the features that need no vendor or outside decision: Q, P, N, S, then L. K, O and R wait on GT (sending documents to Anthropic, a Twilio account, and the attorney on partner first looks). Before writing code, read the files it touches and outline the plan in a few lines.
+Build next, in this order, the features that need no vendor or outside decision: N, S, then L. K, O and R wait on GT (sending documents to Anthropic, a Twilio account, and the attorney on partner first looks). Before writing code, read the files it touches and outline the plan in a few lines.

@@ -32,6 +32,8 @@ type Store = {
   streetView: boolean;
   /** How long things may wait, from Settings (lib/sla.ts). */
   targets: Targets;
+  /** How borrowers pay, from Settings: shown on funded loans. */
+  paymentInstructions: string;
   viewerName: string;
   /** Who's signed in, to tell their own loans apart. */
   viewer: { id: string; email: string };
@@ -48,7 +50,7 @@ function outer(s: Book, a: Outer): Book {
   return a.state;
 }
 
-export function StoreProvider({ demo, accountId, viewerName, viewerEmail = "", initialBook, pricing, newLeads = 0, streetView = false, targets = SLA_TARGETS, children }: { demo: boolean; accountId: string; viewerName: string; viewerEmail?: string; initialBook?: Book; pricing?: PricingPayload; newLeads?: number; streetView?: boolean; targets?: Targets; children: React.ReactNode }) {
+export function StoreProvider({ demo, accountId, viewerName, viewerEmail = "", initialBook, pricing, newLeads = 0, streetView = false, targets = SLA_TARGETS, paymentInstructions = "", children }: { demo: boolean; accountId: string; viewerName: string; viewerEmail?: string; initialBook?: Book; pricing?: PricingPayload; newLeads?: number; streetView?: boolean; targets?: Targets; paymentInstructions?: string; children: React.ReactNode }) {
   const [s, local] = useReducer(outer, demo, (isDemo: boolean) => { adoptPricing(pricing); adoptPricing(initialBook?.pricing); return isDemo ? demoBook() : initialBook ?? emptyBook(); });
   const [hydrated, setHydrated] = useState(false);
   const [error, setError] = useState("");
@@ -156,7 +158,7 @@ export function StoreProvider({ demo, accountId, viewerName, viewerEmail = "", i
   }, []);
 
   const viewer = useMemo(() => ({ id: accountId, email: viewerEmail }), [accountId, viewerEmail]);
-  const value = useMemo(() => ({ s, dispatch, uploadDoc, uploadCondition, uploadLienFile, uploadPropertyPhoto, uploadPhoto, applyReply, newLeads, local: isLocal, demo, streetView: streetView && !isLocal, targets, viewerName, viewer, error, clearError: () => setError("") }), [s, dispatch, uploadDoc, uploadCondition, uploadLienFile, uploadPropertyPhoto, uploadPhoto, applyReply, newLeads, isLocal, demo, streetView, targets, viewerName, viewer, error]);
+  const value = useMemo(() => ({ s, dispatch, uploadDoc, uploadCondition, uploadLienFile, uploadPropertyPhoto, uploadPhoto, applyReply, newLeads, local: isLocal, demo, streetView: streetView && !isLocal, targets, paymentInstructions, viewerName, viewer, error, clearError: () => setError("") }), [s, dispatch, uploadDoc, uploadCondition, uploadLienFile, uploadPropertyPhoto, uploadPhoto, applyReply, newLeads, isLocal, demo, streetView, targets, paymentInstructions, viewerName, viewer, error]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 export function useStore() { const c = useContext(Ctx); if (!c) throw new Error("no store"); return c; }

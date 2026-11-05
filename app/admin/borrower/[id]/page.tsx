@@ -25,6 +25,8 @@ import { LoanTimeline } from "@/components/loan/LoanTimeline";
 import { RehabProgress } from "@/components/loan/RehabProgress";
 import { PropertyPicture } from "@/components/PropertyPicture";
 import { Showcase } from "@/components/loan/Showcase";
+import { LoanMoney } from "@/components/loan/LoanStatements";
+import { ExitPlanCard } from "@/components/loan/ExitPlanCard";
 import { interestBasis, PLAIN_RATIO } from "@/lib/status-words";
 import { Badge, Section, Stat, usd, pct, productLabel, statusLabel } from "@/components/ui";
 import type { DocStatus } from "@/lib/mockData";
@@ -100,8 +102,10 @@ export default function BorrowerLoan() {
           </Section>
           {funded && e.holdback > 0 && <RehabProgress deal={d} />}
           {funded && e.holdback > 0 && <DrawPanel deal={d} />}
+          {funded && <ExitPlanCard deal={d} side="client" />}
+          {(funded || d.status === "paid_off") && <LoanMoney deal={d} />}
           {funded && <div id="payments"><PaymentsPanel deal={d} /></div>}
-          {funded && <Extensions deal={d} side="borrower" />}
+          {funded && <div id="extensions"><Extensions deal={d} side="borrower" /></div>}
           {d.status === "paid_off" && <PaidOff deal={d} side="borrower" />}
           {d.closing && PRE_FUNDING.includes(d.status) && (
             <Section title="Closing">

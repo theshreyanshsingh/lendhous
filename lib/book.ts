@@ -1,5 +1,6 @@
 // The loan book's rules: one set of records and one reducer, with no React and no database. Demo seats and sample data
 // run it in the browser; real accounts run it on the server (lib/book-store.ts), after lib/book-access.ts checks them.
+import { CONFIDENCE, EXIT_CHOICES, exitPlanProblem, type ExitPlan } from "./exit-plans";
 import { evaluate, fundedBalances, round2, type Application, type BuyBox } from "./engine";
 import { countedDeals, missingDocs, needsList, withSponsor } from "./credit";
 import { approversNeeded, approvalError, defaultScope, drawRequestError, releaseToScope, reviewDraw } from "./draws";
@@ -22,7 +23,8 @@ import { addDays, DEMO_SERVICING_DAY, firstDueDate, ledger, maturityOf, payoffFo
 export interface Book { partnerId: string; buyerId: string; brokerId: string; borrowerId: string; loanPrefix: string; deals: Deal[]; bids: Bid[]; partners: Partner[]; buyers: LoanBuyer[]; brokers: Broker[]; sales: LoanSale[]; offers: LoanOffer[]; draws: DrawRequest[]; photoRequests: PhotoRequest[]; payoffs: PayoffRequest[]; messages: LoanMessage[]; sources: CapitalSource[]; conditionLibrary: ConditionTemplate[]; audit: { at: string; text: string }[]; sample?: boolean; /** The pricing its loans use, as sent to a browser. Not part of the records. */ pricing?: PricingPayload }
 
 export type BookAction =
-  | { t: "submitApp"; app: Application; address: string; city: string; zip: string; entityName: string; exitStrategy: string; closingDate?: string; client?: { name: string; borrowerId?: string; brokerId?: string; brokerPoints?: number }; source?: string; sponsor?: Sponsor }
+  | { t: "submitApp"; app: Application; address: string; city: string; zip: string; entityName: string; exitStrategy: string; closingDate?: string; client?: { name: string; borrowerId?: string; brokerId?: string; brokerPoints?: number }; source?: string; sponsor?: Sponsor; refinances?: string }
+  | { t: "setExitPlan"; dealId: string; plan: Omit<ExitPlan, "by" | "at">; by: string }
   | { t: "saveSponsor"; dealId: string; sponsor: Sponsor }
   /** A signed borrower application, applied to a loan already started. Only the server does it, from the signed link. */
   | { t: "applyBorrowerInfo"; dealId: string; app: Application; address: string; city: string; zip: string; entityName: string; exitStrategy: string; sponsor: Sponsor; signedBy: string }
@@ -323,8 +325,11 @@ function apply(s: Book, a: BookAction): Book {
       const d: Deal = { id: `d${uid()}`, loanNumber: `${s.loanPrefix}${n}`, borrowerId, borrowerName: a.client?.name || "Alex Sample (FAKE)", entityName: a.entityName || "Sample Flips LLC (FAKE)", address: a.address || "100 New Demo St", city: a.city || "Hollywood", zip: a.zip || "33020", app, status: "submitted", daysInStage: 0, capitalStatus: "not_started", allocations: [], teaserSentTo: [], source: a.source ?? (a.client?.brokerId ? "broker" : "web_quote"), brokerId: a.client?.brokerId ?? protectedBy?.brokerId, brokerPoints: a.client?.brokerPoints, ...(protectedBy ? { referredBy: protectedBy } : {}), scope: defaultScope(app.product, evaluate(app).holdback),
         // The day they asked to close, or a month out.
         docs: trackDocCarried(carryOverDocs(needsList(app, sponsor), earlier, { entityName: a.entityName, sponsor }, serviceDay(s)), sponsor), sponsor, exitStrategy: a.exitStrategy, closingDate: a.closingDate && /^\d{4}-\d{2}-\d{2}$/.test(a.closingDate) ? a.closingDate : addDays(serviceDay(s), 30) };
+      // A refinance of the borrower's own funded LendHous loan: that loan is paid off from this one when it funds.
+      const replaces = a.refinances ? s.deals.find((item) => item.id === a.refinances && item.borrowerId === borrowerId && SERVICED.includes(item.status)) : undefined;
+      if (replaces) d.refinances = replaces.id;
       const carried = d.docs.filter((item) => item.carriedFrom).length;
-      return { ...s, deals: [d, ...s.deals], audit: log(`Application ${d.loanNumber} submitted${a.client?.brokerId ? " by broker" : a.client ? " by staff" : " by borrower"}${history?.loans ? `; repeat borrower, ${history.loans} loan${history.loans === 1 ? "" : "s"} paid as agreed` : ""}${carried ? `; ${carried} document${carried === 1 ? "" : "s"} carried over` : ""}`) };
+      return { ...s, deals: [d, ...s.deals], audit: log(`Application ${d.loanNumber} submitted${replaces ? `, refinancing ${replaces.loanNumber}` : ""}${a.client?.brokerId ? " by broker" : a.client ? " by staff" : " by borrower"}${history?.loans ? `; repeat borrower, ${history.loans} loan${history.loans === 1 ? "" : "s"} paid as agreed` : ""}${carried ? `; ${carried} document${carried === 1 ? "" : "s"} carried over` : ""}`) };
     }
     case "approveFunding": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
@@ -507,7 +512,12 @@ function apply(s: Book, a: BookAction): Book {
       // Clearing conditions starts the title company's checklist and adds the library's standard conditions (Spec 4.3).
       const docs = stage.to === "conditions" ? [...deal.docs, ...missingClosingItems(deal)] : deal.docs;
       const conditions = stage.to === "conditions" ? [...(deal.conditions ?? []), ...missingStandard(deal, libraryOf(s)).map((template) => fromTemplate(template, `cond${uid()}`, "LendHous", today, now()))] : deal.conditions;
-      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, status: stage.to, daysInStage: 0, docs, conditions, ...(funding ? { capitalStatus: "funded" as const, closingDate: today, nextPaymentDue: firstDueDate(today) } : {}) })), audit: log(`${deal.loanNumber}: moved to ${stage.to.replace(/_/g, " ")}`) };
+      const advanced: Book = { ...s, deals: upd(a.dealId, (d) => ({ ...d, status: stage.to, daysInStage: 0, docs, conditions, ...(funding ? { capitalStatus: "funded" as const, closingDate: today, nextPaymentDue: firstDueDate(today) } : {}) })), audit: log(`${deal.loanNumber}: moved to ${stage.to.replace(/_/g, " ")}`) };
+      // A refinance's money pays off the LendHous loan it replaces, for what that loan owes on the day it funds.
+      const replaced = funding && deal.refinances ? advanced.deals.find((d) => d.id === deal.refinances && SERVICED.includes(d.status)) : undefined;
+      if (!replaced) return advanced;
+      const owed = payoffOn(settle(replaced, today), today).quote.total;
+      return apply(advanced, { t: "recordPayoff", dealId: replaced.id, amount: owed, receivedOn: today, method: "other", reference: `Refinanced by ${deal.loanNumber}`, by: "LendHous (refinance)" });
     }
     case "repriceLoan": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
@@ -735,6 +745,12 @@ function apply(s: Book, a: BookAction): Book {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
       if (!deal.propertyPhotos?.some((photo) => photo.id === a.photoId)) return s;
       return { ...s, deals: upd(a.dealId, (d) => ({ ...d, propertyPhotos: d.propertyPhotos!.filter((photo) => photo.id !== a.photoId) })), audit: log(`${deal.loanNumber}: a photo of the property removed`) };
+    }
+    case "setExitPlan": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (exitPlanProblem(a.plan)) return s;
+      const plan: ExitPlan = { choice: a.plan.choice, confidence: a.plan.confidence, note: a.plan.note.trim(), ...(a.plan.choice === "sell" ? { listPrice: a.plan.listPrice, saleBy: a.plan.saleBy } : {}), ...(a.plan.choice === "refi_other" && a.plan.lender?.trim() ? { lender: a.plan.lender.trim() } : {}), by: a.by, at: now() };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, exitPlan: plan })), audit: log(`${deal.loanNumber}: exit plan set by ${a.by}: ${EXIT_CHOICES[plan.choice].toLowerCase()} (${CONFIDENCE[plan.confidence].toLowerCase()})`) };
     }
     case "setShowcase": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;

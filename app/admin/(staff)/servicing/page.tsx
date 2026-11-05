@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { PageIntro } from "@/components/page-intro";
+import { MaturityDesk } from "@/components/MaturityDesk";
 import { RecordPayment } from "@/components/loan/RecordPayment";
 import { RecordPayoff } from "@/components/loan/RecordPayoff";
 import { dueLine, PayoffRequestCard } from "@/components/loan/PayoffRequests";
@@ -44,6 +45,7 @@ export default function Servicing() {
   return (
     <div className="space-y-4">
       <PageIntro eyebrow="Servicing" title="Loan servicing" lede="Every funded loan: what's due, what's late, what's maturing and who's paying off." />
+      <MaturityDesk />
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <div className="glass p-4"><Stat label="Loans" value={loans.length} /></div>
         <div className="glass p-4"><Stat label="Balance" value={k(loans.reduce((sum, deal) => sum + balanceOf(deal), 0))} /></div>

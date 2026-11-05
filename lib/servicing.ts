@@ -12,6 +12,8 @@ type ServicingTerms = ReturnType<typeof servicingTermsOf>;
 
 /** The statuses a loan is serviced in: it has money out and payments coming due. */
 export const SERVICED = ["funded", "servicing_current", "servicing_delinquent", "matured", "default"];
+/** PLACEHOLDER: the days before maturity a short-term loan's borrower is asked how they'll pay it off (lib/exit-plans.ts). */
+export const EXIT_OUTREACH_DAYS = [120, 90, 60, 30];
 
 export const METHODS: Record<PaymentMethod, string> = { wire: "Wire", ach: "ACH", check: "Check", other: "Other" };
 
@@ -183,7 +185,10 @@ export function settle(deal: Deal, asOf: string): Deal {
   const bills = l.rows.filter((row) => row.status !== "boarded" && (row.due <= day || row.paidOn)).map((row) => ({ due: row.due, amount: row.amount }));
   const status: Deal["status"] = deal.status === "default" ? "default" : l.matured ? "matured" : l.daysPastDue >= rules.delinquentDays ? "servicing_delinquent" : deal.status === "funded" ? "funded" : "servicing_current";
   const notices = [...new Set([...(deal.maturityNotices ?? []), ...rules.maturityNoticeDays.filter((days) => l.daysToMaturity <= days)])].sort((a, b) => b - a);
-  return { ...deal, bills, boardedThrough: boardedFrom(deal), servicedThrough: day, nextPaymentDue: l.nextDue, paymentsLate: l.paymentsLate, status, daysInStage: status === deal.status ? deal.daysInStage : 0, maturityNotices: notices.length ? notices : undefined };
+  // A short-term loan with no exit plan yet is asked for one at each outreach day it reaches.
+  const asking = deal.app.product !== "dscr" && !deal.exitPlan && status !== "default";
+  const asked = asking ? [...new Set([...(deal.exitAsked ?? []), ...EXIT_OUTREACH_DAYS.filter((days) => l.daysToMaturity <= days)])].sort((a, b) => b - a) : deal.exitAsked ?? [];
+  return { ...deal, bills, boardedThrough: boardedFrom(deal), servicedThrough: day, nextPaymentDue: l.nextDue, paymentsLate: l.paymentsLate, status, daysInStage: status === deal.status ? deal.daysInStage : 0, exitAsked: asked.length ? asked : undefined, maturityNotices: notices.length ? notices : undefined };
 }
 
 export const paymentsMade = (deal: Deal) => ledger(deal).paymentsMade;

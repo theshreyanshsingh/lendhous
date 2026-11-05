@@ -68,6 +68,8 @@ export function BorrowerApplication({ token, initial, startStep, savedAt, office
   const estimate = useMemo(() => {
     if (!inPortal || !num(draft.loan.purchasePrice)) return null;
     const loan = toLoan(draft);
+    // A rental loan is sized on its rent, so there's nothing to estimate until the rent is in.
+    if (loan.app.product === "dscr" && !num(draft.loan.monthlyRent)) return null;
     const scored = { ...(draft.guarantors.some((g) => num(g.fico)) ? withSponsor(loan.app, loan.sponsor, new Date()) : { ...loan.app, fico: 700 }), ...(portal?.repeat ? { repeat: portal.repeat } : {}) };
     return { e: evaluate(scored), product: loan.app.product, assumed: !draft.guarantors.some((g) => num(g.fico)), fico: scored.fico, deals: scored.verifiedDeals, needs: needsList(scored, loan.sponsor) };
   }, [draft, inPortal, portal?.repeat]);

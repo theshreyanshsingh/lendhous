@@ -27,6 +27,8 @@ export type AppDraft = {
   vesting: { hasLlc: boolean | null; entityName: string; entityState: string; ein: string; address: AddressValue };
   guarantors: GuarantorInfo[];
   trackRecord: TrackDeal[];
+  /** The borrower's own funded LendHous loan this application refinances (lib/exit-plans.ts). */
+  refinanceOf?: string;
 };
 
 const blankAddress = (): AddressValue => ({ street: "", city: "", state: "", zip: "", county: "" });
@@ -81,6 +83,25 @@ export function completeDraft(saved: unknown): AppDraft {
     loan: { ...base.loan, ...draft.loan }, vesting: { ...base.vesting, ...draft.vesting, address: { ...base.vesting.address, ...draft.vesting?.address } },
     guarantors: (draft.guarantors?.length ? draft.guarantors : base.guarantors).slice(0, 4).map((item) => ({ ...blankGuarantor(), ...item, home: { ...blankAddress(), ...item.home }, mailing: { ...blankAddress(), ...item.mailing }, answers: { ...item.answers } })),
     trackRecord: (draft.trackRecord ?? []).slice(0, 40),
+    ...(typeof draft.refinanceOf === "string" && draft.refinanceOf ? { refinanceOf: draft.refinanceOf.slice(0, 120) } : {}),
+  };
+}
+
+/**
+ * A rental loan that pays off the borrower's short-term LendHous loan on the same property: their entity, guarantors and
+ * past deals from it (or from their last signed application), the property as it is, its value after the work, and the
+ * rehab counted as a project they finished. The new loan pays the old one off when it funds.
+ */
+export function refinanceDraft(deal: import("./mockData").Deal, account: { name: string; email: string; phone?: string | null }, today: string, signed?: AppDraft | null): AppDraft {
+  const start = signed ? { ...repeatDraft(signed), contact: draftForAccount(account).contact } : draftFromLoan(deal, account);
+  const original = draftFromDeal(deal, account.email);
+  const value = deal.app.arv || deal.app.purchasePrice;
+  const done = { id: `refi-${deal.id}`, address: `${deal.address}, ${deal.city}`, kind: deal.app.product === "ground_up" ? ("build" as const) : ("flip" as const), completed: today, purchasePrice: deal.app.purchasePrice };
+  return {
+    ...start, loanType: "dscr", refinanceOf: deal.id,
+    property: { ...original.property, occupancy: "tenant" },
+    loan: { ...blankDraft().loan, purpose: "refinance", purchasePrice: text(deal.app.purchasePrice), asIsValue: text(value), exit: "hold", plan: `Refinance ${deal.loanNumber} into a rental loan once the work is done.` },
+    trackRecord: start.trackRecord.some((item) => item.address.startsWith(deal.address)) ? start.trackRecord : [...start.trackRecord, done],
   };
 }
 
@@ -236,6 +257,7 @@ export function toLoan(draft: AppDraft) {
     entityName: draft.vesting.hasLlc ? draft.vesting.entityName.trim() : `${borrower} (LLC to be formed)`,
     exitStrategy: { sell: "Sell", refinance: "Refi", hold: "Hold", cash: "Pay off in cash", "": "Sell" }[l.exit],
     closingDate: /^\d{4}-\d{2}-\d{2}$/.test(l.closeDate) ? l.closeDate : undefined,
+    refinances: draft.refinanceOf,
   };
 }
 

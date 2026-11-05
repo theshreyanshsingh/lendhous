@@ -4,7 +4,7 @@ import { nextStepFor } from "@/lib/next-step";
 import type { Deal } from "@/lib/mockData";
 
 const URGENT = ["late", "default"];
-const ASKING = ["sign", "finish", "send"];
+const ASKING = ["sign", "finish", "send", "exit"];
 
 /** The borrower's one next step on a loan, at the top of the loan page (lib/next-step.ts). */
 export function NextStepCard({ deal }: { deal: Deal }) {

@@ -67,7 +67,8 @@ const buyBox = z.object({
 });
 
 const schema = z.discriminatedUnion("t", [
-  z.object({ t: z.literal("submitApp"), app: application, address: text(200), city: text(100), zip: text(10), entityName: text(200), exitStrategy: text(40), closingDate: date.optional(), client: z.object({ name: text(120), borrowerId: id.optional(), brokerId: id.optional(), brokerPoints: z.number().min(0).max(5).optional() }).optional(), source: text(40).optional(), sponsor: sponsor.optional() }),
+  z.object({ t: z.literal("submitApp"), app: application, address: text(200), city: text(100), zip: text(10), entityName: text(200), exitStrategy: text(40), closingDate: date.optional(), client: z.object({ name: text(120), borrowerId: id.optional(), brokerId: id.optional(), brokerPoints: z.number().min(0).max(5).optional() }).optional(), source: text(40).optional(), sponsor: sponsor.optional(), refinances: id.optional() }),
+  z.object({ t: z.literal("setExitPlan"), dealId: id, by: z.string().max(120), plan: z.object({ choice: z.enum(["sell", "refi_lendhous", "refi_other", "extend", "payoff"]), confidence: z.enum(["sure", "likely", "unsure"]), listPrice: money.optional(), saleBy: date.optional(), lender: text(120).optional(), note: text(500) }) }),
   z.object({ t: z.literal("saveSponsor"), dealId: id, sponsor }),
   z.object({ t: z.literal("verifyTrackDeal"), dealId: id, trackId: id, verified: z.boolean() }),
   z.object({ t: z.literal("signOffCredit"), dealId: id, by: z.string().max(120), note: text(2000) }),

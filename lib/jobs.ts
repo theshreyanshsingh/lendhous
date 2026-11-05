@@ -20,6 +20,7 @@ import { pastTarget } from "@/lib/work-queue";
 import { recentErrors, recordError } from "@/lib/errors";
 import { previousMonth } from "@/lib/investor-statements";
 import { makeStatements } from "@/lib/statement-store";
+import { makeBorrowerStatements } from "@/lib/borrower-statement-store";
 import { prisma } from "@/lib/prisma";
 import { SERVICED, servicingDate } from "@/lib/servicing";
 import { getSettings } from "@/lib/settings";
@@ -118,10 +119,10 @@ async function checkSanctions(now: Date) {
   return `list of ${refreshed.names} names${refreshed.changed ? " (updated)" : ""}; screened ${active.length} loans; ${flagged} possible matches`;
 }
 
-// Partners' and buyers' statements for last month (Spec P8, P9). Every night until each is made, so a missed 1st catches up.
+// Partners', buyers' and borrowers' statements for last month (Spec P8, P9, 8.6). Every night until each is made, so a missed 1st catches up.
 async function makeMonthlyStatements(now: Date) {
   const month = previousMonth(servicingDate(now));
-  return `${await makeStatements(month)} new statements for ${month}`;
+  return `${await makeStatements(month)} new investor statements and ${await makeBorrowerStatements(month)} new borrower statements for ${month}`;
 }
 
 // The owners' morning email (Spec 11): yesterday's applications, term sheets and fundings, what's waiting on the team,

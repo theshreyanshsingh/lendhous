@@ -313,6 +313,8 @@ model PlatformSettings {
   lenderPhone                   String   @default("")
   // How long things may wait, in hours, by kind (lib/sla.ts). Unset uses the PLACEHOLDER targets there.
   slaTargets                    Json?
+  // How borrowers pay: LendHous's own receiving instructions, shown on funded loans and statements. Blank says to call.
+  paymentInstructions           String   @default("")
   updatedAt                     DateTime @updatedAt
 }
 
@@ -469,6 +471,21 @@ model InvestorStatement {
 
   @@unique([investorType, investorId, month])
   @@index([investorId])
+}
+
+// A borrower's monthly statement for one funded loan (lib/borrower-statements.ts), sealed as it was made, one per loan
+// and month. borrowerId is the account it belongs to.
+model BorrowerStatement {
+  id         String    @id @default(uuid()) @map("_id")
+  dealId     String
+  borrowerId String
+  month      String
+  data       Json
+  createdAt  DateTime  @default(now())
+  emailedAt  DateTime?
+
+  @@unique([dealId, month])
+  @@index([borrowerId])
 }
 
 // A pre-approval or proof-of-funds letter (lib/letters.ts). Who it's for, its figures and its verify code are sealed;

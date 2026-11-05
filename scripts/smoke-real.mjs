@@ -26,7 +26,7 @@ const wipe = async () => {
   await prisma.document.deleteMany({ where: { ownerType: { in: ["LOAN", "LEAD", "BROKER"] } } });
   await prisma.lead.deleteMany();
   await prisma.quoteCount.deleteMany();
-  await prisma.platformSettings.updateMany({ data: { slaTargets: null } });
+  await prisma.platformSettings.updateMany({ data: { slaTargets: null, paymentInstructions: "" } });
   await prisma.pricingVersion.deleteMany();
   await prisma.sanctionsList.deleteMany();
   await prisma.photoLink.deleteMany();
@@ -43,6 +43,7 @@ const wipe = async () => {
   await prisma.jobRun.deleteMany({ where: { runKey: { startsWith: "smoke-" } } });
   await prisma.errorEvent.deleteMany({ where: { hash: { startsWith: "smoke" } } });
   await prisma.investorStatement.deleteMany();
+  await prisma.borrowerStatement.deleteMany();
 };
 await wipe();
 // As if the nightly jobs ran this morning, so the owners' panel has no warning until the script takes one away.
@@ -242,6 +243,7 @@ try {
   await owner.getByTestId("setting-signup").check();
   // The work queue's targets: GT sets how long a new application may wait, and it sticks.
   await owner.getByTestId("setting-sla-firstLook").fill("3");
+  await owner.getByTestId("setting-pay").fill("Wire to: LendHous Servicing (SMOKE)\nReference: your loan number");
   await owner.getByRole("button", { name: "Save settings" }).click();
   await seen(owner.getByText("Settings saved."));
   ok("an owner sets how long things may wait", (await owner.getByTestId("setting-sla-firstLook").inputValue()) === "3");
@@ -840,11 +842,12 @@ try {
   ok("the borrower sends both", (await borrower.getByTestId("lien-party-status").getByText("We're checking it").count()) === 2);
   ok("the waivers are stored encrypted", (await prisma.document.count({ where: { documentType: "lien_waiver" } })) === 2 && !(await rawRows("Document")).includes("supplier-waiver.pdf"));
   await go(owner, "/admin/draws");
+  // Each check saves and redraws the card, so wait for that before the next one.
   for (let left = await card.getByTestId("check-waiver").count(); left > 0; left = await card.getByTestId("check-waiver").count()) {
     await card.getByTestId("waiver-amount").first().fill("5000");
     await card.getByTestId("waiver-through").first().fill(today);
     await card.getByTestId("check-waiver").first().click();
-    await owner.waitForTimeout(250);
+    for (let tries = 0; tries < 40 && (await card.getByTestId("check-waiver").count()) === left; tries++) await owner.waitForTimeout(250);
   }
   ok("the team checks them against the statutory form, which frees the draw", await seen(card.getByTestId("draw-holds").getByText(/Nothing under the lien law/)));
   await card.getByTestId("release-draw").click();
@@ -1133,6 +1136,42 @@ try {
   ok("another firm can't open it", (await partner.request.get(BASE + statementHref)).status() === 404);
   ok("nor can anyone signed out", (await (await browser.newContext()).request.get(BASE + statementHref)).status() === 401);
   ok("the buyer was emailed that it's ready", (await prisma.notification.count({ where: { toEmail: `buyer@${DOMAIN}`, eventCode: "statement.ready" } })) === 1);
+  // The borrower's own monthly statement for the loan, made the same night, with how to pay from Settings.
+  await go(borrower, `/admin/borrower/${dealId}`);
+  const loanStatement = borrower.getByTestId("loan-statement-row").first();
+  ok("the borrower's monthly statement shows on their loan", await seen(loanStatement));
+  ok("with how to pay, as the owner set it in Settings", (await borrower.getByTestId("pay-instructions").innerText()).includes("LendHous Servicing (SMOKE)"));
+  const loanStatementHref = await loanStatement.getByTestId("loan-statement-pdf").getAttribute("href");
+  const loanStatementPdf = await borrower.request.get(BASE + loanStatementHref);
+  ok("it downloads as a PDF", loanStatementPdf.status() === 200 && (await loanStatementPdf.body()).subarray(0, 5).toString() === "%PDF-");
+  ok("another borrower can't open it", (await other.request.get(BASE + loanStatementHref)).status() === 404);
+  ok("nor can anyone signed out", (await (await browser.newContext()).request.get(BASE + loanStatementHref)).status() === 401);
+  ok("the borrower was emailed that it's ready", (await prisma.notification.count({ where: { toEmail: `borrower@${DOMAIN}`, eventCode: "statement.ready" } })) === 1);
+  ok("its figures are encrypted in the database", !(await rawRows("BorrowerStatement")).includes("LH-1001"));
+  // How the loan will end: a sale needs its price and date; then the borrower changes their mind and refinances with LendHous.
+  await borrower.getByTestId("exit-choice-sell").check();
+  await borrower.getByTestId("exit-confidence-likely").check();
+  await borrower.getByTestId("exit-save").click();
+  ok("a sale plan needs its list price", (await seen(borrower.getByTestId("exit-error"))) && (await borrower.getByTestId("exit-error").innerText()).includes("list"));
+  await borrower.getByTestId("exit-list-price").fill("540000");
+  await borrower.getByTestId("exit-sale-by").fill(new Date(Date.now() + 200 * 86_400_000).toISOString().slice(0, 10));
+  await borrower.getByTestId("exit-save").click();
+  ok("the borrower tells LendHous how the loan will end", (await seen(borrower.getByTestId("exit-summary"))) && (await borrower.getByTestId("exit-summary").innerText()).includes("$540,000"));
+  await go(owner, "/admin/servicing");
+  ok("the team sees it on the maturity desk", (await seen(owner.getByTestId("desk-row").filter({ hasText: "LH-1001" }).getByTestId("desk-plan"))) && (await owner.getByTestId("desk-row").filter({ hasText: "LH-1001" }).innerText()).includes("Selling it"));
+  await go(borrower, `/admin/borrower/${dealId}`);
+  await borrower.getByTestId("exit-change").click();
+  await borrower.getByTestId("exit-choice-refi_lendhous").check();
+  await borrower.getByTestId("exit-confidence-sure").check();
+  await borrower.getByTestId("exit-save").click();
+  await seen(borrower.getByTestId("exit-refi-start"));
+  await borrower.getByTestId("exit-refi-start").click();
+  ok("refinancing with LendHous starts a rental-loan application from the loan", (await seen(borrower.getByTestId("app-refinance"))) && (await borrower.getByTestId("app-loan-dscr").getAttribute("aria-checked")) === "true");
+  // This account has no phone on file, so the first page asks for one, as it did on the first application.
+  if (!(await borrower.getByTestId("app-phone").inputValue())) await borrower.getByTestId("app-phone").fill("(555) 010-0500");
+  await borrower.getByTestId("app-next").click();
+  ok("on the same property", (await borrower.getByTestId("app-address-street").inputValue()) === "100 Real Street");
+  await go(borrower, `/admin/borrower/${dealId}`);
 
   // A broker signs the broker agreement with the firm's papers; an owner approves it before any deal goes in. One of its
   // owners is close to a name on the sanctions list, so approving takes a reason.
@@ -1298,6 +1337,9 @@ try {
   // takes the repeat cut off the new one's price.
   await go(borrower, `/admin/borrower/${dealId}`);
   ok("the funded loan offers the next one, with what paying as agreed earns", (await borrower.getByTestId("repeat-status").innerText()).includes("1 LendHous loan paid as agreed takes 0.25% off"));
+  // The refinance application the borrower opened earlier would be picked up here instead; this step is about a
+  // fresh one, so drop that unfinished draft first.
+  await prisma.applicationLink.deleteMany({ where: { userId: (await prisma.user.findUniqueOrThrow({ where: { email: `borrower@${DOMAIN}` } })).id, status: "open", dealId: null } });
   await borrower.getByTestId("new-loan-from").click();
   await borrower.waitForURL("**/admin/apply?from=*");
   ok("the next application starts from the one signed for LH-1001", (await seen(borrower.getByTestId("app-started-from").getByText(/LH-1001/))) && (await borrower.getByTestId("app-phone").inputValue()) === "(555) 010-0500");

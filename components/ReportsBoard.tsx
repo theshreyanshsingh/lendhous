@@ -10,6 +10,7 @@ import { addDays } from "@/lib/servicing";
 import { useStore } from "@/lib/store";
 import { QuoteFunnel } from "@/components/QuoteFunnel";
 import { SpeedScoreboard } from "@/components/SpeedScoreboard";
+import { ExitsReport } from "@/components/ExitsReport";
 
 const RANGES = [
   { key: "30d", label: "Last 30 days" },
@@ -181,6 +182,7 @@ export function ReportsBoard() {
       </Section>
 
       <SpeedScoreboard period={period} />
+      <ExitsReport period={period} />
       <QuoteFunnel period={period} />
 
       <Section title="Capital today">

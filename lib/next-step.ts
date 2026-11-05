@@ -4,9 +4,10 @@ import { shortDay } from "./format";
 import { isClosedApplication } from "./loan-exits";
 import type { Deal } from "./mockData";
 import { ledger, SERVICED } from "./servicing";
+import { exitAskOpen } from "./exit-plans";
 
 export type NextStep = {
-  kind: "sign" | "finish" | "send" | "late" | "pay" | "default" | "wait" | "done";
+  kind: "sign" | "finish" | "send" | "late" | "exit" | "pay" | "default" | "wait" | "done";
   title: string;
   detail?: string;
   /** Where the step is done: a place on the loan page, or another page. */
@@ -34,6 +35,7 @@ export function nextStepFor(deal: Deal, l = SERVICED.includes(deal.status) ? led
   if (owed) return { kind: "send", title: owed === 1 ? "Send the 1 item we need" : `Send the ${owed} items we need`, detail: "They're listed below. Each one opens where you upload it.", href: "#needs-from-you", action: "See the list" };
   if (deal.status === "default") return { kind: "default", title: "Call us about your loan", detail: "It's in default. Your team can talk through bringing it current.", href: "#messages", action: "Message your team" };
   if (l && l.amountDue > 0) return { kind: "late", title: "Your payment is past due", detail: "Please pay it as soon as you can.", href: "#payments", action: "See what's due" };
+  if (l && exitAskOpen(deal, l.daysToMaturity)) return { kind: "exit", title: "Tell us how you'll pay off the loan", detail: `It matures ${shortDay(l.maturity)}. A sale, a LendHous rental loan, an extension or a payoff: we'll help in time.`, href: "#exit-plan", action: "Tell us" };
   if (l?.nextDue) return { kind: "pay", title: `Next payment due ${shortDay(l.nextDue)}`, detail: "Nothing else needed from you right now.", href: "#payments", action: "See payments" };
   return { kind: "wait", title: "Nothing needed from you right now", detail: "Your team is working on it. We'll email you when that changes." };
 }

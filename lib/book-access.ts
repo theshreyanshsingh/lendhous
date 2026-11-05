@@ -18,6 +18,7 @@ import { exceptionDecisionProblem, exceptionRequestProblem, issueProblem as shee
 import { MAX_PHOTOS_PER_LINK, photoRequestState, photosClosed } from "./photo-requests";
 import { evaluate } from "./engine";
 import { showcaseable } from "./showcase";
+import { exitPlanProblem } from "./exit-plans";
 import type { Broker, Deal, Doc, LoanPayment, LoanSale, PayoffRequest } from "./mockData";
 import { currentPricing, pricingPayload } from "./pricing-versions";
 import { ledger, servicingDate } from "./servicing";
@@ -526,6 +527,16 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       return trusted ? ok() : no("Send the notice from the loan's page.");
     case "addPropertyPhotos":
       return trusted ? ok() : no("Upload the photos themselves.");
+    case "setExitPlan": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      if (!FUNDED.includes(deal.status)) return no("An exit plan is for a funded loan.");
+      const problem = exitPlanProblem(action.plan);
+      if (problem) return no(problem);
+      // The borrower tells us; the team can write down what the borrower said on a call.
+      if (view === "borrower" && deal.borrowerId === viewer.id) return ok({ ...action, by: viewer.name });
+      return staffOnlyAllowed("service_loans") ? ok({ ...action, by: viewer.name }) : no(NOT_ALLOWED);
+    }
     case "setShowcase": {
       const deal = dealOf(action.dealId);
       if (!deal) return no(GONE);

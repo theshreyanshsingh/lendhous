@@ -35,6 +35,8 @@ import { BrokerFee } from "@/components/loan/BrokerFee";
 import { LoanTimeline } from "@/components/loan/LoanTimeline";
 import { PropertyPicture } from "@/components/PropertyPicture";
 import { Showcase } from "@/components/loan/Showcase";
+import { TeamLoanStatements } from "@/components/loan/LoanStatements";
+import { ExitPlanCard } from "@/components/loan/ExitPlanCard";
 
 // Closing starts once the term sheet is accepted, and stays as the record of how the money went out.
 const CLOSING_TAB = ["term_sheet_accepted", "conditions", "clear_to_close", "closing", "funded", "servicing_current", "servicing_delinquent", "matured", "default", "paid_off"];
@@ -257,6 +259,8 @@ export default function DealWorkspace() {
       {tab === "Credit review" && <div className="space-y-4"><ApplicationRecord deal={d} /><ApplicationOnFile deal={d} /><OfacPanel deal={d} /><CreditReview deal={d} /></div>}
       {tab === "Closing" && <div className="space-y-4"><ClosingPanel deal={d} />{(d.app.product === "fix_flip" || d.app.product === "ground_up" || d.lienFile) && <LienProtection deal={d} />}<OfacPanel deal={d} /></div>}
       {tab === "Servicing" && (SERVICED.includes(d.status) || d.status === "paid_off") && <LoanLedger deal={d} />}
+      {tab === "Servicing" && SERVICED.includes(d.status) && <ExitPlanCard deal={d} side="team" />}
+      {tab === "Servicing" && (SERVICED.includes(d.status) || d.status === "paid_off") && <TeamLoanStatements deal={d} />}
 
       {tab === "Messages" && (
         <div className="grid gap-4 lg:grid-cols-2">

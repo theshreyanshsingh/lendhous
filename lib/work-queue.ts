@@ -8,6 +8,7 @@ import type { Deal } from "./mockData";
 import { latestScreening } from "./ofac";
 import { dueOf, staleLetter } from "./payoffs";
 import { noticeOwed } from "./adverse-action";
+import { needsExitAnswer } from "./exit-plans";
 import { clockOf, SLA_TARGETS, type Clock, type Targets } from "./sla";
 import { servicingDate } from "./servicing";
 
@@ -47,6 +48,7 @@ export function workQueue(book: Book, viewer: { id: string; email?: string }, no
     if (deal.status === "closing" && (deal.fundingApprovers?.length ?? 0) < 2) add({ key: `funding:${deal.id}`, label: "Approve the funding", href: tab(deal), deal, priority: 4 });
     if (deal.paymentsLate) add({ key: `late:${deal.id}`, label: "Payment past due", href: tab(deal, "Servicing"), deal, priority: 5 });
     if (deal.status === "matured") add({ key: `matured:${deal.id}`, label: "Past maturity", href: tab(deal, "Servicing"), deal, priority: 6 });
+    else if (needsExitAnswer(deal)) add({ key: `exit:${deal.id}`, label: "Call about the exit plan: no answer yet", href: tab(deal, "Servicing"), deal, priority: 6 });
     if (openExtension(deal)) add({ key: `extension:${deal.id}`, label: "Decide the extension request", href: tab(deal, "Servicing"), deal, priority: 7 });
     if (lienReleaseOpen(deal)) add({ key: `release:${deal.id}`, label: "Record the mortgage release", href: tab(deal, "Servicing"), deal, priority: 8 });
     if (deal.pricingException?.status === "pending") add({ key: `exception:${deal.id}`, label: "Decide the pricing exception", href: tab(deal, "Term sheet"), deal, since: deal.pricingException.requestedAt, priority: 9 });
