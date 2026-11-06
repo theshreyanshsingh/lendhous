@@ -125,7 +125,22 @@ export function QuoteRequest({ pricing, signupOpen = false, referral, embed }: {
           {text("Bedrooms", draft.beds, (beds) => put({ beds: beds.replace(/[^0-9]/g, "") }), { required: false, max: 3 })}
           {text("Bathrooms", draft.baths, (baths) => put({ baths: baths.replace(/[^0-9.]/g, "") }), { required: false, max: 4 })}
           {text("Square footage", draft.sqft, (sqft) => put({ sqft: dollars(sqft) }), { required: false, max: 9 })}
+          {rehabLoan && money("After-repair value (ARV)", "arv", true, "What it sells for once the work is done. Add comps below to support it.")}
         </div>
+        {rehabLoan && (
+          <div className="quote-comps">
+            <div className="quote-comps-head"><b>Comparable sales for the ARV</b><span>Optional, up to 3. Recent sales of similar finished homes nearby.</span></div>
+            {draft.comps.map((comp, index) => (
+              <Arrive key={index} className="quote-comp">
+                <label>Address<input data-testid={`comp-address-${index}`} maxLength={200} value={comp.address} onChange={(event) => put({ comps: draft.comps.map((item, at) => (at === index ? { ...item, address: event.target.value } : item)) })} /></label>
+                <label>Sold for<input data-testid={`comp-price-${index}`} inputMode="numeric" placeholder="$0" value={comp.price} onChange={(event) => put({ comps: draft.comps.map((item, at) => (at === index ? { ...item, price: dollars(event.target.value) } : item)) })} /></label>
+                <label>Sold in<input data-testid={`comp-sold-${index}`} type="month" value={comp.soldOn} onChange={(event) => put({ comps: draft.comps.map((item, at) => (at === index ? { ...item, soldOn: event.target.value } : item)) })} /></label>
+                <button type="button" className="quote-remove" aria-label="Remove this comp" onClick={() => put({ comps: draft.comps.filter((_, at) => at !== index) })}>×</button>
+              </Arrive>
+            ))}
+            {draft.comps.length < 3 && <button type="button" className="text-link" data-testid="add-comp" onClick={() => put({ comps: [...draft.comps, { address: "", price: "", soldOn: "" }] })}>+ Add a comp</button>}
+          </div>
+        )}
       </section>
 
       <section className="panel">
@@ -144,25 +159,10 @@ export function QuoteRequest({ pricing, signupOpen = false, referral, embed }: {
         <div className="fields">
           {money(draft.purpose === "purchase" ? "Purchase price" : "Current value", "purchasePrice")}
           {rehabLoan && money(draft.loanType === "ground_up" ? "Construction budget" : "Renovation budget", "rehab")}
-          {rehabLoan && money("After-repair value (ARV)", "arv", true, "What it sells for once the work is done. Add comps below to support it.")}
           {rental && money("Monthly rent (lease or market)", "monthlyRent")}
           {money("Loan amount you'd like", "requestedAmount", false, "Leave blank for the most it qualifies for.")}
           {text("Funding date you'd like", draft.fundingDate, (fundingDate) => put({ fundingDate }), { type: "date", testid: "quote-date" })}
         </div>
-        {rehabLoan && (
-          <div className="quote-comps">
-            <div className="quote-comps-head"><b>Comparable sales for the ARV</b><span>Optional, up to 3. Recent sales of similar finished homes nearby.</span></div>
-            {draft.comps.map((comp, index) => (
-              <Arrive key={index} className="quote-comp">
-                <label>Address<input data-testid={`comp-address-${index}`} maxLength={200} value={comp.address} onChange={(event) => put({ comps: draft.comps.map((item, at) => (at === index ? { ...item, address: event.target.value } : item)) })} /></label>
-                <label>Sold for<input data-testid={`comp-price-${index}`} inputMode="numeric" placeholder="$0" value={comp.price} onChange={(event) => put({ comps: draft.comps.map((item, at) => (at === index ? { ...item, price: dollars(event.target.value) } : item)) })} /></label>
-                <label>Sold in<input data-testid={`comp-sold-${index}`} type="month" value={comp.soldOn} onChange={(event) => put({ comps: draft.comps.map((item, at) => (at === index ? { ...item, soldOn: event.target.value } : item)) })} /></label>
-                <button type="button" className="quote-remove" aria-label="Remove this comp" onClick={() => put({ comps: draft.comps.filter((_, at) => at !== index) })}>×</button>
-              </Arrive>
-            ))}
-            {draft.comps.length < 3 && <button type="button" className="text-link" data-testid="add-comp" onClick={() => put({ comps: [...draft.comps, { address: "", price: "", soldOn: "" }] })}>+ Add a comp</button>}
-          </div>
-        )}
       </section>
 
       <section className="panel">
