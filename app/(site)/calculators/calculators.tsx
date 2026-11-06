@@ -21,6 +21,8 @@ export function Calculators() {
   const setField = (field: string, raw: string) => setInputs((all) => ({ ...all, [tab]: { ...all[tab], [field]: raw === "" ? NaN : Number(raw) } }));
   return (
     <>
+      {/* For screen readers, so the calculator's own heading sits under the page's. */}
+      <h2 className="sr-only">Calculators</h2>
       <div className="tab-list" role="tablist" aria-label="Calculators">
         {TABS.map((item) => (
           <button key={item.key} type="button" role="tab" aria-selected={tab === item.key} className="tab-trigger" data-testid={`calc-tab-${item.key}`} onClick={() => setTab(item.key)}>{item.label}</button>

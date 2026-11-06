@@ -4,6 +4,7 @@ import { assignLoan, loanTeamOptions } from "@/actions/book";
 import { TEAM_ROLE_LABEL, TEAM_ROLES, type TeamRole } from "@/lib/loan-team";
 import { DEMO_TEAM, type Deal, type TeamMember } from "@/lib/mockData";
 import { useStore } from "@/lib/store";
+import { phonePill } from "@/lib/ui-classes";
 
 type Options = { members: TeamMember[]; canAssign: boolean; me: string };
 
@@ -50,6 +51,8 @@ export function LoanTeam({ deal }: { deal: Deal }) {
 }
 
 const dialable = (phone: string) => phone.replace(/[^\d+]/g, "");
+// Links on a desktop; on a phone, buttons a thumb can hit, since calling or texting is what a phone is for.
+const reach = `text-link underline ${phonePill}`;
 
 /** How a borrower or broker reaches the people on their loan. */
 export function TeamContacts({ deal }: { deal: Deal }) {
@@ -61,9 +64,9 @@ export function TeamContacts({ deal }: { deal: Deal }) {
         <li key={role} data-testid="your-team-person">
           <div className="text-xs text-muted-foreground">{TEAM_ROLE_LABEL[role]}</div>
           <div className="font-medium">{member.name}</div>
-          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs">
-            {member.phone && <><a className="text-link underline" href={`tel:${dialable(member.phone)}`}>Call {member.phone}</a><a className="text-link underline" href={`sms:${dialable(member.phone)}`}>Text</a></>}
-            <a className="text-link underline" href={`mailto:${member.email}`}>Email</a>
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs max-sm:mt-2 max-sm:gap-2">
+            {member.phone && <><a className={reach} href={`tel:${dialable(member.phone)}`}>Call {member.phone}</a><a className={reach} href={`sms:${dialable(member.phone)}`}>Text</a></>}
+            <a className={reach} href={`mailto:${member.email}`}>Email</a>
           </div>
         </li>
       ))}

@@ -24,7 +24,7 @@ export default async function ForgotPasswordPage({ searchParams }: { searchParam
           </form>
         </>
       )}
-      <Link href="/login" className="mt-4 text-sm text-muted-foreground underline underline-offset-2">Back to sign in</Link>
+      <Link href="/login" className="mt-4 text-sm text-muted-foreground underline underline-offset-2 max-sm:inline-block max-sm:py-2.5">Back to sign in</Link>
     </main>
   );
 }

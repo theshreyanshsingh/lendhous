@@ -42,7 +42,7 @@ export default async function SetPasswordPage({ searchParams }: { searchParams: 
         <>
           <h1 className="mt-3 text-[28px] font-normal tracking-tight text-foreground">This link no longer works.</h1>
           <p className="mt-4 text-sm text-muted-foreground" data-testid="password-link-dead">It has expired or was already used. Ask your LendHous administrator for a new one.</p>
-          <Link href="/login" className="mt-6 text-sm text-muted-foreground underline underline-offset-2">Back to sign in</Link>
+          <Link href="/login" className="mt-6 text-sm text-muted-foreground underline underline-offset-2 max-sm:inline-block max-sm:py-2.5">Back to sign in</Link>
         </>
       )}
     </main>

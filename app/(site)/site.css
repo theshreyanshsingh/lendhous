@@ -655,7 +655,8 @@ body:has(.site) {
   margin: 10px 0;
 }
 
-.site .article a {
+/* Links in the text; the article's own buttons keep the button's white on ink. */
+.site .article a:not(.button) {
   color: var(--label);
   text-decoration: underline;
 }
@@ -974,18 +975,20 @@ body:has(.site) {
   color: var(--cream);
 }
 
+/* The spacing sits on the question, so the whole row is what a tap or click opens. */
 .site .faq details {
-  padding: 18px 0;
   border-bottom: 1px solid var(--rule);
 }
 
 .site .faq summary {
   cursor: pointer;
   font-size: 13.5px;
+  padding: 18px 0;
 }
 
 .site .faq p {
-  margin: 15px 0 0;
+  margin: -3px 0 0;
+  padding-bottom: 18px;
   font-size: 12.5px;
 }
 
@@ -1074,7 +1077,7 @@ body:has(.site) {
   border-bottom: 1px solid var(--rule);
 }
 
-.site .faq-section .faq details:first-child {
+.site .faq-section .faq details:first-child summary {
   padding-top: 0;
 }
 
@@ -1515,4 +1518,15 @@ body:has(.site) {
 }
 @media (prefers-reduced-motion: reduce) {
   .site .phone-cta { transition: none; }
+}
+
+/* Footer links tall enough for a thumb on a phone. */
+@media (max-width: 700px) {
+  .site .footer-nav a { padding: 10px 0; }
+  .site .footer-links a { display: inline-block; padding: 10px 0; }
+}
+
+/* A standalone text link ("View loan programs", "+ Add a comp") is a full thumb's height on a phone. */
+@media (max-width: 700px) {
+  .site .text-link { min-height: 44px; }
 }

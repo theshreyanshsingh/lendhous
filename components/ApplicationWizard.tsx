@@ -105,7 +105,8 @@ export default function ApplicationWizard({ mode = "borrower", prefill }: { mode
       <div className="space-y-4">
         <div className="glass p-4">
           <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs text-muted-foreground"><span className="whitespace-nowrap">Step {step + 1} of {steps.length}</span><span>Progress isn&apos;t saved if you leave this page</span></div>
-          <div className="mt-2 flex gap-1">{steps.map((s, i) => <button key={s} onClick={() => move(i)} className="relative h-1.5 flex-1 overflow-hidden rounded-full bg-accent" aria-label={s}><motion.span className="absolute inset-0 origin-left rounded-full bg-primary" initial={false} animate={{ scaleX: i <= step ? 1 : 0 }} transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }} /></button>)}</div>
+          {/* Each step is a thin bar inside a taller tap area, so a thumb can hit it. */}
+          <div className="mt-1 flex gap-1">{steps.map((s, i) => <button key={s} type="button" onClick={() => move(i)} className="flex h-6 flex-1 items-center" aria-label={s} aria-current={i === step ? "step" : undefined}><span className="relative h-1.5 w-full overflow-hidden rounded-full bg-accent"><motion.span className="absolute inset-0 origin-left rounded-full bg-primary" initial={false} animate={{ scaleX: i <= step ? 1 : 0 }} transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }} /></span></button>)}</div>
           <h1 className="mt-3 text-xl font-normal tracking-tight">{steps[step]}</h1>
         </div>
         <StepSwap step={step} direction={direction} className="glass space-y-4 p-4 sm:p-5">

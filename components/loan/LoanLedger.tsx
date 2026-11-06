@@ -82,7 +82,7 @@ export function LoanLedger({ deal }: { deal: Deal }) {
                 {row.late && (
                   <span className="flex flex-wrap items-center gap-2">
                     {row.waived ? <span data-testid="fee-waived">Late fee waived</span> : <span>Late fee {usd(row.fee, 2)}{row.feePaid >= row.fee ? " (paid)" : ""}</span>}
-                    {!row.waived && row.feePaid < row.fee && waiving !== row.due && <button type="button" className="text-link hover:underline" data-testid="waive-fee" onClick={() => { close(); setWaiving(row.due); }}>Waive</button>}
+                    {!row.waived && row.feePaid < row.fee && waiving !== row.due && <button type="button" className="text-link hover:underline max-sm:inline-block max-sm:py-2" data-testid="waive-fee" onClick={() => { close(); setWaiving(row.due); }}>Waive</button>}
                   </span>
                 )}
               </div>

@@ -30,6 +30,7 @@ export function SiteFooter() {
         <Link className="brand" href="/">LendHous<span className="brand-period">.</span></Link>
         <p>Real estate investment financing.</p>
       </div>
+      <h2 className="sr-only">Site links</h2>
       <nav className="footer-nav" aria-label="Footer">
         <div>
           <h3>LOAN PROGRAMS</h3>

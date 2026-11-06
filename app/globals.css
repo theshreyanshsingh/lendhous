@@ -86,7 +86,8 @@
   --input: #d3d6cf;
   --ring: #677d67;
   --link: #2b5d6a;
-  --faint: #8b928c;
+  /* Lighter than the muted text, and still 4.5:1 or better on white, the page and the muted panels (WCAG AA). */
+  --faint: #686f69;
   --good: #2e6b45;
   --warn: #8a6410;
   --bad: #a8382b;
@@ -137,7 +138,7 @@
   --input: #43534d;
   --ring: #93a993;
   --link: #8cc4d0;
-  --faint: #84918b;
+  --faint: #97a39d;
   --good: #7fcb9a;
   --warn: #e2b85c;
   --bad: #f4998a;
@@ -327,6 +328,12 @@ body {
 }
 a, button, summary, label, select, input, textarea, [role="tab"], [role="radio"] {
   touch-action: manipulation;
+}
+/* On a touch screen every button is at least 44px tall; min-height wins over the compact heights set for desktops. */
+@media (pointer: coarse) {
+  .btn-primary, .btn-ghost {
+    min-height: 44px;
+  }
 }
 @media (hover: none) {
   .btn-primary:active, .btn-ghost:active, .site .button:active, .site .quote-chip:active, .site .quote-choice:active {

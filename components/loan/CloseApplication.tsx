@@ -53,7 +53,7 @@ export function CloseApplication({ deal, side }: { deal: Deal; side: "team" | "b
   };
   return (
     <>
-    {!open && <button type="button" className={team ? "btn-ghost h-9! px-3! text-xs!" : "text-sm text-link underline underline-offset-2"} data-testid="close-application" onClick={() => setOpen(true)}>{team ? "Decline or withdraw" : "Withdraw this application"}</button>}
+    {!open && <button type="button" className={team ? "btn-ghost h-9! px-3! text-xs!" : "text-sm text-link underline underline-offset-2 max-sm:py-2.5"} data-testid="close-application" onClick={() => setOpen(true)}>{team ? "Decline or withdraw" : "Withdraw this application"}</button>}
     <Reveal open={open}>
     <div className="mt-3 w-full space-y-3 rounded-[2px] border border-border p-3" data-testid="close-application-form">
       {team && (

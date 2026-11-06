@@ -3,6 +3,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { sendApplicationLink } from "@/actions/application-links";
 import { Reveal } from "@/components/motion";
+import { phonePill } from "@/lib/ui-classes";
 
 /**
  * Sends the borrower the secure application link, for a lead or a loan. The link is emailed to them and shown here
@@ -28,7 +29,7 @@ export function SendApplicationLink({ leadId, dealId, name, email, compact }: { 
   const copy = async () => { await navigator.clipboard.writeText(url).catch(() => {}); setCopied(true); setTimeout(() => setCopied(false), 1500); };
   return (
     <div className="min-w-0" data-testid="send-application">
-      {!open && <button type="button" className={compact ? "text-xs text-link underline underline-offset-2" : "btn-ghost h-9! px-3! text-xs!"} data-testid="open-application-link" onClick={() => setOpen(true)}>Send application link</button>}
+      {!open && <button type="button" className={compact ? `text-xs text-link underline underline-offset-2 ${phonePill}` : "btn-ghost h-9! px-3! text-xs!"} data-testid="open-application-link" onClick={() => setOpen(true)}>Send application link</button>}
       <Reveal open={open}>
         <div className="mt-2 space-y-2 rounded-[2px] border border-border p-3 text-left text-sm">
           {url ? (

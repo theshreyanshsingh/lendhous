@@ -3,6 +3,7 @@ import { ChevronRight } from "lucide-react";
 import { OPEN_UPLOAD } from "@/components/UploadSheet";
 import { PRE_FUNDING } from "@/lib/loan-exits";
 import type { Deal } from "@/lib/mockData";
+import { phonePill } from "@/lib/ui-classes";
 
 const IN = ["uploaded", "in_review", "accepted", "waived"];
 
@@ -34,7 +35,7 @@ export function NeedsFromYou({ deal }: { deal: Deal }) {
       ) : <p className="mt-2 text-sm text-muted-foreground">We&apos;ll email you when that changes.</p>}
       {/* On a phone the documents go from one sheet, straight from the camera. */}
       {docs.length > 0 && <button type="button" className="btn-primary mt-3 h-11! w-full md:hidden" data-testid="needs-upload" onClick={() => window.dispatchEvent(new Event(OPEN_UPLOAD))}>Upload {docs.length === 1 ? "it" : `the ${docs.length} documents`} now</button>}
-      <a href="#messages" className="mt-3 inline-block text-xs text-link underline" data-testid="jump-messages">Questions? Message your team</a>
+      <a href="#messages" className={`mt-3 inline-block text-xs text-link underline ${phonePill}`} data-testid="jump-messages">Questions? Message your team</a>
     </section>
   );
 }

@@ -26,8 +26,8 @@ export function LoginPanel({ next, demo, signup = false }: { next?: string; demo
         </label>
         {state.error && <p className="text-sm text-bad" role="alert">{state.error}</p>}
         <SubmitButton className="h-11 w-full text-[13.5px] font-medium" pendingLabel="Checking…">Sign in</SubmitButton>
-        <Link href="/login/forgot" className="block text-center text-sm text-muted-foreground underline underline-offset-2" data-testid="forgot-password">Forgot your password?</Link>
-        {signup && <Link href="/login/signup" className="block text-center text-sm text-muted-foreground underline underline-offset-2" data-testid="signup-link">New to LendHous? Create an account</Link>}
+        <Link href="/login/forgot" className="block text-center text-sm text-muted-foreground underline underline-offset-2 max-sm:py-2.5" data-testid="forgot-password">Forgot your password?</Link>
+        {signup && <Link href="/login/signup" className="block text-center text-sm text-muted-foreground underline underline-offset-2 max-sm:py-2.5" data-testid="signup-link">New to LendHous? Create an account</Link>}
       </form>
       {demo && (
         <aside>

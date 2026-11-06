@@ -26,7 +26,7 @@ export default async function SignupPage({ searchParams }: { searchParams: Promi
       ) : (
         <p className="mt-4 text-sm text-muted-foreground" data-testid="signup-closed">LendHous isn&apos;t taking new sign-ups right now. Ask your loan officer for an invitation, or <Link href="/start" className="underline underline-offset-2">request a quote</Link> and we&apos;ll be in touch.</p>
       )}
-      <Link href="/login" className="mt-4 text-sm text-muted-foreground underline underline-offset-2">Already have an account? Sign in</Link>
+      <Link href="/login" className="mt-4 text-sm text-muted-foreground underline underline-offset-2 max-sm:inline-block max-sm:py-2.5">Already have an account? Sign in</Link>
     </main>
   );
 }

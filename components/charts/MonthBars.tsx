@@ -19,18 +19,19 @@ export function MonthBars({ data, label, money = (n: number) => usd(n, 2), testi
   const showYear = new Set(data.map((item) => item.month.slice(0, 4))).size > 1;
   return (
     <figure className="relative min-w-0" data-testid={testid}>
-      <div className="relative h-40" aria-hidden="true">
+      {/* The gridlines are drawing only; each bar a keyboard reaches says its month and amount (the table below has them all). */}
+      <div className="relative h-40">
         {[1, 0.5].map((at) => (
-          <div key={at} className="absolute inset-x-0 border-t border-dashed border-border" style={{ top: `${(1 - at) * 100}%` }}>
+          <div key={at} className="absolute inset-x-0 border-t border-dashed border-border" style={{ top: `${(1 - at) * 100}%` }} aria-hidden="true">
             <span className="absolute -top-2 left-0 bg-card pr-1 text-[10px] text-faint tabular-nums">{k(top * at)}</span>
           </div>
         ))}
-        <div className="absolute inset-x-0 bottom-0 border-t border-rule" />
+        <div className="absolute inset-x-0 bottom-0 border-t border-rule" aria-hidden="true" />
         <div className="absolute inset-0 flex items-end gap-[2px] pl-11">
           {data.map((item, i) => {
             const height = (item.value / top) * 100;
             return (
-              <div key={item.month} tabIndex={0} className="group relative flex h-full min-w-0 flex-1 items-end justify-center outline-none" data-testid="month-bar">
+              <div key={item.month} tabIndex={0} role="img" aria-label={`${monthLabel(item.month, true)}: ${money(item.value)}`} className="group relative flex h-full min-w-0 flex-1 items-end justify-center outline-none focus-visible:ring-2 focus-visible:ring-ring" data-testid="month-bar">
                 {i === biggest && item.value > 0 && <span className="absolute left-1/2 -translate-x-1/2 text-[10px] font-medium whitespace-nowrap text-muted-foreground tabular-nums" style={{ bottom: `calc(${height}% + 4px)` }}>{k(item.value)}</span>}
                 <div className="w-full max-w-9 rounded-t-[4px] bg-brand transition-opacity group-hover:opacity-80 dark:bg-[#93a993]" style={{ height: `${height}%` }} />
                 <div className="pointer-events-none absolute bottom-full left-1/2 z-10 mb-1 hidden -translate-x-1/2 rounded-[2px] border border-border bg-popover px-2 py-1 text-[11px] whitespace-nowrap shadow-[var(--shadow)] group-hover:block group-focus-visible:block" role="tooltip">

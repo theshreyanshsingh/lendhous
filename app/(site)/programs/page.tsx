@@ -19,6 +19,7 @@ export default async function Programs() {
       <PageHead eyebrow="CAPITAL FOR YOUR STRATEGY" title="Find the right starting point." description="Acquire, improve, build, or hold. Explore how different financing structures can support your investment plan." />
       <main className="content">
         <div className="note">Program guides are a starting point for discussion. Confirm LendHous program availability, lending location, and current eligibility before applying.</div>
+        <h2 className="sr-only">The programs</h2>
         <div className="program-grid">
           {PROGRAMS.map((program, index) => (
             <Link key={program.slug} className="program-card" href={`/programs/${program.slug}`}>

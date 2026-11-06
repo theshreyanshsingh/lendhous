@@ -25,7 +25,7 @@ export function ScopeOfWork({ deal, editable }: { deal: Deal; editable: boolean 
   return (
     <Section title="Scope of work" right={sow?.status === "accepted" ? <Badge tone="green">Approved</Badge> : sow?.status === "in_review" ? <Badge tone="blue">In review</Badge> : undefined}>
       {open && <p className="mb-3 text-sm text-muted-foreground">Split your {usd(budget)} budget by type of work. Draws are paid against these lines, so don&apos;t list the same work twice.</p>}
-      {folded && <details data-testid="scope-folded" open={unfolded} onToggle={(event) => setUnfolded((event.currentTarget as HTMLDetailsElement).open)}><summary className="cursor-pointer text-sm text-link">{sow?.status === "accepted" ? "Approved" : "Sent for review"}: {usd(scopeTotal(lines))} across {lines.length} lines{sow?.status === "accepted" ? "" : ". Open it to change it."}</summary></details>}
+      {folded && <details data-testid="scope-folded" open={unfolded} onToggle={(event) => setUnfolded((event.currentTarget as HTMLDetailsElement).open)}><summary className="cursor-pointer text-sm text-link max-sm:py-2.5">{sow?.status === "accepted" ? "Approved" : "Sent for review"}: {usd(scopeTotal(lines))} across {lines.length} lines{sow?.status === "accepted" ? "" : ". Open it to change it."}</summary></details>}
       {showing && <div className={folded ? "mt-2" : ""}>
       <ul className="divide-y divide-border" data-testid="scope-lines">
         {lines.map((line, index) => (

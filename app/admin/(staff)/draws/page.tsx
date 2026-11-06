@@ -58,6 +58,7 @@ function DrawCard({ draw, deal }: { draw: DrawRequest; deal: Deal }) {
   const [details, setDetails] = useState(draw.status === "inspecting");
   return (
     <section className="glass min-w-0 p-4 sm:p-5" data-testid="draw-card">
+      <h2 className="sr-only">{deal.loanNumber} draw</h2>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0"><Link href={`/admin/deals/${deal.id}`} className="font-medium text-link hover:underline">{deal.loanNumber}</Link> <span className="text-sm">· {deal.borrowerName}</span><div className="text-xs text-muted-foreground">{deal.address}, {deal.city} · requested {shortDate(draw.requestedAt)}</div></div>
         <Badge tone={DRAW_STATUS[draw.status].tone}>{DRAW_STATUS[draw.status].label}</Badge>

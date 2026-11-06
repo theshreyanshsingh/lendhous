@@ -38,7 +38,7 @@ export function LettersBoard({ demo }: { demo: boolean }) {
     <Section title="Sample letter">
       <div className="space-y-2 text-sm" data-testid="letters-demo">
         <p className="text-muted-foreground">Demo accounts can&apos;t issue real letters. Here&apos;s what one looks like, and the page its QR code opens.</p>
-        <div className="flex flex-wrap gap-3"><a className="text-link underline" href="/api/letters/demo" data-testid="letter-sample-pdf">Sample letter (PDF)</a><a className="text-link underline" href="/verify/demo" data-testid="letter-sample-verify">Its verify page</a></div>
+        <div className="flex flex-wrap gap-3"><a className="text-link underline max-sm:py-2.5" href="/api/letters/demo" data-testid="letter-sample-pdf">Sample letter (PDF)</a><a className="text-link underline max-sm:py-2.5" href="/verify/demo" data-testid="letter-sample-verify">Its verify page</a></div>
       </div>
     </Section>
   );

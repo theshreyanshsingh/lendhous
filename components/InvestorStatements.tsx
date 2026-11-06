@@ -6,6 +6,7 @@ import { Section, Skeleton, usd } from "@/components/ui";
 import { downloadCsv } from "@/lib/csv";
 import { monthName, previousMonth, statementFor, statementRows, type Investor } from "@/lib/investor-statements";
 import { useStore } from "@/lib/store";
+import { phonePill } from "@/lib/ui-classes";
 
 type Row = Awaited<ReturnType<typeof myStatements>>[number];
 
@@ -35,8 +36,8 @@ export function InvestorStatements({ investor }: { investor: Investor }) {
                 <div><div className="text-xs text-muted-foreground">Net to you</div><div className="font-semibold tabular-nums" data-testid="statement-net">{usd(preview.totals.net, 2)}</div></div>
               </div>
               <div className="flex flex-wrap gap-3">
-                <a className="text-link underline" href={`/api/statements/demo?type=${investor.type}`} data-testid="statement-sample-pdf">Sample PDF</a>
-                <button type="button" className="text-link underline" data-testid="statement-sample-csv" onClick={() => downloadCsv(`lendhous-statement-${preview.month}-sample.csv`, statementRows(preview))}>Spreadsheet</button>
+                <a className={`text-link underline ${phonePill}`} href={`/api/statements/demo?type=${investor.type}`} data-testid="statement-sample-pdf">Sample PDF</a>
+                <button type="button" className={`text-link underline ${phonePill}`} data-testid="statement-sample-csv" onClick={() => downloadCsv(`lendhous-statement-${preview.month}-sample.csv`, statementRows(preview))}>Spreadsheet</button>
               </div>
             </>
           )}

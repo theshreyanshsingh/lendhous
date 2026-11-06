@@ -18,6 +18,7 @@ export default async function EmbeddedQuote({ searchParams }: { searchParams: Pr
   const referral = await brokerByReferral(ref).catch(() => null);
   return (
     <main className="embed-quote" data-testid="embed-quote">
+      <h1 className="sr-only">LendHous loan quote</h1>
       <div className="embed-head"><span className="embed-brand">LendHous<i>.</i></span><span className="quote-small">Investor loans in Florida · indicative terms in a minute</span></div>
       <QuoteRequest pricing={currentPricing()} signupOpen={(await getSettings()).allowSignup !== false} referral={referral ? { code: ref!, name: referral.name } : undefined} embed={{ site: siteSlug(site) }} />
     </main>

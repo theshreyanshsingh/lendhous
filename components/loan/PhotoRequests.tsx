@@ -5,6 +5,7 @@ import { Badge, shortDate } from "@/components/ui";
 import type { Deal, DrawRequest, PhotoRequest, RequestPhoto } from "@/lib/mockData";
 import { guideSteps, looksOld, missingShots, PHOTO_LINK_DAYS, photoRequestState, requestLines, type LinkState } from "@/lib/photo-requests";
 import { useStore } from "@/lib/store";
+import { phonePill } from "@/lib/ui-classes";
 
 const STATE: Record<LinkState, { label: string; tone: "blue" | "amber" | "slate" }> = {
   open: { label: "Waiting for photos", tone: "blue" },
@@ -86,6 +87,7 @@ export function PhotoRequests({ deal, draw, asBorrower = false }: { deal: Deal; 
         <div className="min-w-0 flex-1 basis-56">
           {!draw && asBorrower && <h3 className="text-sm font-medium">Photos from your contractor</h3>}
           {draw && <h3 className="text-sm font-medium">Photos of the work</h3>}
+          {!draw && !asBorrower && <h3 className="sr-only">Photos from the contractor or borrower</h3>}
           <p className="text-xs text-muted-foreground">{asBorrower ? "Send your contractor a link." : "Send the contractor or borrower a link."} They don&apos;t need an account, and the page walks them through what to photograph.</p>
         </div>
         {!open && <button className="btn-ghost" data-testid="ask-photos" onClick={() => { setOpen(true); setIssued(null); setPicked(startLines()); }}>Ask for photos</button>}
@@ -167,8 +169,8 @@ function RequestRow({ request, deal, draw, local, busy, canChange, onRenew, onTu
       {received && missing.length > 0 && <p className="mt-2 text-xs text-warn" data-testid="photo-missing">Not sent: {missing.map((item) => `${item.step}, ${item.shot.toLowerCase()}`).join("; ")}</p>}
       {state !== "closed" && canChange && (
         <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">
-          <button className="text-link underline underline-offset-2 disabled:opacity-40" data-testid="photo-renew" disabled={busy} onClick={onRenew}>Make a new link</button>
-          {state === "open" && <button className="text-link underline underline-offset-2 disabled:opacity-40" data-testid="photo-off" disabled={busy} onClick={onTurnOff}>Turn the link off</button>}
+          <button className={`py-1 text-link underline underline-offset-2 disabled:opacity-40 ${phonePill}`} data-testid="photo-renew" disabled={busy} onClick={onRenew}>Make a new link</button>
+          {state === "open" && <button className={`py-1 text-link underline underline-offset-2 disabled:opacity-40 ${phonePill}`} data-testid="photo-off" disabled={busy} onClick={onTurnOff}>Turn the link off</button>}
         </div>
       )}
     </li>

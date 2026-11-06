@@ -8,6 +8,7 @@ import { linkSummaries } from "@/lib/application-links";
 import { openLead, openQuote } from "@/lib/lead-store";
 import { CITIZENSHIP_LABEL, CREDIT_LABEL } from "@/lib/quote";
 import { channelLabel } from "@/lib/quote-funnel";
+import { phonePill } from "@/lib/ui-classes";
 import { notDeleted, prisma } from "@/lib/prisma";
 import { PROPERTY_PHOTO } from "@/lib/property-photos";
 
@@ -41,8 +42,8 @@ export default async function Leads() {
                 <tr key={lead.id} id={`lead-${lead.id}`} className="scroll-mt-20 border-b border-border align-top last:border-0">
                   <td>
                     <div className="font-medium">{lead.name}</div>
-                    <a className="block text-xs text-link underline underline-offset-2" href={`mailto:${lead.email}`}>{lead.email}</a>
-                    {lead.phone && <a className="block text-xs text-link underline underline-offset-2" href={`tel:${lead.phone}`}>{lead.phone}</a>}
+                    <a className="block text-xs text-link underline underline-offset-2 max-sm:py-1.5" href={`mailto:${lead.email}`}>{lead.email}</a>
+                    {lead.phone && <a className="block text-xs text-link underline underline-offset-2 max-sm:py-1.5" href={`tel:${lead.phone}`}>{lead.phone}</a>}
                   </td>
                   <td data-label="Received" className="lg:whitespace-nowrap">{when(lead.createdAt)}</td>
                   <td data-label="Project">
@@ -80,14 +81,14 @@ export default async function Leads() {
                       ) : (
                         <form action={markLeadContacted}>
                           <input type="hidden" name="id" value={lead.id} />
-                          <button type="submit" className="btn-ghost h-8! px-3! text-xs!">Mark contacted</button>
+                          <button type="submit" className="btn-ghost h-8! px-3! text-xs! max-sm:h-11! max-sm:px-4! max-sm:text-sm!">Mark contacted</button>
                         </form>
                       )}
                       {lead.loanId ? (
-                        <Link href={`/admin/deals/${lead.loanId}`} className="text-xs text-link underline underline-offset-2" data-testid="lead-loan">Open the loan</Link>
+                        <Link href={`/admin/deals/${lead.loanId}`} className={`text-xs text-link underline underline-offset-2 ${phonePill}`} data-testid="lead-loan">Open the loan</Link>
                       ) : (
                         <>
-                          <Link href={`/admin/new-loan?lead=${lead.id}`} className="text-xs text-link underline underline-offset-2" data-testid="start-loan">Start a loan</Link>
+                          <Link href={`/admin/new-loan?lead=${lead.id}`} className={`text-xs text-link underline underline-offset-2 ${phonePill}`} data-testid="start-loan">Start a loan</Link>
                           {(() => { const link = links.find((item) => item.leadId === lead.id); return link ? <span className="text-xs text-muted-foreground" data-testid="lead-link-status">Link {link.state === "open" ? (link.savedAt ? `on step ${link.step + 1} of 5` : "sent, not opened yet") : link.state}</span> : null; })()}
                           <SendApplicationLink compact leadId={lead.id} name={lead.request ? `${lead.request.borrower.firstName} ${lead.request.borrower.lastName}` : lead.name} email={lead.request?.borrower.email ?? lead.email} />
                         </>

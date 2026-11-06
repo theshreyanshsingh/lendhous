@@ -22,7 +22,7 @@ export function LoanTimeline({ deal, side }: { deal: Deal; side: "team" | "clien
     <div className="mt-4 border-t border-border pt-3 sm:mt-5 sm:pt-4" data-testid="loan-timeline">
       {/* A phone gets one line, with every step a tap away. */}
       <details className="text-xs sm:hidden" data-testid="timeline-summary">
-        <summary className="flex cursor-pointer list-none items-center gap-2 py-1">
+        <summary className="flex min-h-11 cursor-pointer list-none items-center gap-2 py-1">
           <span aria-hidden="true" className="size-2.5 shrink-0 rounded-full border-2 border-link bg-card ring-4 ring-link/15" />
           <span className="min-w-0 flex-1"><b className="font-semibold text-foreground">{now?.label ?? "Done"}</b>{at >= 0 ? <span className="text-muted-foreground"> · step {at + 1} of {points.length}{now?.days !== undefined ? ` · ${now.days} day${now.days === 1 ? "" : "s"} so far` : ""}{target ? ` · target close ${shortDay(target.on)}` : ""}</span> : null}</span>
           <span className="shrink-0 text-link">All steps</span>

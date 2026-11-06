@@ -43,7 +43,7 @@ function List({ title, items, today, testid, empty }: { title: string; items: Qu
       {items.length === 0 ? <p className="py-2 text-sm text-muted-foreground">{empty}</p> : (
         <ul className="divide-y divide-border">{shown.map((item) => <Row key={item.key} item={item} today={today} />)}</ul>
       )}
-      {items.length > SHOWN && <button type="button" className="mt-1 text-xs text-link underline" onClick={() => setAll(!all)}>{all ? "Show fewer" : `Show all ${items.length}`}</button>}
+      {items.length > SHOWN && <button type="button" className="mt-1 py-1 text-xs text-link underline max-sm:min-h-10 max-sm:text-sm" onClick={() => setAll(!all)}>{all ? "Show fewer" : `Show all ${items.length}`}</button>}
     </div>
   );
 }

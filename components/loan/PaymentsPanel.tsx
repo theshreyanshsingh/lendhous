@@ -43,7 +43,7 @@ export function PaymentsPanel({ deal }: { deal: Deal }) {
       </div>
       {l.rows.some((row) => row.status !== "upcoming") && (
         <details className="mt-3 text-sm" data-testid="payment-rows">
-          <summary className="cursor-pointer text-link">Payment history</summary>
+          <summary className="cursor-pointer text-link max-sm:py-2.5">Payment history</summary>
           <ul className="mt-2 divide-y divide-border">
             {[...shownRows(l)].reverse().map((row) => (
               <li key={row.due} className="py-1.5">

@@ -11,6 +11,7 @@ export default function Resources() {
     <>
       <PageHead eyebrow="THE INVESTOR FIELD GUIDE" title="A little clarity goes a long way." description="Practical explanations for the decisions between finding a property and financing your next move." />
       <main className="content two-col">
+        <h2 className="sr-only">Guides</h2>
         <div className="resource-list">
           {GUIDES.map((guide) => (
             <Link key={guide.slug} href={`/resources/${guide.slug}`}>
