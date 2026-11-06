@@ -314,3 +314,36 @@
   outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
+
+/* Touch: a tap acts at once (no double-tap zoom wait), with no grey flash, and a press shows. */
+html {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+}
+/* A notched phone held sideways keeps the page clear of the notch. */
+body {
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+a, button, summary, label, select, input, textarea, [role="tab"], [role="radio"] {
+  touch-action: manipulation;
+}
+@media (hover: none) {
+  .btn-primary:active, .btn-ghost:active, .site .button:active, .site .quote-chip:active, .site .quote-choice:active {
+    transform: scale(0.97);
+  }
+  .btn-primary, .btn-ghost, .site .button, .site .quote-chip, .site .quote-choice {
+    transition: transform 0.08s ease, background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  }
+}
+/* iPhones zoom the whole page into any field under 16px and leave it zoomed. Unlayered and specific, so it holds over
+   the site's and the panel's own field sizes; the signature lines keep their larger script. */
+@media (max-width: 1023px) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([class*="text-xl"]):not([class*="text-2xl"]), :root body :is(select, textarea) {
+    font-size: 16px;
+  }
+}
+/* Bars fixed to the foot of a phone clear the home indicator. */
+.safe-bottom {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+}

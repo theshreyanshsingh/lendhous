@@ -52,12 +52,18 @@ export function YourAgents({ deal }: { deal: Deal }) {
                   <div data-testid={`agent-${role}-saved`}>
                     <p>{[saved.name, saved.company].filter(Boolean).join(", ")}</p>
                     <p className="text-xs text-muted-foreground">{[saved.email, saved.phone].filter(Boolean).join(" · ")}</p>
-                    <button type="button" className="mt-1 text-xs text-link underline underline-offset-2" onClick={() => setEditing(role)}>Change</button>
+                    <button type="button" className="mt-1 min-h-9 text-xs text-link underline underline-offset-2" onClick={() => setEditing(role)}>Change</button>
                   </div>
+                ) : editing !== role ? (
+                  // Nothing on file: one button, not four empty boxes.
+                  <button type="button" className="btn-ghost h-10! w-full justify-start! px-3! text-sm! sm:w-auto" data-testid={`agent-${role}-add`} onClick={() => { setError(""); setEditing(role); }}>+ Add your {role === "title" ? "title or escrow agent" : "insurance agent"}</button>
                 ) : (
                   <>
                     <Fields role={role} value={drafts[role]} onChange={put(role)} prefix="agent" />
-                    <button type="button" className="btn-primary h-9! px-3! text-xs!" data-testid={`agent-${role}-save`} onClick={() => void save([role])}>Save the {role === "title" ? "title agent" : "insurance agent"}</button>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" className="btn-primary h-10! px-4! text-sm! max-sm:flex-1" data-testid={`agent-${role}-save`} onClick={() => void save([role])}>Save the {role === "title" ? "title agent" : "insurance agent"}</button>
+                      <button type="button" className="btn-ghost h-10! px-4! text-sm!" onClick={() => { setError(""); setEditing(null); }}>Cancel</button>
+                    </div>
                   </>
                 )}
               </div>
@@ -67,8 +73,9 @@ export function YourAgents({ deal }: { deal: Deal }) {
         </div>
       </Section>
       {prompt && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/40 p-4" data-testid="agents-prompt">
-          <div role="dialog" aria-modal="true" aria-labelledby="agents-prompt-title" className="glass max-h-[90vh] w-full max-w-2xl overflow-y-auto p-5 shadow-[var(--shadow)]">
+        // A sheet from the foot of the screen on a phone, under the thumb; a box in the middle on a desktop.
+        <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/40 p-4 max-sm:place-items-end max-sm:p-0" data-testid="agents-prompt">
+          <div role="dialog" aria-modal="true" aria-labelledby="agents-prompt-title" className="glass max-h-[90vh] w-full max-w-2xl overflow-y-auto p-5 shadow-[var(--shadow)] max-sm:max-h-[88dvh] max-sm:rounded-t-[14px] max-sm:rounded-b-none max-sm:border-x-0 max-sm:border-b-0 max-sm:pb-[max(1.25rem,env(safe-area-inset-bottom))]">
             <div className="flex items-start justify-between gap-3">
               <h2 id="agents-prompt-title" className="font-heading text-xl font-normal">Who are your title/escrow and insurance agents?</h2>
               <button type="button" className="text-muted-foreground hover:text-foreground" aria-label="Close" onClick={later}>×</button>
@@ -79,8 +86,8 @@ export function YourAgents({ deal }: { deal: Deal }) {
             </div>
             {error && <p className="mt-3 text-sm text-bad" role="alert" data-testid="agents-prompt-error">{error}</p>}
             <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
-              <button type="button" className="btn-ghost" data-testid="agents-prompt-later" onClick={later}>Not now</button>
-              <button type="button" className="btn-primary" data-testid="agents-prompt-save" onClick={() => void save(agentsMissing(deal))}>Save</button>
+              <button type="button" className="btn-ghost max-sm:h-11 max-sm:flex-1" data-testid="agents-prompt-later" onClick={later}>Not now</button>
+              <button type="button" className="btn-primary max-sm:h-11 max-sm:flex-1" data-testid="agents-prompt-save" onClick={() => void save(agentsMissing(deal))}>Save</button>
             </div>
             <p className="mt-2 text-xs text-faint">Don&apos;t have one yet? Close this for now; we&apos;ll ask again the next time you sign in until both are on file.</p>
           </div>

@@ -1,5 +1,6 @@
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Loader2 } from "lucide-react";
 import { Badge, Section } from "@/components/ui";
 import { docBadge, OWN_DOC_ID, ownDocProblem, splitDocs, uploadLabel } from "@/lib/borrower-docs";
 import type { Deal, Doc } from "@/lib/mockData";
@@ -10,12 +11,18 @@ const newDocId = () => `own-${Math.random().toString(36).slice(2, 12)}`;
 /**
  * The borrower's documents for a loan, as two lists: what's still to send (anything sent back first, with what the team
  * still needs) and what's in. Each can be dropped on or tapped to upload; on a phone the picker offers the camera too.
- * Anything the team didn't ask for can be added at the foot.
+ * Anything the team didn't ask for can be added at the foot. Once the loan has funded (`settled`) and nothing is left to
+ * send, the list folds to one line, since it's history by then.
  */
-export function BorrowerDocuments({ deal }: { deal: Deal }) {
+export function BorrowerDocuments({ deal, settled = false }: { deal: Deal; settled?: boolean }) {
   const { uploadDoc, dispatch, viewerName } = useStore();
   const { toDo, submitted } = splitDocs(deal.docs);
   const [tab, setTab] = useState<"todo" | "submitted">(toDo.length ? "todo" : "submitted");
+  const [unfolded, setUnfolded] = useState(false);
+  // A big file on a phone's connection takes a while: the button says so, and a line says when it's in.
+  const [busy, setBusy] = useState<string | null>(null);
+  const [notice, setNotice] = useState("");
+  useEffect(() => { if (!notice) return; const timer = setTimeout(() => setNotice(""), 6000); return () => clearTimeout(timer); }, [notice]);
   const fileRef = useRef<HTMLInputElement>(null);
   const [target, setTarget] = useState<string | null>(null);
   const [drag, setDrag] = useState<string | null>(null);
@@ -23,13 +30,19 @@ export function BorrowerDocuments({ deal }: { deal: Deal }) {
   const [ownName, setOwnName] = useState("");
   const [ownError, setOwnError] = useState("");
   const ownFile = useRef<HTMLInputElement>(null);
-  const upload = (docId: string, file: File) => uploadDoc(deal.id, docId, file);
+  const upload = async (docId: string, file: File, name = deal.docs.find((x) => x.id === docId)?.name ?? "Your document") => {
+    setBusy(docId); setNotice("");
+    const ok = await uploadDoc(deal.id, docId, file);
+    setBusy(null);
+    if (ok) { setNotice(`${name} sent. You'll find it under Submitted.`); navigator.vibrate?.(12); }
+    return ok;
+  };
   const addOwn = async (file: File | undefined) => {
     const problem = ownDocProblem(ownName) ?? (file ? null : "Choose the file.");
     if (problem) return setOwnError(problem);
     const docId = newDocId();
     if (!OWN_DOC_ID.test(docId) || !(await dispatch({ t: "addOwnDoc", dealId: deal.id, docId, name: ownName.trim(), by: viewerName }))) return setOwnError("That didn't go through. Try again.");
-    await upload(docId, file!);
+    await upload(docId, file!, ownName.trim());
     setOwnName(""); setOwnError(""); setAdding(false); setTab("submitted");
   };
   const card = (x: Doc) => {
@@ -51,18 +64,32 @@ export function BorrowerDocuments({ deal }: { deal: Deal }) {
         )}
         {x.fileName && (x.documentId ? <a href={`/api/documents/${x.documentId}`} className="mt-2 block truncate text-xs text-link underline underline-offset-2" data-testid="doc-file">📎 {x.fileName}</a> : <p className="mt-2 truncate text-xs text-muted-foreground">📎 {x.fileName}</p>)}
         {x.carriedFrom && <p className="mt-1 text-xs text-good" data-testid="doc-carried">On file from your loan {x.carriedFrom}</p>}
-        {(x.status === "requested" || x.status === "rejected" || x.status === "uploaded") && <button type="button" className={`${x.status === "uploaded" ? "btn-ghost" : "btn-primary"} mt-2 h-9! px-3! text-xs!`} onClick={() => { setTarget(x.id); fileRef.current?.click(); }}>{uploadLabel(x)}</button>}
+        {(x.status === "requested" || x.status === "rejected" || x.status === "uploaded") && <button type="button" disabled={Boolean(busy)} className={`${x.status === "uploaded" ? "btn-ghost" : "btn-primary"} mt-2 h-9! px-3! text-xs! max-sm:h-11! max-sm:w-full max-sm:text-sm!`} onClick={() => { setTarget(x.id); fileRef.current?.click(); }}>{busy === x.id ? <><Loader2 className="size-3.5 animate-spin" aria-hidden="true" />Sending…</> : uploadLabel(x)}</button>}
       </li>
     );
   };
+  const accepted = deal.docs.filter((x) => x.status === "accepted").length;
+  if (settled && !toDo.length && !unfolded) {
+    return (
+      <div id="documents">
+        <Section title="Your documents">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-sm" data-testid="docs-settled">
+            <p>{deal.docs.length ? <><span className="text-good" aria-hidden="true">✓</span> {accepted === deal.docs.length ? `All ${accepted} accepted` : `${accepted} of ${deal.docs.length} accepted, nothing left to send`}</> : "No documents on this loan."}</p>
+            {deal.docs.length > 0 && <button type="button" className="min-h-11 text-sm text-link underline underline-offset-2" data-testid="docs-unfold" onClick={() => setUnfolded(true)}>Show them</button>}
+          </div>
+        </Section>
+      </div>
+    );
+  }
   const tabButton = (key: "todo" | "submitted", label: string, count: number) => (
-    <button type="button" role="tab" aria-selected={tab === key} data-testid={`docs-tab-${key}`} onClick={() => setTab(key)} className={`rounded-full px-3 py-1.5 text-xs font-medium ${tab === key ? "bg-primary text-primary-foreground" : "border border-rule text-muted-foreground hover:text-foreground"}`}>{label} ({count})</button>
+    <button type="button" role="tab" aria-selected={tab === key} data-testid={`docs-tab-${key}`} onClick={() => setTab(key)} className={`rounded-full px-3 py-1.5 text-xs font-medium max-sm:min-h-10 max-sm:flex-1 max-sm:text-sm ${tab === key ? "bg-primary text-primary-foreground" : "border border-rule text-muted-foreground hover:text-foreground"}`}>{label} ({count})</button>
   );
   return (
     <div id="documents">
-      <Section title="Your documents" right={<span className="text-xs text-muted-foreground">{deal.docs.filter((x) => x.status === "accepted").length}/{deal.docs.length} accepted</span>}>
+      <Section title="Your documents" right={<span className="text-xs text-muted-foreground">{accepted}/{deal.docs.length} accepted</span>}>
         <input ref={fileRef} type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,.webp,.heic,.doc,.docx,.xls,.xlsx,.csv,.txt" data-testid="file-input"
           onChange={(event) => { const file = event.target.files?.[0]; if (file && target) void upload(target, file); event.target.value = ""; }} />
+        {notice && <p className="mb-3 rounded-[2px] bg-good/10 p-2 text-sm text-good" role="status" data-testid="docs-notice">✓ {notice}</p>}
         <div className="mb-3 flex flex-wrap gap-2" role="tablist" aria-label="Documents">{tabButton("todo", "To do", toDo.length)}{tabButton("submitted", "Submitted", submitted.length)}</div>
         {/* Both lists stay on the page, so a document just sent is still there to find; only the chosen one shows. */}
         <div className={tab === "todo" ? "" : "hidden"} role="tabpanel" data-testid="docs-todo">

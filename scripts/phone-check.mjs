@@ -18,13 +18,15 @@ const SEATS = {
   "bella.buyer@lendhous.test": ["/admin/buyer", "/admin/buyer/loans/s-d9", "/admin/buyer/portfolio"],
 };
 // Tabs and steps that only render after a click.
-const CLICKS = { "/admin": ["attention-toggle", "filters-toggle", "layout-board"], "/start": ["add-comp"], "/embed/quote": ["add-comp"], "/admin/reports": ["range-custom"], "/apply/demo": ["app-next", "app-next"], "/admin/deals/d13": ["tab-Servicing", "waive-fee", "declare-default", "start-payoff"], "/admin/deals/d14": ["tab-Servicing", "approve-extension"], "/admin/deals/d16": ["close-application"], "/admin/deals/d7": ["tab-Closing", "change-wire"], "/admin/borrower/d1": ["close-application", "doc-category-toggle", "timeline-summary"], "/admin/servicing": ["record-payment"], "/admin/apply": ["app-next"], "/admin/deals/d1": ["tab-Credit review", "fill-sponsor"], "/admin/deals/d5": ["tab-Credit review"], "/admin/deals/d6": ["tab-Credit review", "edit-sponsor"], "/photos/demo": ["photo-start", "photo-next", "photo-next", "photo-next", "photo-next"], "/admin/deals/d2": ["tab-Documents", "ask-photos"], "/admin/draws": ["ask-photos"], "/admin/deals/d3": ["tab-Credit review", "tab-Score & Flags", "tab-Capital Routing", "tab-Documents", "tab-Messages"], "/admin/borrower/d2": ["request-draw"] };
+const CLICKS = { "/admin": ["attention-toggle", "filters-toggle", "layout-board"], "/start": ["add-comp"], "/embed/quote": ["add-comp"], "/admin/reports": ["range-custom"], "/apply/demo": ["app-next", "app-next"], "/admin/deals/d13": ["tab-Servicing", "waive-fee", "declare-default", "start-payoff"], "/admin/deals/d14": ["tab-Servicing", "approve-extension"], "/admin/deals/d16": ["close-application"], "/admin/deals/d7": ["tab-Closing", "change-wire"], "/admin/borrower/d1": ["close-application", "doc-category-toggle", "timeline-summary"], "/admin/servicing": ["record-payment"], "/admin/apply": ["app-next"], "/admin/deals/d1": ["tab-Credit review", "fill-sponsor"], "/admin/deals/d5": ["tab-Credit review"], "/admin/deals/d6": ["tab-Credit review", "edit-sponsor"], "/photos/demo": ["photo-start", "photo-next", "photo-next", "photo-next", "photo-next"], "/admin/deals/d2": ["tab-Documents", "ask-photos"], "/admin/draws": ["draw-details-toggle", "ask-photos"], "/admin/deals/d3": ["tab-Credit review", "tab-Score & Flags", "tab-Capital Routing", "tab-Documents", "tab-Messages"], "/admin/borrower/d2": ["request-draw"] };
 
 // Reads the page in the browser: anything past the right edge, and anything that scrolls sideways.
 const measure = () => {
   const width = document.documentElement.clientWidth;
   const name = (el) => `${el.tagName.toLowerCase()}${el.getAttribute("data-testid") ? `[${el.getAttribute("data-testid")}]` : ""}.${String(el.className.baseVal ?? el.className).split(/\s+/).slice(0, 3).join(".")} "${(el.innerText || "").trim().slice(0, 30).replace(/\n/g, " ")}"`;
   const hiddenByAncestor = (el) => el.closest("[aria-hidden='true'], .sr-only");
+  // A row meant to slide sideways (data-scroll-row, like a loan's tabs) may; the row itself still has to fit the page.
+  const inScrollRow = (el) => el.parentElement?.closest("[data-scroll-row]");
   const past = [];
   const scrollers = [];
   for (const el of document.querySelectorAll("body *")) {
@@ -32,8 +34,8 @@ const measure = () => {
     if (style.display === "none" || style.visibility === "hidden" || style.position === "fixed") continue;
     const box = el.getBoundingClientRect();
     if (box.width === 0 || box.height === 0 || hiddenByAncestor(el)) continue;
-    if (box.right > width + 1 || box.left < -1) past.push(`${name(el)} right=${Math.round(box.right)}`);
-    if (["auto", "scroll"].includes(style.overflowX) && el.scrollWidth > el.clientWidth + 1) scrollers.push(`${name(el)} ${el.scrollWidth}>${el.clientWidth}`);
+    if ((box.right > width + 1 || box.left < -1) && !inScrollRow(el)) past.push(`${name(el)} right=${Math.round(box.right)}`);
+    if (["auto", "scroll"].includes(style.overflowX) && el.scrollWidth > el.clientWidth + 1 && !el.hasAttribute("data-scroll-row")) scrollers.push(`${name(el)} ${el.scrollWidth}>${el.clientWidth}`);
   }
   return { docWidth: document.documentElement.scrollWidth, width, past: past.slice(0, 4), scrollers: scrollers.slice(0, 3) };
 };

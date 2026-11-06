@@ -21,8 +21,11 @@ function ReferralLink({ code }: { code: string }) {
   const [copied, setCopied] = useState(false);
   // The site's address is only known in the browser, so it's added after the page first draws.
   const [origin, setOrigin] = useState("");
-  useEffect(() => setOrigin(window.location.origin), []);
+  // A phone hands the link to its own share menu (Messages, WhatsApp, email); elsewhere it's copied.
+  const [canShare, setCanShare] = useState(false);
+  useEffect(() => { setOrigin(window.location.origin); setCanShare(typeof navigator.share === "function" && window.matchMedia("(pointer: coarse)").matches); }, []);
   const url = `${origin}${referralPath(code)}`;
+  const share = () => void navigator.share({ title: "Your LendHous loan quote", text: "See indicative terms for your deal on the spot, with no credit check:", url }).catch(() => {});
   return (
     <div className="glass flex flex-wrap items-center justify-between gap-3 p-4" data-testid="referral-link">
       <div className="min-w-0 flex-1 basis-64">
@@ -30,7 +33,10 @@ function ReferralLink({ code }: { code: string }) {
         <p className="text-sm text-muted-foreground">Send it to clients: a quote request through it comes to LendHous as yours, and the borrower stays yours for {PROTECTION_MONTHS} months.</p>
         <p className="mt-1 truncate font-mono text-xs" data-testid="referral-url">{url}</p>
       </div>
-      <button type="button" className="btn-ghost" data-testid="copy-referral" onClick={() => void navigator.clipboard?.writeText(url).then(() => setCopied(true), () => setCopied(false))}>{copied ? "Copied" : "Copy link"}</button>
+      <div className="flex gap-2 max-sm:w-full">
+        {canShare && <button type="button" className="btn-primary max-sm:h-11 max-sm:flex-1" data-testid="share-referral" onClick={share}>Share link</button>}
+        <button type="button" className="btn-ghost max-sm:h-11 max-sm:flex-1" data-testid="copy-referral" onClick={() => void navigator.clipboard?.writeText(url).then(() => setCopied(true), () => setCopied(false))}>{copied ? "Copied" : "Copy link"}</button>
+      </div>
     </div>
   );
 }

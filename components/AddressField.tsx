@@ -62,9 +62,9 @@ export function AddressField({ value, onChange, label = "Property address", vari
 
   const site = variant === "site";
   const input = site ? "" : "desk-input";
-  const part = (key: keyof AddressValue, text: string, extra: { max?: number; auto?: string } = {}) => (
+  const part = (key: keyof AddressValue, text: string, extra: { max?: number; auto?: string; mode?: "numeric" } = {}) => (
     <label className={site ? "" : "block min-w-0"}>{site ? text : <span className="label">{text}</span>}
-      <input className={input} data-testid={`${testid}-${key}`} required={required && key !== "county"} maxLength={extra.max ?? 100} autoComplete={extra.auto} value={value[key]} onChange={(event) => onChange({ ...value, [key]: key === "state" ? event.target.value.toUpperCase().slice(0, 2) : event.target.value })} />
+      <input className={input} data-testid={`${testid}-${key}`} required={required && key !== "county"} maxLength={extra.max ?? 100} autoComplete={extra.auto} inputMode={extra.mode} value={value[key]} onChange={(event) => onChange({ ...value, [key]: key === "state" ? event.target.value.toUpperCase().slice(0, 2) : event.target.value })} />
     </label>
   );
   return (
@@ -91,11 +91,12 @@ export function AddressField({ value, onChange, label = "Property address", vari
           )}
         </AnimatePresence>
       </div>
-      <div className={site ? "fields" : `grid grid-cols-2 gap-3 ${county ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
+      {/* Two to a row on a phone too: city and state, ZIP and county. */}
+      <div className={site ? "fields fields-phone-2" : `grid grid-cols-2 gap-3 ${county ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
         {part("city", "City", { auto: "address-level2" })}
         {part("state", "State", { max: 2, auto: "address-level1" })}
-        {part("zip", "ZIP", { max: 10, auto: "postal-code" })}
-        {county && part("county", "County (if you know it)")}
+        {part("zip", "ZIP", { max: 10, auto: "postal-code", mode: "numeric" })}
+        {county && part("county", site ? "County (optional)" : "County (if you know it)")}
       </div>
     </div>
   );

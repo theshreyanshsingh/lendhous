@@ -55,6 +55,21 @@ export default function DealWorkspace() {
   const [tab, setTab] = useState<Tab>("Numbers & Ratios");
   // The work queue links straight to the tab where its item is done (?tab=Documents).
   useEffect(() => { const asked = new URLSearchParams(window.location.search).get("tab"); if (asked && (allTabs as readonly string[]).includes(asked)) setTab(asked as Tab); }, []);
+  // Opening a tab from far down the page starts it at its top, just under the tab row, and brings the tab itself into view.
+  const openTab = (next: Tab, button: HTMLElement) => {
+    setTab(next);
+    // Sideways only: scrollIntoView would also move the page to where the pinned row started.
+    const row = button.parentElement;
+    if (row) row.scrollTo({ left: button.offsetLeft - (row.clientWidth - button.offsetWidth) / 2, behavior: "smooth" });
+    const bar = button.closest<HTMLElement>("[data-testid='deal-tabs']");
+    const stuck = bar && bar.getBoundingClientRect().top <= parseFloat(getComputedStyle(bar).top) + 1;
+    if (!bar || !stuck) return;
+    // The new tab renders after this click; then put its top just under the row.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const content = bar.nextElementSibling;
+      if (content) window.scrollBy({ top: content.getBoundingClientRect().top - bar.getBoundingClientRect().bottom - 12, behavior: "instant" });
+    }));
+  };
   const today = useServiceDay();
   const [ov, setOv] = useState<Partial<Application>>({});
   const [routeSel, setRouteSel] = useState<"in_house" | "partner" | "split" | null>(null);
@@ -140,8 +155,11 @@ export default function DealWorkspace() {
             <button type="button" className="btn-ghost h-9! px-3! text-xs!" data-testid="reprice-loan" disabled={!repriced.eligible} onClick={() => dispatch({ t: "repriceLoan", dealId: d.id, by: viewerName })}>Reprice on current pricing</button>
           </div>
         )}
-        <div className="mt-4 grid grid-cols-2 border-b border-border sm:grid-cols-3 xl:flex xl:flex-wrap xl:gap-1">
-          {tabs.map((t) => <button key={t} data-testid={`tab-${t}`} onClick={() => setTab(t)} className={`border-b-2 px-3 py-2 text-left text-sm font-semibold sm:whitespace-nowrap ${tab === t ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>{t}</button>)}
+      </div>
+      {/* One row that stays under the top bar while the tab scrolls; on a phone it slides sideways, the open tab in view. */}
+      <div className="sticky top-14 z-20 -mx-4 -mt-1 border-b border-border bg-background/95 px-4 backdrop-blur md:-mx-[22px] md:px-[22px] lg:top-0" data-testid="deal-tabs">
+        <div role="tablist" aria-label="Loan" data-scroll-row className="flex gap-1 overflow-x-auto [scrollbar-width:none] max-xl:snap-x [&::-webkit-scrollbar]:hidden">
+          {tabs.map((t) => <button key={t} type="button" role="tab" aria-selected={tab === t} data-testid={`tab-${t}`} onClick={(event) => openTab(t, event.currentTarget)} className={`min-h-11 shrink-0 snap-start border-b-2 px-3 py-2 text-sm font-semibold whitespace-nowrap ${tab === t ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>{t}</button>)}
         </div>
       </div>
 

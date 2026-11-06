@@ -1320,11 +1320,32 @@ const bp = await borrowerPhone.newPage();
 await bp.goto(BASE + "/admin/borrower");
 ok("a borrower's phone has a tab bar and no menu button", (await bp.getByTestId("borrower-tabs").isVisible()) && !(await bp.getByRole("button", { name: "Open navigation" }).isVisible()));
 await bp.getByTestId("tab-bar-upload").click();
-ok("its Upload tab opens the loan that needs something", await bp.waitForURL(/\/admin\/borrower\/d\w+/, { timeout: 5000 }).then(() => true, () => false));
+ok("its Upload tab lists everything still needed in one sheet", (await seen(bp.getByTestId("upload-sheet"))) && (await bp.getByTestId("upload-item").count()) >= 1);
+const [chooser] = await Promise.all([bp.waitForEvent("filechooser"), bp.getByTestId("upload-item").first().getByRole("button").click()]);
+await chooser.setFiles({ name: "FAKE-phone-photo.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 fake") });
+ok("and sends one from there in a tap, marked sent", await seen(bp.getByTestId("upload-sent")));
+await shot(bp, "09c-mobile-upload-sheet.png", false);
+await bp.keyboard.press("Escape");
+await bp.getByTestId("upload-sheet").waitFor({ state: "detached", timeout: 3000 }).catch(() => {});
 await bp.getByTestId("tab-bar-account").click();
 ok("and Account opens the menu", await bp.getByTestId("account-menu").last().isVisible());
 await shot(bp, "09b-mobile-borrower-tabs.png", false);
+await bp.goto(BASE + "/admin/borrower/d1");
+await bp.getByTestId("needs-upload").click();
+ok("a loan's checklist on a phone sends its documents from one button", await seen(bp.getByTestId("upload-sheet")));
 await borrowerPhone.close();
+
+// A partner's, buyer's or broker's phone gets a tab bar of its own pages too.
+const partnerPhone = await browser.newContext({ viewport: { width: 375, height: 760 }, isMobile: true, hasTouch: true });
+await partnerPhone.addCookies(sessions[SEATS.partner]);
+const ptp = await partnerPhone.newPage();
+await ptp.goto(BASE + "/admin/partner/portfolio");
+ok("a partner's phone has its own tab bar, with only the open page lit", (await ptp.getByTestId("firm-tabs").isVisible()) && (await ptp.getByTestId("firm-tabs").locator("[aria-current='page']").innerText()).includes("Portfolio") && (await ptp.getByTestId("firm-tabs").locator("[aria-current='page']").count()) === 1);
+await partnerPhone.setOffline(true);
+ok("a phone that loses its signal is told it's offline", await seen(ptp.getByTestId("offline")));
+await partnerPhone.setOffline(false);
+ok("and the line goes once it's back", await ptp.getByTestId("offline").waitFor({ state: "detached", timeout: 5000 }).then(() => true, () => false));
+await partnerPhone.close();
 
 // The sheets and the menu open over the page, so the phone-check script doesn't see them.
 const phone = await browser.newContext({ viewport: { width: 375, height: 760 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
@@ -1332,7 +1353,8 @@ await phone.addCookies(sessions[SEATS.staff]);
 const pp = await phone.newPage();
 const fits = () => pp.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth && [...document.querySelectorAll("[data-slot='sheet-content'] *")].every((el) => el.getBoundingClientRect().right <= document.documentElement.clientWidth + 1));
 await pp.goto(BASE + "/admin");
-await pp.getByRole("button", { name: "Open navigation" }).click();
+ok("the team's phone has a tab bar with what's waiting, and no menu button up top", (await pp.getByTestId("staff-tabs").isVisible()) && !(await pp.getByRole("button", { name: "Open navigation" }).isVisible()));
+await pp.getByTestId("tab-bar-menu").click();
 // The owners' tools are folded under Admin until opened.
 await pp.getByTestId("nav-group-Admin").last().click();
 await pp.getByRole("link", { name: "Members" }).click();
@@ -1342,7 +1364,36 @@ await pp.getByTestId("invite-member").click();
 await pp.getByTestId("member-name").waitFor();
 ok("the invite sheet fits a phone", await fits());
 await shot(pp, "15-mobile-invite-member.png", false);
+// A draw on a phone is its amount and its buttons; the lines open on a tap.
+await pp.goto(BASE + "/admin/draws");
+const waitingDraw = pp.getByTestId("draw-card").filter({ has: pp.getByTestId("send-inspector") }).first();
+ok("a draw on the team's phone shows what's asked and folds its lines", (await waitingDraw.getByTestId("draw-summary").isVisible()) && !(await waitingDraw.locator("table").isVisible()) && (await waitingDraw.getByTestId("send-inspector").isVisible()));
+await waitingDraw.getByTestId("draw-details-toggle").click();
+ok("and opens them on a tap", await waitingDraw.locator("table").isVisible());
+// A loan's tabs stay under the top bar, and one opened from far down starts at its top.
+await pp.goto(BASE + "/admin/deals/d1");
+await pp.evaluate(() => window.scrollTo(0, 1800));
+await pp.getByTestId("tab-Documents").click();
+await pp.waitForTimeout(300);
+ok("a loan's tabs stay in reach on a phone and open at their top", await pp.evaluate(() => { const bar = document.querySelector("[data-testid='deal-tabs']").getBoundingClientRect(); const content = document.querySelector("[data-testid='deal-tabs']").nextElementSibling.getBoundingClientRect(); return bar.top >= 0 && bar.top <= 60 && content.top >= bar.bottom && content.top <= bar.bottom + 40; }));
 await phone.close();
+
+// A visitor's phone: the quote's fields don't make iPhones zoom, its button stays under the thumb, and the other pages
+// offer it at the foot once the first screen is passed.
+const visitorPhone = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+const vp = await visitorPhone.newPage();
+await vp.goto(BASE + "/");
+const ctaOn = () => vp.getByTestId("phone-cta").evaluate((el) => el.classList.contains("on"));
+const beforeScroll = await ctaOn();
+await vp.evaluate(() => window.scrollTo(0, 1500));
+await vp.waitForTimeout(400);
+ok("the site's pages offer See your terms at the foot of a phone once past the first screen", !beforeScroll && (await ctaOn()) && (await vp.getByTestId("phone-cta").getByRole("link", { name: /See your terms/ }).isVisible()));
+await vp.goto(BASE + "/start");
+ok("the quote's fields are all 16px on a phone, so iPhones don't zoom in", await vp.evaluate(() => [...document.querySelectorAll(".quote-form input:not([type=file]), .quote-form select")].every((el) => parseFloat(getComputedStyle(el).fontSize) >= 16)));
+await vp.evaluate(() => window.scrollTo(0, 1200));
+ok("and See my terms stays at the foot of the screen through every step", await vp.getByTestId("quote-see-terms").evaluate((el) => { const box = el.getBoundingClientRect(); return box.top > 0 && box.bottom <= window.innerHeight; }));
+ok("and the kind of loan comes first", (await vp.locator(".quote-step-title").first().innerText()).includes("The loan"));
+await visitorPhone.close();
 
 // cold load of every route in a fresh browser, as the seat that owns it: catches hydration mismatches that
 // client-side navigation hides

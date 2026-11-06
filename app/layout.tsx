@@ -6,8 +6,11 @@ import { ThemeProvider } from "next-themes";
 export const metadata: Metadata = {
   title: { default: "LendHous", template: "%s · LendHous" },
   description: "LendHous private lending for real estate investors.",
+  // Added to an iPhone's home screen, the portal opens full screen like an app (app/manifest.ts does the same elsewhere).
+  appleWebApp: { capable: true, title: "LendHous", statusBarStyle: "default" },
 };
-export const viewport: Viewport = { width: "device-width", initialScale: 1, themeColor: "#202B28" };
+// Cover lets the phone bars reach under the home indicator, padded by the safe-area insets.
+export const viewport: Viewport = { width: "device-width", initialScale: 1, viewportFit: "cover", themeColor: "#202B28" };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (

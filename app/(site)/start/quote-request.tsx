@@ -116,15 +116,29 @@ export function QuoteRequest({ pricing, signupOpen = false, referral, embed }: {
     <form className="quote-form" onSubmit={submit} data-testid="quote-form" noValidate>
       {referral && <p className="panel quote-small" data-testid="quote-referral">Referred by <b>{referral.name}</b>. They&apos;ll be kept up to date on this request.</p>}
 
+      {/* The kind of loan comes first: it decides what the rest of the form asks. */}
       <section className="panel">
-        <div className="quote-step-title"><i>1</i> The property</div>
+        <div className="quote-step-title"><i>1</i> The loan</div>
+        <div className="quote-chips" role="radiogroup" aria-label="Type of loan">
+          {(Object.entries(LOAN_TYPES) as [LoanType, string][]).map(([key, name]) => <button key={key} type="button" role="radio" aria-checked={draft.loanType === key} data-testid={`quote-loan-${key}`} className={`quote-chip ${draft.loanType === key ? "on" : ""}`} onClick={() => put({ loanType: key })}>{name}</button>)}
+        </div>
+        <div className="fields fields-phone-2" style={{ marginTop: 20 }}>
+          {select("Purpose", draft.purpose, PURPOSES, (purpose) => put({ purpose }), "quote-purpose")}
+          {select("Exit strategy", draft.exit, EXITS, (exit) => put({ exit }), "quote-exit")}
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="quote-step-title"><i>2</i> The property</div>
         <AddressField variant="site" testid="quote-address" value={draft.address} onChange={(address) => put({ address })} />
         <div style={{ marginTop: 20 }}><PropertyPhotoPicker onChange={setPhotos} testid="quote-photos" /></div>
         <div className="fields" style={{ marginTop: 20 }}>
           {select("Property type", draft.propertyType, PROPERTY_TYPES, (propertyType) => put({ propertyType }), "quote-type")}
-          {text("Bedrooms", draft.beds, (beds) => put({ beds: beds.replace(/[^0-9]/g, "") }), { required: false, max: 3 })}
-          {text("Bathrooms", draft.baths, (baths) => put({ baths: baths.replace(/[^0-9.]/g, "") }), { required: false, max: 4 })}
-          {text("Square footage", draft.sqft, (sqft) => put({ sqft: dollars(sqft) }), { required: false, max: 9 })}
+          <div className="quote-trio">
+            <label>Beds<input inputMode="numeric" data-testid="quote-beds" maxLength={3} value={draft.beds} onChange={(event) => put({ beds: event.target.value.replace(/[^0-9]/g, "") })} /></label>
+            <label>Baths<input inputMode="decimal" data-testid="quote-baths" maxLength={4} value={draft.baths} onChange={(event) => put({ baths: event.target.value.replace(/[^0-9.]/g, "") })} /></label>
+            <label>Sq ft<input inputMode="numeric" data-testid="quote-sqft" maxLength={9} value={draft.sqft} onChange={(event) => put({ sqft: dollars(event.target.value) })} /></label>
+          </div>
           {rehabLoan && money("After-repair value (ARV)", "arv", true, "What it sells for once the work is done. Add comps below to support it.")}
         </div>
         {rehabLoan && (
@@ -141,17 +155,6 @@ export function QuoteRequest({ pricing, signupOpen = false, referral, embed }: {
             {draft.comps.length < 3 && <button type="button" className="text-link" data-testid="add-comp" onClick={() => put({ comps: [...draft.comps, { address: "", price: "", soldOn: "" }] })}>+ Add a comp</button>}
           </div>
         )}
-      </section>
-
-      <section className="panel">
-        <div className="quote-step-title"><i>2</i> The loan</div>
-        <div className="quote-chips" role="radiogroup" aria-label="Type of loan">
-          {(Object.entries(LOAN_TYPES) as [LoanType, string][]).map(([key, name]) => <button key={key} type="button" role="radio" aria-checked={draft.loanType === key} data-testid={`quote-loan-${key}`} className={`quote-chip ${draft.loanType === key ? "on" : ""}`} onClick={() => put({ loanType: key })}>{name}</button>)}
-        </div>
-        <div className="fields" style={{ marginTop: 20 }}>
-          {select("Purpose", draft.purpose, PURPOSES, (purpose) => put({ purpose }), "quote-purpose")}
-          {select("Exit strategy", draft.exit, EXITS, (exit) => put({ exit }), "quote-exit")}
-        </div>
       </section>
 
       <section className="panel">
@@ -175,12 +178,13 @@ export function QuoteRequest({ pricing, signupOpen = false, referral, embed }: {
         </div>
       </section>
 
+      {/* On a phone this rides at the foot of the screen through every step, under the thumb. */}
       {!shown && (
-        <>
+        <div className="quote-go">
           {error && <Arrive className="form-error"><span role="alert" data-testid="quote-error">{error}</span></Arrive>}
           <p className="quote-small">No name, email or phone needed to see your terms. Nothing is sent until you save them.</p>
           <button className="button quote-submit" type="button" data-testid="quote-see-terms" onClick={seeTerms}>See my terms →</button>
-        </>
+        </div>
       )}
 
       {shown && deal && (
@@ -221,9 +225,12 @@ export function QuoteRequest({ pricing, signupOpen = false, referral, embed }: {
           </section>
 
           <label className="hp" aria-hidden="true">Leave this empty<input tabIndex={-1} autoComplete="off" value={honeypot} onChange={(event) => setHoneypot(event.target.value)} /></label>
-          {error && <Arrive className="form-error"><span role="alert" data-testid="quote-error">{error}</span></Arrive>}
           <p className="quote-small">This isn&apos;t an application and doesn&apos;t pull credit. Don&apos;t enter a Social Security number or account details here.</p>
-          <button className="button quote-submit" type="submit" data-testid="quote-submit" disabled={Boolean(sending)}>{sending === "quote" ? "Saving…" : sending ? sending : "Save my terms →"}</button>
+          {/* Once the terms show, saving them rides at the foot of a phone's screen, with any problem just above it. */}
+          <div className="quote-go">
+            {error && <Arrive className="form-error"><span role="alert" data-testid="quote-error">{error}</span></Arrive>}
+            <button className="button quote-submit" type="submit" data-testid="quote-submit" disabled={Boolean(sending)}>{sending === "quote" ? "Saving…" : sending ? sending : "Save my terms →"}</button>
+          </div>
         </>
       )}
     </form>

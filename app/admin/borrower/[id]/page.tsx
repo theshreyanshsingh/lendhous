@@ -70,13 +70,14 @@ export default function BorrowerLoan() {
       <div id="conditions"><BorrowerConditions deal={d} canUpload /></div>
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="min-w-0 space-y-4">
-        <BorrowerDocuments deal={d} />
+        <BorrowerDocuments deal={d} settled={funded || d.status === "paid_off"} />
         {d.sponsor && ["submitted", "initial_review", "underwriting"].includes(d.status) && <Link href={`/admin/borrower/${d.id}/profile`} className="block text-sm text-link underline underline-offset-2" data-testid="edit-profile">Update your guarantors, past deals or credit answers</Link>}
         <div id="property-photos"><PropertyPhotos deal={d} side="client" /></div>
         <ScopeOfWork deal={d} editable />
         <div id="messages"><LoanMessages dealId={d.id} side="borrower" /></div>
         </div>
-        <div className="min-w-0 space-y-4">
+        {/* Once funded, a phone shows the money before the paperwork. */}
+        <div className={`min-w-0 space-y-4 ${funded ? "max-lg:order-first" : ""}`}>
           <Section title={funded ? "Loan balance" : "Estimated terms"}>
             <div className="grid grid-cols-2 gap-3">
               <Stat label="Note amount" value={usd(e.noteAmount)} />
@@ -99,7 +100,7 @@ export default function BorrowerLoan() {
             </Section>
           )}
           {(funded || d.status === "paid_off") && <Showcase deal={d} side="client" />}
-          {!closed && d.status !== "paid_off" && <YourAgents deal={d} />}
+          {PRE_FUNDING.includes(d.status) && <YourAgents deal={d} />}
           <Section title="Your team"><TeamContacts deal={d} /><div className="mt-3 rounded-md bg-bad/10 p-2 text-xs text-bad">Wire-fraud warning: we will never email you wire instructions. Always confirm by phone with a number you already have.</div></Section>
         </div>
       </div>

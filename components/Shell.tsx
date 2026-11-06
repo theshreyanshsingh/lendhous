@@ -10,6 +10,8 @@ import { VIEW_HOME, type View } from "@/lib/permissions";
 import { Logo } from "@/components/logo";
 import { StaffSearch } from "@/components/StaffSearch";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { OPEN_UPLOAD, UploadSheet } from "@/components/UploadSheet";
+import { InstallHint } from "@/components/InstallHint";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 
@@ -41,8 +43,24 @@ export default function Shell({ children, account, view }: { children: React.Rea
   const path = usePathname();
   const { s, newLeads, error, clearError } = useStore();
   const [open, setOpen] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  // On a site with no signal, say so before a save or an upload fails.
+  const [offline, setOffline] = useState(false);
+  useEffect(() => {
+    const check = () => setOffline(!navigator.onLine);
+    check();
+    window.addEventListener("online", check);
+    window.addEventListener("offline", check);
+    return () => { window.removeEventListener("online", check); window.removeEventListener("offline", check); };
+  }, []);
   const waiting = attentionCounts(s, newLeads);
-  useEffect(() => setOpen(false), [path]);
+  useEffect(() => { setOpen(false); setUploading(false); }, [path]);
+  useEffect(() => {
+    if (view !== "borrower") return;
+    const show = () => setUploading(true);
+    window.addEventListener(OPEN_UPLOAD, show);
+    return () => window.removeEventListener(OPEN_UPLOAD, show);
+  }, [view]);
   const counted: Record<string, number> = view === "admin" ? { "/admin/leads": waiting.leads, "/admin/draws": waiting.draws, "/admin/loan-sales": waiting.offers, "/admin/servicing": waiting.servicing } : {};
   const items: NavItem[] = [
     ...(view ? nav[view] : []).map((item) => ({ ...item, count: counted[item.href] })),
@@ -58,6 +76,8 @@ export default function Shell({ children, account, view }: { children: React.Rea
     ...(view === "partner" || view === "buyer" || view === "broker" ? [{ href: "/admin/account/tax", label: "Tax form", icon: FileText, section: "Account" }] : []),
   ];
   const logoHref = view ? VIEW_HOME[view] : "/admin/account/security";
+  // Borrowers and staff get a tab bar on a phone, except a borrower applying, where Back and Next own the bottom of the screen.
+  const tabBar = (view === "borrower" && !path.startsWith("/admin/apply")) || view === "admin" || view === "partner" || view === "buyer" || view === "broker";
   return (
     <div className="min-h-screen">
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-72 flex-col border-r border-sidebar-border bg-sidebar px-3 pt-3.5 pb-3 lg:flex">
@@ -67,10 +87,11 @@ export default function Shell({ children, account, view }: { children: React.Rea
         <Controls account={account} />
       </aside>
       <div className="lg:pl-72">
-        <div className="sticky top-0 z-30 flex items-center justify-between border-b border-rule bg-background px-4 py-3 lg:hidden">
+        {/* One fixed height with or without the menu button, so bars pinned below it (a loan's tabs) sit flush. */}
+        <div className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-rule bg-background px-4 lg:hidden">
           <Logo href={logoHref} />
           <Sheet open={open} onOpenChange={setOpen}>
-            <SheetTrigger className={cn("size-9 items-center justify-center rounded-[2px] border border-rule bg-background", view === "borrower" && !path.startsWith("/admin/apply") ? "hidden md:inline-flex" : "inline-flex")} aria-label="Open navigation">
+            <SheetTrigger className={cn("size-9 items-center justify-center rounded-[2px] border border-rule bg-background", tabBar ? "hidden md:inline-flex" : "inline-flex")} aria-label="Open navigation">
               <Menu className="size-4" />
             </SheetTrigger>
             <SheetContent side="left" className="flex flex-col bg-sidebar px-3 pt-10 pb-3">
@@ -80,33 +101,87 @@ export default function Shell({ children, account, view }: { children: React.Rea
             </SheetContent>
           </Sheet>
         </div>
-        <main id="desk" className={cn("mx-auto min-w-0 max-w-7xl px-4 pt-5 md:px-[22px] md:pt-7 md:pb-12", view === "borrower" ? "pb-28" : "pb-10")}>{account.staleJobs.length > 0 && <div role="alert" className="mb-4 rounded-[2px] border border-bad/40 bg-bad/10 px-4 py-3 text-sm text-bad" data-testid="stale-jobs">The nightly {account.staleJobs.join(" and the ")} {account.staleJobs.length === 1 ? "hasn't" : "haven't"} run in over two days. Check that the jobs process is running on the server (<code>pm2 ls</code> shows <code>lendhous-jobs</code>), or run <code>npm run jobs</code>.</div>}{error && <div role="alert" className="mb-4 flex items-start justify-between gap-3 rounded-[2px] border border-bad/40 bg-bad/10 px-4 py-3 text-sm text-bad" data-testid="book-error"><span className="min-w-0">{error}</span><button type="button" className="shrink-0 underline" onClick={clearError}>Dismiss</button></div>}<SampleDataBar path={path} demo={account.demo} offer={account.offerSample} />{children}</main>
+        <main id="desk" className={cn("mx-auto min-w-0 max-w-7xl px-4 pt-5 md:px-[22px] md:pt-7 md:pb-12", tabBar ? "pb-28" : "pb-10")}>{offline && <div role="status" className="mb-4 rounded-[2px] border border-warn/40 bg-warn/12 px-4 py-2.5 text-sm text-warn" data-testid="offline">You&apos;re offline. Saves and uploads won&apos;t go through until you&apos;re back online.</div>}{account.staleJobs.length > 0 && <div role="alert" className="mb-4 rounded-[2px] border border-bad/40 bg-bad/10 px-4 py-3 text-sm text-bad" data-testid="stale-jobs">The nightly {account.staleJobs.join(" and the ")} {account.staleJobs.length === 1 ? "hasn't" : "haven't"} run in over two days. Check that the jobs process is running on the server (<code>pm2 ls</code> shows <code>lendhous-jobs</code>), or run <code>npm run jobs</code>.</div>}{error && <div role="alert" className="mb-4 flex items-start justify-between gap-3 rounded-[2px] border border-bad/40 bg-bad/10 px-4 py-3 text-sm text-bad" data-testid="book-error"><span className="min-w-0">{error}</span><button type="button" className="shrink-0 underline" onClick={clearError}>Dismiss</button></div>}<SampleDataBar path={path} demo={account.demo} offer={account.offerSample} />{view && path === VIEW_HOME[view] && <InstallHint />}{children}</main>
       </div>
-      {/* While applying, Back and Next own the bottom of the screen. */}
-      {view === "borrower" && !path.startsWith("/admin/apply") && <BorrowerTabs path={path} onAccount={() => setOpen(true)} />}
+      {tabBar && view === "borrower" && <BorrowerTabs path={path} onAccount={() => setOpen(true)} onUpload={() => setUploading(true)} />}
+      {view === "borrower" && <UploadSheet open={uploading} onOpenChange={setUploading} />}
+      {tabBar && view === "admin" && <StaffTabs path={path} counts={counted} onMenu={() => setOpen(true)} />}
+      {tabBar && (view === "partner" || view === "buyer" || view === "broker") && <FirmTabs path={path} items={FIRM_TABS[view]} onMenu={() => setOpen(true)} />}
     </div>
   );
 }
 
+/** A partner's, buyer's or broker's phone: their two pages in short words, and the rest (tax form, account) behind Menu. */
+const FIRM_TABS: Record<"partner" | "buyer" | "broker", { href: string; label: string; icon: LucideIcon }[]> = {
+  partner: [{ href: "/admin/partner", label: "Deal feed", icon: BookOpen }, { href: "/admin/partner/portfolio", label: "Portfolio", icon: Briefcase }],
+  buyer: [{ href: "/admin/buyer", label: "For sale", icon: Store }, { href: "/admin/buyer/portfolio", label: "My loans", icon: Briefcase }],
+  broker: [{ href: "/admin/broker", label: "My deals", icon: LayoutDashboard }, { href: "/admin/broker/new", label: "New deal", icon: FilePlus }],
+};
+function FirmTabs({ path, items, onMenu }: { path: string; items: { href: string; label: string; icon: LucideIcon }[]; onMenu: () => void }) {
+  const tab = "flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 text-[11px]";
+  // The most specific match lights up, so the portfolio isn't also the deal feed.
+  const current = [...items].sort((a, b) => b.href.length - a.href.length).find((item) => active(path, item.href))?.href;
+  return (
+    <nav className="fixed inset-x-0 bottom-0 z-30 flex border-t border-rule bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden" aria-label="Workspace" data-testid="firm-tabs">
+      {items.map((item) => {
+        const Icon = item.icon;
+        const on = item.href === current;
+        return <Link key={item.href} href={item.href} aria-current={on ? "page" : undefined} className={cn(tab, on ? "font-medium text-foreground" : "text-muted-foreground")}><Icon className="size-5" aria-hidden="true" />{item.label}</Link>;
+      })}
+      <button type="button" className={cn(tab, "text-muted-foreground")} onClick={onMenu} data-testid="tab-bar-menu"><Menu className="size-5" aria-hidden="true" />Menu</button>
+    </nav>
+  );
+}
+
+/** The team's phone: the pipeline and the three inboxes that fill up, each with what's waiting, and the rest behind Menu. */
+function StaffTabs({ path, counts, onMenu }: { path: string; counts: Record<string, number>; onMenu: () => void }) {
+  const tab = "relative flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 text-[11px]";
+  const tabs = [
+    { href: "/admin", label: "Pipeline", icon: ClipboardList },
+    { href: "/admin/leads", label: "Leads", icon: Inbox },
+    { href: "/admin/draws", label: "Draws", icon: Hammer },
+    { href: "/admin/servicing", label: "Servicing", icon: ReceiptText },
+  ];
+  return (
+    <nav className="fixed inset-x-0 bottom-0 z-30 flex border-t border-rule bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden" aria-label="Team" data-testid="staff-tabs">
+      {tabs.map((item) => {
+        const Icon = item.icon;
+        const on = active(path, item.href);
+        const count = counts[item.href];
+        return (
+          <Link key={item.href} href={item.href} aria-current={on ? "page" : undefined} className={cn(tab, on ? "font-medium text-foreground" : "text-muted-foreground")} data-testid={`tab-bar-${item.label.toLowerCase()}`}>
+            <Icon className="size-5" aria-hidden="true" />{item.label}
+            {count ? <span className="absolute top-1.5 left-1/2 ml-2 min-w-4 rounded-full bg-primary px-1 text-center text-[10px] leading-4 font-medium text-primary-foreground" aria-label={`${count} waiting`}>{count}</span> : null}
+          </Link>
+        );
+      })}
+      <button type="button" className={cn(tab, "text-muted-foreground")} onClick={onMenu} data-testid="tab-bar-menu"><Menu className="size-5" aria-hidden="true" />Menu</button>
+    </nav>
+  );
+}
+
 /**
- * A borrower's phone: the four things they come for, under their thumb. Upload and Messages go to the loan they're on,
- * or else the loan that needs something from them.
+ * A borrower's phone: the four things they come for, under their thumb. Upload opens one sheet of everything still
+ * needed; Messages goes to the loan they're on, or else the loan that needs something from them.
  */
-function BorrowerTabs({ path, onAccount }: { path: string; onAccount: () => void }) {
+function BorrowerTabs({ path, onAccount, onUpload }: { path: string; onAccount: () => void; onUpload: () => void }) {
   const { s } = useStore();
   const mine = s.deals.filter((deal) => deal.borrowerId === s.borrowerId);
   const here = mine.find((deal) => path.startsWith(`/admin/borrower/${deal.id}`));
-  const owes = mine.find((deal) => deal.docs.some((doc) => doc.status === "requested" || doc.status === "rejected"));
-  const loan = here ?? owes ?? mine[0];
-  const tab = "flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 text-[11px]";
-  const tabs = [
-    { key: "loans", label: "My loans", icon: LayoutDashboard, href: "/admin/borrower", on: path === "/admin/borrower" },
-    { key: "upload", label: "Upload", icon: Upload, href: loan ? `/admin/borrower/${loan.id}#needs-from-you` : "/admin/apply", on: false },
-    { key: "messages", label: "Messages", icon: MessageSquare, href: loan ? `/admin/borrower/${loan.id}#messages` : "/admin/borrower", on: false },
-  ];
+  const owes = mine.filter((deal) => deal.docs.some((doc) => doc.status === "requested" || doc.status === "rejected"));
+  const owed = owes.reduce((sum, deal) => sum + deal.docs.filter((doc) => doc.status === "requested" || doc.status === "rejected").length, 0);
+  const loan = here ?? owes[0] ?? mine[0];
+  const tab = "relative flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 text-[11px]";
   return (
     <nav className="fixed inset-x-0 bottom-0 z-30 flex border-t border-rule bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden" aria-label="Borrower" data-testid="borrower-tabs">
-      {tabs.map((item) => { const Icon = item.icon; return <Link key={item.key} href={item.href} className={cn(tab, item.on ? "font-medium text-foreground" : "text-muted-foreground")} data-testid={`tab-bar-${item.key}`}><Icon className="size-5" aria-hidden="true" />{item.label}</Link>; })}
+      <Link href="/admin/borrower" aria-current={path === "/admin/borrower" ? "page" : undefined} className={cn(tab, path === "/admin/borrower" ? "font-medium text-foreground" : "text-muted-foreground")} data-testid="tab-bar-loans"><LayoutDashboard className="size-5" aria-hidden="true" />My loans</Link>
+      {mine.length ? (
+        <button type="button" className={cn(tab, "text-muted-foreground")} onClick={onUpload} data-testid="tab-bar-upload">
+          <Upload className="size-5" aria-hidden="true" />Upload
+          {owed ? <span className="absolute top-1.5 left-1/2 ml-2 min-w-4 rounded-full bg-primary px-1 text-center text-[10px] leading-4 font-medium text-primary-foreground" aria-label={`${owed} still needed`}>{owed}</span> : null}
+        </button>
+      ) : <Link href="/admin/apply" className={cn(tab, "text-muted-foreground")} data-testid="tab-bar-upload"><Upload className="size-5" aria-hidden="true" />Upload</Link>}
+      <Link href={loan ? `/admin/borrower/${loan.id}#messages` : "/admin/borrower"} className={cn(tab, "text-muted-foreground")} data-testid="tab-bar-messages"><MessageSquare className="size-5" aria-hidden="true" />Messages</Link>
       <button type="button" className={cn(tab, "text-muted-foreground")} onClick={onAccount} data-testid="tab-bar-account"><UserRound className="size-5" aria-hidden="true" />Account</button>
     </nav>
   );

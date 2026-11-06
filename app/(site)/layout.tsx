@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { SiteFooter, SiteHeader } from "@/components/site-chrome";
+import { SitePhoneCta } from "@/components/site-phone-cta";
 import "./site.css";
 
 export const metadata: Metadata = {
@@ -16,6 +17,7 @@ export default function SiteLayout({ children }: { children: React.ReactNode }) 
       <SiteHeader />
       {children}
       <SiteFooter />
+      <SitePhoneCta />
     </div>
   );
 }

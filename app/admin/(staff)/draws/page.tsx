@@ -53,6 +53,9 @@ function DrawCard({ draw, deal }: { draw: DrawRequest; deal: Deal }) {
   const sanctions = draw.status === "approved" && today ? ofacBlocker(deal, today) : null;
   // Nor before Florida's lien law and the insurance are satisfied, unless an owner released it past them.
   const holds = draw.status === "approved" && today ? unreleasedHolds(deal, draw, today) : [];
+  // On a phone a draw is its summary and its buttons; the lines, photos and lien waivers open on a tap. One waiting on
+  // the inspection's numbers starts open, since they're typed in its lines.
+  const [details, setDetails] = useState(draw.status === "inspecting");
   return (
     <section className="glass min-w-0 p-4 sm:p-5" data-testid="draw-card">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -62,6 +65,11 @@ function DrawCard({ draw, deal }: { draw: DrawRequest; deal: Deal }) {
       {deal.contractorIsGtAffiliate && <p className="mt-2 rounded-md bg-bad/10 p-2 text-xs text-bad">Affiliated contractor: this needs an independent inspector and two approvers.</p>}
       {deal.paymentsLate ? <p className="mt-2 rounded-md bg-bad/10 p-2 text-xs text-bad">This loan has {deal.paymentsLate} payments past due. Nothing can be released until it&apos;s current.</p> : null}
       {draw.note && <p className="mt-2 text-sm">{draw.note}</p>}
+      <p className="mt-2 text-sm sm:hidden" data-testid="draw-summary"><b className="tabular-nums">{usd(drawTotal(draw))}</b> requested across {draw.lines.length} line{draw.lines.length === 1 ? "" : "s"}{holds.length ? ` · ${holds.length} held` : ""}</p>
+      <button type="button" className="mt-2 flex min-h-11 w-full items-center justify-between rounded-[2px] border border-border px-3 text-left text-sm sm:hidden" aria-expanded={details} data-testid="draw-details-toggle" onClick={() => setDetails(!details)}>
+        <span>{details ? "Hide the lines, photos and lien waivers" : "Lines, photos and lien waivers"}</span><span aria-hidden="true">{details ? "−" : "+"}</span>
+      </button>
+      <div className={details ? "" : "max-sm:hidden"}>
       <p className="mt-1 text-xs text-muted-foreground">Inspection contact: {draw.contact || "none given"}{draw.photos.length && !draw.photoIds?.length ? ` · ${draw.photos.length} photo${draw.photos.length > 1 ? "s" : ""}: ${draw.photos.join(", ")}` : ""}</p>
       {draw.photoIds?.length ? <ul className="mt-1 flex flex-wrap gap-x-3 text-xs" data-testid="draw-photos">{draw.photoIds.map((id, index) => <li key={id}><a className="text-link underline underline-offset-2" href={`/api/documents/${id}`}>{draw.photos[index] ?? `Photo ${index + 1}`}</a></li>)}</ul> : null}
       <table className="stack-table mt-3 w-full">
@@ -88,6 +96,7 @@ function DrawCard({ draw, deal }: { draw: DrawRequest; deal: Deal }) {
       </table>
       <div className="mt-3 border-t border-border pt-3"><PhotoRequests deal={deal} draw={draw} /></div>
       <DrawLienChecklist deal={deal} draw={draw} side="team" />
+      </div>
       {draw.status === "inspected" && (
         <p className="mt-3 text-sm" data-testid="draw-review"><b>{usd(review.approved)}</b> supported of {usd(drawTotal(draw))} requested, after retainage.{needed > 1 ? ` Needs two approvers${draw.approvers.length ? `; ${draw.approvers[0]} has approved` : ""}.` : ""}{review.blocked ? ` ${review.blocked}.` : ""}</p>
       )}

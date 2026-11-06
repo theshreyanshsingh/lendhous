@@ -10,6 +10,7 @@ import { PageIntro } from "@/components/page-intro";
 import { Badge, usd, productLabel, statusLabel, Stat } from "@/components/ui";
 import { BorrowerLetters } from "@/components/BorrowerLetters";
 import { EmptyArt } from "@/components/art/HouseArt";
+import { OPEN_UPLOAD } from "@/components/UploadSheet";
 import { PropertyPicture } from "@/components/PropertyPicture";
 import { shortDay } from "@/lib/format";
 import { itemsOwed, nextStepFor } from "@/lib/next-step";
@@ -29,7 +30,13 @@ export default function BorrowerHome() {
         <div className="min-w-0"><PageIntro eyebrow="Welcome back" title={viewerName} lede="Your applications and funded loans. Open one to see its next step and upload documents." /></div>
         <Link href="/admin/apply" className="btn-primary mb-6">+ Apply for a loan</Link>
       </div>
-      {tasks.length > 0 && <div className="glass border-warn/30 bg-warn/12 p-4 text-sm text-warn"><b>{tasks.length} document{tasks.length > 1 ? "s" : ""} needed</b> across your loans. Open a loan to upload.</div>}
+      {tasks.length > 0 && (
+        <div className="glass flex flex-wrap items-center justify-between gap-3 border-warn/30 bg-warn/12 p-4 text-sm text-warn" data-testid="docs-owed">
+          <p className="min-w-0 flex-1 basis-48"><b>{tasks.length} document{tasks.length > 1 ? "s" : ""} needed</b> across your loans.<span className="max-md:hidden"> Open a loan to upload.</span></p>
+          {/* On a phone, all of them in one sheet, straight from the camera. */}
+          <button type="button" className="btn-primary h-11! w-full md:hidden" data-testid="upload-now" onClick={() => window.dispatchEvent(new Event(OPEN_UPLOAD))}>Upload now</button>
+        </div>
+      )}
       <BorrowerLetters />
       {closedLoans.length > 0 && (
         <div className="flex gap-2" role="tablist" aria-label="Your loans">
