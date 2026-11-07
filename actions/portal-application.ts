@@ -10,7 +10,9 @@ import { sendAlerts } from "@/lib/book-alerts";
 import { runAction } from "@/lib/book-store";
 import { completeDraft, CONSENT_VERSION, signatureProblem, STEPS, toLoan, type ConsentKey } from "@/lib/borrower-application";
 import { isDemoEmail } from "@/lib/deploy";
-import { screenAutomatically } from "@/lib/loan-intake";
+import { creditReferral, screenAutomatically } from "@/lib/loan-intake";
+import { recentLeadFor } from "@/lib/lead-store";
+import { prisma } from "@/lib/prisma";
 import { viewFor } from "@/lib/permissions";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import { requestMeta } from "@/lib/request-meta";
@@ -57,7 +59,12 @@ export async function signPortalApplication(raw: unknown, consents: Record<Conse
   const id = await savePortalDraft(user, draft, STEPS.length - 1, now);
   await markSigned(id, draft, { name: signatureName.replace(/\s+/g, " ").trim(), at: now.toISOString(), ip: meta.ipAddress, userAgent: meta.userAgent ?? "", consents, version: CONSENT_VERSION, digest: digestOf(draft) }, dealId, now);
   await audit({ actorId: user.id, action: "application.signed", entityType: "ApplicationLink", entityId: id, after: { dealId, consentVersion: CONSENT_VERSION, from: "portal" } });
+  // The quote they came in with, if it came by a broker's or a borrower's referral link, credits that referral.
+  const lead = await recentLeadFor(user.email).catch(() => null);
+  const referred = lead && !lead.loanId ? await creditReferral(dealId, lead).catch(() => null) : null;
+  // The loan is in by now, so linking the quote to it never fails the application.
+  if (lead && !lead.loanId) await prisma.lead.update({ where: { id: lead.id }, data: { loanId: dealId } }).catch((error) => console.error("[lendhous-portal] could not link the quote to its loan:", error));
   const screened = await screenAutomatically(dealId);
   revalidatePath("/admin/borrower");
-  return { book: scopeBook(screened ?? result.after, user), dealId };
+  return { book: scopeBook(screened ?? referred ?? result.after, user), dealId };
 }

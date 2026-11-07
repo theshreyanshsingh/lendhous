@@ -34,6 +34,9 @@ const application = z.object({
   taxesAnnual: optionalMoney,
   insuranceAnnual: optionalMoney,
   hoaMonthly: optionalMoney,
+  rentalType: z.enum(["long_term", "short_term"]).optional(),
+  strAnnualIncome: optionalMoney,
+  strIncomeSource: z.enum(["payouts", "projection"]).optional(),
   requestedAmount: optionalMoney,
   termMonths: z.number().int().min(1).max(480).optional(),
   interestReserve: z.enum(["none", "financed"]),
@@ -103,13 +106,14 @@ const schema = z.discriminatedUnion("t", [
   z.object({ t: z.literal("suspendBroker"), brokerId: id, reason: text(1000), by: z.string().max(120) }),
   z.object({ t: z.literal("setBrokerPoints"), dealId: id, points: z.number().finite().min(0).max(5) }),
   z.object({ t: z.literal("brokerFeePaid"), dealId: id, amount: money, on: date, reference: text(160), by: z.string().max(120) }),
+  z.object({ t: z.literal("referralBonusPaid"), dealId: id, amount: money, on: date, reference: text(160), by: z.string().max(120) }),
   z.object({ t: z.literal("signNda"), partnerId: z.string().max(120) }),
   z.object({ t: z.literal("signBuyerNda"), buyerId: z.string().max(120) }),
   z.object({ t: z.literal("listLoan"), dealId: id, askPct: z.number().min(50).max(120) }),
   z.object({ t: z.literal("unlistLoan"), saleId: id }),
   z.object({ t: z.literal("offerLoan"), saleId: id, buyerId: z.string().max(120), pricePct: z.number().min(50).max(120), note: text(500), atAsk: z.boolean() }),
   z.object({ t: z.literal("decideOffer"), offerId: id, accept: z.boolean() }),
-  z.object({ t: z.literal("acceptTermSheet"), dealId: id, signedName: text(120).min(1) }),
+  z.object({ t: z.literal("acceptTermSheet"), dealId: id, signedName: text(120).min(1), points: z.number().finite().min(0).max(10).optional() }),
   z.object({ t: z.literal("issueTermSheet"), dealId: id, rate: z.number().positive().max(100), points: z.number().min(0).max(100), termMonths: z.number().int().min(1).max(480), prepay: z.enum(["none", "min3", "min6"]), by: z.string().max(120) }),
   z.object({ t: z.literal("requestPricingException"), dealId: id, rate: z.number().positive().max(100), points: z.number().min(0).max(100), termMonths: z.number().int().min(1).max(480), prepay: z.enum(["none", "min3", "min6"]), note: text(1000).min(1), by: z.string().max(120) }),
   z.object({ t: z.literal("decidePricingException"), dealId: id, approve: z.boolean(), note: text(1000), by: z.string().max(120) }),
@@ -118,7 +122,7 @@ const schema = z.discriminatedUnion("t", [
   z.object({ t: z.literal("clearCondition"), dealId: id, conditionId: id, note: text(1000), by: z.string().max(120) }),
   z.object({ t: z.literal("returnCondition"), dealId: id, conditionId: id, reason: text(1000).min(1), by: z.string().max(120) }),
   z.object({ t: z.literal("waiveCondition"), dealId: id, conditionId: id, reason: text(1000).min(1), by: z.string().max(120) }),
-  z.object({ t: z.literal("saveConditionTemplate"), by: z.string().max(120), template: z.object({ id: id.optional(), title: text(200), detail: text(1000), category: z.enum(["prior_to_docs", "prior_to_funding", "post_closing"]), owner: z.enum(["borrower", "processor", "underwriter", "title"]), needsUpload: z.boolean(), products: z.array(z.enum(["fix_flip", "bridge", "ground_up", "dscr"])).max(4), dueDays: z.number().int().min(1).max(365), active: z.boolean() }) }),
+  z.object({ t: z.literal("saveConditionTemplate"), by: z.string().max(120), template: z.object({ id: id.optional(), title: text(200), detail: text(1000), category: z.enum(["prior_to_docs", "prior_to_funding", "post_closing"]), owner: z.enum(["borrower", "processor", "underwriter", "title"]), needsUpload: z.boolean(), products: z.array(z.enum(["fix_flip", "bridge", "ground_up", "dscr"])).max(4), rental: z.enum(["long_term", "short_term"]).optional(), dueDays: z.number().int().min(1).max(365), active: z.boolean() }) }),
   z.object({ t: z.literal("saveScope"), dealId: id, scope: z.array(z.object({ id, division: text(120), budget: money, released: money })).max(60), summary: text(4000) }),
   z.object({ t: z.literal("requestDraw"), dealId: id, by: z.string().max(120), note: text(2000), contact: text(200).min(1), photos: z.array(text(200)).max(30), photoIds: z.array(id).max(30).optional(), lines: z.array(z.object({ scopeId: id, requested: money })).max(60) }),
   z.object({ t: z.literal("sendInspector"), drawId: id }),
@@ -166,7 +170,7 @@ const schema = z.discriminatedUnion("t", [
 ]);
 
 /**
- * The action if it is well formed, or null. assignLoanTeam, brokerApplied, referLoan, uploadDoc, conditionFile, addPropertyPhotos, lienWaiverReceived, affidavitReceived, recordAdverseNotice, linkBorrower,
+ * The action if it is well formed, or null. assignLoanTeam, brokerApplied, referLoan, referFriend, uploadDoc, conditionFile, addPropertyPhotos, lienWaiverReceived, affidavitReceived, recordAdverseNotice, linkBorrower,
  * settleLoans, checkTermSheets, checkInsurance, insuranceRenewal, firmScreened, submitPayoffRequest and payoffLetterDelivered aren't here: only the server
  * starts those.
  */

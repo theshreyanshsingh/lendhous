@@ -13,6 +13,7 @@ const DEFAULTS: Omit<PlatformSettings, "updatedAt"> = {
   lenderPhone: "",
   slaTargets: null,
   paymentInstructions: "",
+  referralBonusCents: 0,
 };
 
 let cached: { at: number; value: Omit<PlatformSettings, "updatedAt"> } | null = null;
@@ -23,6 +24,15 @@ export async function getSettings() {
   const row = await prisma.platformSettings.findUnique({ where: { id: "default" } });
   cached = { at: Date.now(), value: row ?? DEFAULTS };
   return cached.value;
+}
+
+/**
+ * The settings as saved right now, skipping the cache: for a check that has to agree with what a page just showed, since
+ * each part of the server keeps its own twenty-second copy and saving only clears one of them.
+ */
+export async function freshSettings() {
+  cached = null;
+  return getSettings();
 }
 
 export function resetSettingsCache() {

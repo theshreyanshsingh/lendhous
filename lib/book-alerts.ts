@@ -9,6 +9,7 @@ import { currentPricing } from "@/lib/pricing-versions";
 import { DEFAULT_KINDS, maturityAfter, WITHDRAW_REASONS } from "@/lib/loan-exits";
 import { latestSheet } from "@/lib/term-sheets";
 import { policiesOf, policyWord } from "@/lib/insurance";
+import { bonusOf, PAY_WITHIN_BUSINESS_DAYS } from "@/lib/referrals";
 import { dueOf, fromThirdParty, letterChanges, receivedOf, requesterLine, staleLetter } from "@/lib/payoffs";
 import { prisma } from "@/lib/prisma";
 import { defaultInterestFrom, defaultRateOf, ledger, maturityOf, servicingTermsOf } from "@/lib/servicing";
@@ -16,7 +17,7 @@ import { defaultInterestFrom, defaultRateOf, ledger, maturityOf, servicingTermsO
 const origin = () => (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "");
 
 /** "email" is someone with no account here, like a title company that asked for a payoff letter. */
-type Alert = { to: "team" | "borrower" | "broker" | "partner" | "buyer" | "email"; dealId?: string; firmId?: string; email?: string; subject: string; body: string; event: string };
+type Alert = { to: "team" | "borrower" | "broker" | "partner" | "buyer" | "email" | "user"; dealId?: string; firmId?: string; email?: string; userId?: string; subject: string; body: string; event: string };
 
 /** The partner lenders and loan buyers who hold part of a loan, from who it's allocated to. */
 const holdersOf = (deal?: Deal) => (deal?.allocations ?? []).flatMap((item): Pick<Alert, "to" | "firmId">[] => (item.sourceId.startsWith("partner:") ? [{ to: "partner", firmId: item.sourceId.slice(8) }] : item.sourceId.startsWith("buyer:") ? [{ to: "buyer", firmId: item.sourceId.slice(6) }] : []));
@@ -67,7 +68,26 @@ function staleLetterAlerts(before: Book, after: Book): Alert[] {
 
 /** The alerts one action causes. Pure, so it can be tested. */
 export function alertsFor(before: Book, after: Book, action: BookAction): Alert[] {
-  return [...actionAlerts(before, after, action), ...staleLetterAlerts(before, after)];
+  return [...actionAlerts(before, after, action), ...staleLetterAlerts(before, after), ...referralAlerts(before, after)];
+}
+
+/**
+ * A referred friend's loan funding earns the borrower who referred them their bonus, and recording it paid tells them it's
+ * on its way. The referrer hears nothing else about the friend's loan.
+ */
+function referralAlerts(before: Book, after: Book): Alert[] {
+  return after.deals.flatMap((deal): Alert[] => {
+    const was = before.deals.find((item) => item.id === deal.id);
+    const referral = deal.friendReferral;
+    if (!was || !referral) return [];
+    const amount = dollars(bonusOf(deal).amount);
+    if (bonusOf(was).state === "expected" && bonusOf(deal).state === "earned") return [
+      { to: "user", userId: referral.referrerId, subject: "You've earned a LendHous referral bonus", body: `A friend you referred to LendHous has closed their loan, so you've earned your ${amount} referral bonus. We'll send it within ${PAY_WITHIN_BUSINESS_DAYS} business days and email you when it's on its way. Thank you for sending them our way.`, event: "referral.earned" },
+      { to: "team", dealId: deal.id, subject: `Referral bonus to pay: ${deal.loanNumber}`, body: `${deal.loanNumber} funded, so ${referral.referrerName} has earned the ${amount} referral bonus for referring ${deal.borrowerName}. Record it on the loan's Capital Routing tab once it's sent.`, event: "referral.earned" },
+    ];
+    if (!was.friendReferral?.paid && referral.paid) return [{ to: "user", userId: referral.referrerId, subject: "Your LendHous referral bonus is on its way", body: `We sent your ${dollars(referral.paid.amount)} referral bonus on ${longDate(referral.paid.on)}${referral.paid.reference ? ` (${referral.paid.reference})` : ""}. Thank you for the referral.`, event: "referral.paid" }];
+    return [];
+  });
 }
 
 function actionAlerts(before: Book, after: Book, action: BookAction): Alert[] {
@@ -458,6 +478,11 @@ export async function sendAlerts(before: Book, after: Book, action: BookAction) 
       }
       if (alert.to === "email") {
         if (alert.email) await notify(alert.email, alert.subject, alert.body, { eventCode: alert.event });
+        continue;
+      }
+      if (alert.to === "user") {
+        const account = alert.userId ? await prisma.user.findUnique({ where: { id: alert.userId }, select: { email: true, deletedAt: true } }) : null;
+        if (account && !account.deletedAt) await notify(account.email, alert.subject, alert.body + link, { eventCode: alert.event });
         continue;
       }
       const deal = after.deals.find((item) => item.id === alert.dealId);

@@ -20,3 +20,9 @@ export function closingIn(day: string, today: string) {
   const left = Math.round((Date.parse(`${day}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000);
   return left > 1 ? `${left} days to go` : left === 1 ? "tomorrow" : left === 0 ? "today" : `${-left} day${left === -1 ? "" : "s"} past`;
 }
+
+/** A rate as a percent: at least two decimals and up to four, so 11.5 shows as 11.50% and a sixteenth (11.5625%) exactly. */
+export function ratePercent(value: number) {
+  const [whole, decimals = ""] = value.toFixed(4).replace(/0+$/, "").split(".");
+  return `${whole}.${decimals.padEnd(2, "0")}%`;
+}

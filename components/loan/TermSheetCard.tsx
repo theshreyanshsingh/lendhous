@@ -2,13 +2,13 @@
 import { useState } from "react";
 import { Reveal } from "@/components/motion";
 import { maturityDate } from "@/lib/engine";
-import type { Deal } from "@/lib/mockData";
+import type { BuyDownChoice, Deal } from "@/lib/mockData";
 import { daysBetween } from "@/lib/servicing";
 import { est, useStore } from "@/lib/store";
 import { latestSheet, respondProblem, sheetContent, SHEET_STATUS } from "@/lib/term-sheets";
 import { Badge, Section, Stat, shortDate, usd } from "@/components/ui";
 import { useServiceDay } from "./use-service-day";
-import { shortDay } from "@/lib/format";
+import { ratePercent, shortDay } from "@/lib/format";
 
 const TONE = { sent: "amber", accepted: "green", changes_requested: "blue", declined: "rose", expired: "slate", superseded: "slate" } as const;
 
@@ -21,7 +21,7 @@ function LegacyTermSheet({ deal, canSign }: { deal: Deal; canSign: boolean }) {
     <Section title="Term sheet" right={waiting ? <Badge tone="amber">Waiting for acceptance</Badge> : <Badge tone="green">Accepted</Badge>}>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3" data-testid="term-sheet">
         <Stat label="Loan amount" value={usd(e.noteAmount)} />
-        <Stat label="Rate" value={`${e.rate.toFixed(3)}%`} sub={deal.app.product === "dscr" ? "30-year amortizing" : "interest only"} />
+        <Stat label="Rate" value={ratePercent(e.rate)} sub={deal.app.product === "dscr" ? "30-year amortizing" : "interest only"} />
         <Stat label="Points" value={usd(e.points)} sub={`${e.pointsPct}%`} />
         <Stat label="Term" value={`${e.termMonths} months`} sub={`matures ${maturityDate(deal.closingDate, e.termMonths)}`} />
         <Stat label="Cash to close" value={usd(e.cashToClose)} />
@@ -33,9 +33,38 @@ function LegacyTermSheet({ deal, canSign }: { deal: Deal; canSign: boolean }) {
   );
 }
 
+/**
+ * More points for a lower rate, or fewer for a higher one: the choices the term sheet was sent with (lib/buy-down.ts), each
+ * with what it does to the payment and the cash to close.
+ */
+function RateChoice({ choices, value, sent, onChange }: { choices: BuyDownChoice[]; value: number; sent: number; onChange: (index: number) => void }) {
+  const choice = choices[value];
+  const base = choices[sent];
+  const diff = (now: number, was: number) => (Math.abs(now - was) < 0.5 ? "" : ` (${now > was ? "+" : "−"}${usd(Math.abs(now - was))})`);
+  return (
+    <div className="space-y-2 rounded-md border border-rule p-3" data-testid="rate-choice">
+      <label className="block"><span className="label">Buy the rate down, or keep the points low</span>
+        <input type="range" className="h-8 w-full accent-primary" min={0} max={choices.length - 1} step={1} value={value} data-testid="rate-choice-slider" aria-valuetext={`${ratePercent(choice.rate)} with ${choice.points}% in points`} onChange={(event) => onChange(Number(event.target.value))} />
+      </label>
+      <div className="flex justify-between text-[11px] text-muted-foreground"><span>Fewer points, higher rate</span><span>More points, lower rate</span></div>
+      <dl className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4" data-testid="rate-choice-terms">
+        <div><dt className="text-xs text-muted-foreground">Rate</dt><dd className="font-semibold">{ratePercent(choice.rate)}</dd></div>
+        <div><dt className="text-xs text-muted-foreground">Points</dt><dd>{choice.points}% · {usd(choice.pointsDollars)}</dd></div>
+        <div><dt className="text-xs text-muted-foreground">Monthly payment</dt><dd>{usd(choice.monthlyPayment)}{diff(choice.monthlyPayment, base.monthlyPayment)}</dd></div>
+        <div><dt className="text-xs text-muted-foreground">Cash to close</dt><dd>{usd(choice.cashToClose)}{diff(choice.cashToClose, base.cashToClose)}</dd></div>
+      </dl>
+      {value !== sent && <p className="text-xs text-muted-foreground" data-testid="rate-choice-note">Accepting takes this rate and these points instead of the {ratePercent(base.rate)} with {base.points}% the term sheet was sent with.</p>}
+    </div>
+  );
+}
+
 /** The borrower's three answers (Spec B16): accept by typing their name, ask for changes, or decline. */
 function Respond({ deal }: { deal: Deal }) {
   const { dispatch, viewerName } = useStore();
+  const sheet = latestSheet(deal);
+  const choices = sheet?.buyDowns ?? [];
+  const sent = Math.max(0, choices.findIndex((item) => Math.abs(item.points - (sheet?.terms.pointsPct ?? 0)) < 1e-9));
+  const [picked, setPicked] = useState(sent);
   const [mode, setMode] = useState<"accept" | "changes" | "decline">("accept");
   const [name, setName] = useState("");
   const [agreed, setAgreed] = useState(false);
@@ -49,9 +78,10 @@ function Respond({ deal }: { deal: Deal }) {
       </div>
       <Reveal open={mode === "accept"}>
         <div className="space-y-3">
+          {choices.length > 1 && <RateChoice choices={choices} value={picked} sent={sent} onChange={setPicked} />}
           <label className="block"><span className="label">Type your full name to accept</span><input data-testid="term-sheet-name" className="desk-input" autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} /></label>
           <label className="flex items-start gap-2 text-sm"><input data-testid="term-sheet-agree" type="checkbox" className="mt-1" checked={agreed} onChange={(event) => setAgreed(event.target.checked)} /> I accept these terms. I understand this isn&apos;t a commitment to lend, and the loan depends on underwriting and the conditions listed.</label>
-          <button className="btn-primary w-full sm:w-auto" data-testid="accept-term-sheet" disabled={busy || !agreed || !name.trim()} onClick={() => void run({ t: "acceptTermSheet", dealId: deal.id, signedName: name })}>Accept term sheet</button>
+          <button className="btn-primary w-full sm:w-auto" data-testid="accept-term-sheet" disabled={busy || !agreed || !name.trim()} onClick={() => void run({ t: "acceptTermSheet", dealId: deal.id, signedName: name, ...(choices.length > 1 ? { points: choices[picked].points } : {}) })}>{picked !== sent ? `Accept at ${ratePercent(choices[picked].rate)}` : "Accept term sheet"}</button>
         </div>
       </Reveal>
       <Reveal open={mode !== "accept"}>

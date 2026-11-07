@@ -3,6 +3,7 @@
 // engine and pricing the loan would use. It is not an application: no credit is pulled and nothing is promised.
 import { z } from "zod";
 import { evaluate, type Application, type Estimate, type Product } from "./engine";
+import { optionAt, quoteBuyDowns } from "./buy-down";
 import type { PricingConfig } from "./pricing-config";
 
 export const LOAN_TYPES = {
@@ -54,14 +55,21 @@ const dealShape = {
   arv: optionalDollars,
   requestedAmount: optionalDollars,
   monthlyRent: optionalDollars,
+  // A rental let by the night: its yearly income, from 12 months of payouts or a projection (lib/engine.ts qualifyingRent).
+  rentalType: z.enum(["long_term", "short_term"]).optional(),
+  strAnnualIncome: optionalDollars,
+  strIncomeSource: z.enum(["payouts", "projection"]).optional(),
+  // The points they'd pay for the rate they picked on the indicative terms (lib/buy-down.ts). Only a preference.
+  buyDownPoints: z.number().finite().min(0).max(10).optional(),
   fundingDate: day,
   comps: z.array(z.object({ address: z.string().trim().min(3).max(200), price: dollars.min(1), soldOn: z.string().regex(/^\d{4}-\d{2}$/) })).max(3),
   exit: z.enum(["sell", "refinance", "hold", "cash"]),
   notes: z.string().trim().max(1500),
 };
-const dealChecks = (quote: { loanType: LoanType; arv?: number; monthlyRent?: number }, context: z.RefinementCtx) => {
+const dealChecks = (quote: { loanType: LoanType; arv?: number; monthlyRent?: number; rentalType?: "long_term" | "short_term"; strAnnualIncome?: number }, context: z.RefinementCtx) => {
   if ((quote.loanType === "fix_flip" || quote.loanType === "ground_up") && !quote.arv) context.addIssue({ code: "custom", path: ["arv"], message: "Add the after-repair value (ARV)." });
-  if (quote.loanType.startsWith("dscr") && !quote.monthlyRent) context.addIssue({ code: "custom", path: ["monthlyRent"], message: "Add the monthly rent." });
+  if (quote.loanType.startsWith("dscr") && quote.rentalType === "short_term" && !quote.strAnnualIncome) context.addIssue({ code: "custom", path: ["strAnnualIncome"], message: "Add the yearly income from short-term stays." });
+  else if (quote.loanType.startsWith("dscr") && quote.rentalType !== "short_term" && !quote.monthlyRent) context.addIssue({ code: "custom", path: ["monthlyRent"], message: "Add the monthly rent." });
 };
 export const dealSchema = z.object(dealShape).superRefine(dealChecks);
 export type QuoteDeal = z.infer<typeof dealSchema>;
@@ -106,6 +114,9 @@ export function quoteApplication(quote: QuoteDeal): Application | null {
   const product = PRICED[quote.loanType];
   if (!product) return null;
   const florida = quote.address.state === "FL";
+  const shortTerm = quote.rentalType === "short_term";
+  // Taxes and insurance are estimated for a rental until the application has the real ones.
+  const rented = shortTerm ? Boolean(quote.strAnnualIncome) : Boolean(quote.monthlyRent);
   return {
     product, purpose: quote.purpose === "purchase" ? "purchase" : quote.purpose === "refinance" ? "refi_rt" : "refi_co",
     county: florida ? quote.address.county || "Other FL" : quote.address.county || "Out of state", state: quote.address.state,
@@ -113,16 +124,22 @@ export function quoteApplication(quote: QuoteDeal): Application | null {
     occupancy: "vacant", purchasePrice: quote.purchasePrice, rehab: product === "fix_flip" || product === "ground_up" ? quote.rehab : 0,
     arv: product === "fix_flip" || product === "ground_up" ? quote.arv ?? quote.purchasePrice : quote.purchasePrice,
     landValue: product === "ground_up" ? quote.purchasePrice : undefined, hardCosts: product === "ground_up" ? quote.rehab : undefined,
-    requestedAmount: quote.requestedAmount || undefined, monthlyRent: quote.monthlyRent, taxesAnnual: quote.monthlyRent ? Math.round(quote.purchasePrice * 0.018) : undefined, insuranceAnnual: quote.monthlyRent ? Math.round(quote.purchasePrice * 0.012) : undefined,
+    requestedAmount: quote.requestedAmount || undefined, monthlyRent: quote.monthlyRent, taxesAnnual: rented ? Math.round(quote.purchasePrice * 0.018) : undefined, insuranceAnnual: rented ? Math.round(quote.purchasePrice * 0.012) : undefined,
+    ...(product === "dscr" && shortTerm ? { rentalType: "short_term" as const, strAnnualIncome: quote.strAnnualIncome, strIncomeSource: quote.strIncomeSource ?? "payouts" } : {}),
     interestReserve: "none", accrual: "full_boat", fico: CREDIT_BANDS[quote.creditBand], verifiedDeals: EXPERIENCE_BANDS[quote.experience], groundUpBuilds: 0,
     foreignNational: quote.citizenship === "foreign", liquidity: 0, valuationSource: "borrower_estimate",
   };
 }
 
-/** Indicative terms for a quote on the current pricing, or null when the loan type needs a person to look at it. */
+/**
+ * Indicative terms for a quote on the current pricing, or null when the loan type needs a person to look at it. With the
+ * points they picked to buy the rate down (or up), the terms at that choice when it's one the pricing allows.
+ */
 export function indicativeTerms(quote: QuoteDeal, pricing: PricingConfig): Estimate | null {
   const app = quoteApplication(quote);
-  return app ? evaluate(app, pricing) : null;
+  if (!app) return null;
+  const choice = quote.buyDownPoints === undefined ? undefined : optionAt(quoteBuyDowns(app, pricing), quote.buyDownPoints);
+  return evaluate(choice ? { ...app, termRate: choice.rate, termPoints: choice.points } : app, pricing);
 }
 
 export type CashLine = { label: string; amount: number };
@@ -154,8 +171,9 @@ export function quoteSummary(quote: Quote) {
     `Property: ${quote.address.street}, ${quote.address.city}, ${quote.address.state} ${quote.address.zip}${quote.address.county ? ` (${quote.address.county})` : ""}`,
     `${PROPERTY_TYPES[quote.propertyType]}${quote.beds ? ` · ${quote.beds} bd` : ""}${quote.baths ? ` · ${quote.baths} ba` : ""}${quote.sqft ? ` · ${quote.sqft.toLocaleString("en-US")} sq ft` : ""}`,
     `Loan: ${LOAN_TYPES[quote.loanType]} · ${PURPOSES[quote.purpose]} · exit: ${EXITS[quote.exit]}`,
-    `Price or value ${money(quote.purchasePrice)} · rehab ${money(quote.rehab)}${quote.arv ? ` · ARV ${money(quote.arv)}` : ""}${quote.monthlyRent ? ` · rent ${money(quote.monthlyRent)}/mo` : ""}`,
+    `Price or value ${money(quote.purchasePrice)} · rehab ${money(quote.rehab)}${quote.arv ? ` · ARV ${money(quote.arv)}` : ""}${quote.rentalType === "short_term" && quote.strAnnualIncome ? ` · short-term rental, ${money(quote.strAnnualIncome)}/yr ${quote.strIncomeSource === "projection" ? "projected" : "from the last 12 months' payouts"}` : quote.monthlyRent ? ` · rent ${money(quote.monthlyRent)}/mo` : ""}`,
     `Requested: ${quote.requestedAmount ? money(quote.requestedAmount) : "the most it qualifies for"} · fund by ${quote.fundingDate}`,
+    ...(quote.buyDownPoints !== undefined ? [`Picked ${quote.buyDownPoints} points on the quote to set the rate (indicative)`] : []),
     ...(quote.comps.length ? ["Comps for the ARV:", ...quote.comps.map((comp) => `  ${comp.address}: ${money(comp.price)} sold ${comp.soldOn}`)] : []),
     ...(quote.notes ? ["", quote.notes] : []),
   ].join("\n");

@@ -3,9 +3,10 @@
 import { evaluate, type Application } from "./engine";
 import { spreadRate } from "./usury";
 import type { SheetContent } from "./term-sheets";
+import { ratePercent } from "./format";
 
 const money = (amount: number) => `$${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-const percent = (value: number) => `${value.toFixed(3).replace(/0$/, "")}%`;
+const percent = ratePercent;
 const longDay = (day: string) => new Date(`${day}T12:00:00Z`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
 const PRODUCTS: Record<Application["product"], string> = { fix_flip: "Fix and flip", bridge: "Bridge", ground_up: "Ground-up construction", dscr: "DSCR rental" };
 

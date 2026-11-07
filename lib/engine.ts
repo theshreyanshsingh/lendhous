@@ -3,7 +3,7 @@
  * Pure functions only. Same code would run on server and client in the real build.
  * Money in dollars (number) in this prototype; round2() mirrors the "round half up at posting" rule.
  */
-import type { PricingConfig, RepeatTier, Tier, Range } from "./pricing-config";
+import { SHORT_TERM_DEFAULTS, type PricingConfig, type RepeatTier, type ShortTermRules, type Tier, type Range } from "./pricing-config";
 import { currentPricing, pricingFor } from "./pricing-versions";
 
 export const round2 = (x: number) => Math.round((x + Number.EPSILON) * 100) / 100;
@@ -31,6 +31,21 @@ export function amortizingPayment(loan: number, annualRatePct: number, months: n
   return (loan * i) / (1 - Math.pow(1 + i, -months));
 }
 export const ioPayment = (loan: number, annualRatePct: number) => (loan * annualRatePct) / 100 / 12;
+
+/** The short-term rental rules a pricing version uses; versions published before them use the starting ones. */
+export const shortTermOf = (config: PricingConfig): ShortTermRules => config.dscr.shortTerm ?? SHORT_TERM_DEFAULTS;
+
+/** The share of a short-term rental's yearly income counted as rent: more for 12 months of payouts than a projection, less on a cash-out. */
+export function shortTermFactor(app: Pick<Application, "strIncomeSource" | "purpose">, config: PricingConfig = currentPricing()) {
+  const rules = shortTermOf(config);
+  return Math.max(0, (app.strIncomeSource === "projection" ? rules.projectionFactor : rules.historyFactor) - (app.purpose === "refi_co" ? rules.cashOutFactorCut : 0));
+}
+
+/** The monthly rent a DSCR loan is sized on: the lease or market rent, or a short-term rental's yearly income at its factor. */
+export function qualifyingRent(app: Pick<Application, "rentalType" | "monthlyRent" | "strAnnualIncome" | "strIncomeSource" | "purpose">, config: PricingConfig = currentPricing()) {
+  if (app.rentalType !== "short_term") return app.monthlyRent ?? 0;
+  return round2(((app.strAnnualIncome ?? 0) * shortTermFactor(app, config)) / 12);
+}
 
 export function dscr(i: { monthlyRent: number; payment: number; taxesAnnual: number; insuranceAnnual: number; hoaMonthly?: number; floodAnnual?: number }) {
   const pitia = i.payment + i.taxesAnnual / 12 + i.insuranceAnnual / 12 + (i.hoaMonthly ?? 0) + (i.floodAnnual ?? 0) / 12;
@@ -227,6 +242,11 @@ export interface Application {
   landValue?: number; hardCosts?: number; softCosts?: number; groundUpBuilds?: number;
   // dscr
   monthlyRent?: number; taxesAnnual?: number; insuranceAnnual?: number; hoaMonthly?: number;
+  /**
+   * How the rental is let: on a lease (the default), or by the night on Airbnb or VRBO. A short-term rental is sized on its
+   * yearly income at a factor (qualifyingRent): the last 12 months of payouts, or a projection where there's no history yet.
+   */
+  rentalType?: "long_term" | "short_term"; strAnnualIncome?: number; strIncomeSource?: "payouts" | "projection";
   requestedAmount?: number; termMonths?: number;
   interestReserve: "none" | "financed";
   accrual: "full_boat" | "dutch";
@@ -357,6 +377,13 @@ export function evaluate(app: Application, cfg: PricingConfig = pricingFor(app.p
     // DSCR
     const d = cfg.dscr; termMonths = 360;
     rateRange = d.baseRate; pointsRange = d.points; minFico = d.ficoBands[d.ficoBands.length - 1];
+    if (app.rentalType === "short_term") {
+      const rules = shortTermOf(cfg);
+      levCut += rules.leverageCut; rateAdd += rules.rateAdd;
+      flags.push(`Short-term rental: ${Math.round(shortTermFactor(app, cfg) * 100)}% of the ${app.strIncomeSource === "projection" ? "projected" : "last 12 months'"} income counted, −${Math.round(rules.leverageCut * 100)}% leverage, +${rules.rateAdd}%`);
+      if (!app.strAnnualIncome) hardStops.push("Short-term rental: enter its yearly income");
+    }
+    const rent = qualifyingRent(app, cfg);
     pointsPct = app.termPoints ?? repeatPoints(pick(pointsRange, pp));
     const row = d.ficoBands.findIndex((b) => app.fico >= b);
     const cashOutCut = app.purpose === "refi_co" ? d.cashOutLtvReduction : 0;
@@ -370,7 +397,7 @@ export function evaluate(app: Application, cfg: PricingConfig = pricingFor(app.p
         const cellRate = pick(d.baseRate, pp) + cell.rateAdd + rateAdd + smallLoanAdd(loan);
         const r = app.termRate ?? cellRate;
         const pay = d.qualifyOn === "io" ? ioPayment(loan, r) : amortizingPayment(loan, r, d.amortizationMonths);
-        const x = dscr({ monthlyRent: app.monthlyRent ?? 0, payment: pay, taxesAnnual: app.taxesAnnual ?? 0, insuranceAnnual: app.insuranceAnnual ?? 0, hoaMonthly: app.hoaMonthly }).dscr;
+        const x = dscr({ monthlyRent: rent, payment: pay, taxesAnnual: app.taxesAnnual ?? 0, insuranceAnnual: app.insuranceAnnual ?? 0, hoaMonthly: app.hoaMonthly }).dscr;
         if (x >= d.dscrBands[col] - 1e-9) { chosen = { col, loan, rate: r, matrixRate: cellRate, dscr: x, maxLTV: maxL }; break; }
       }
     }

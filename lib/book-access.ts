@@ -26,6 +26,8 @@ import { currentPricing, pricingPayload } from "./pricing-versions";
 import { ledger, servicingDate } from "./servicing";
 import { viewFor, type MemberAccess, type Permission } from "./permissions";
 import { approveProblem, canSendDeals, feePaidProblem } from "./brokers";
+import { bonusPaidProblem, referralProblem, referralsBy } from "./referrals";
+import { optionAt } from "./buy-down";
 
 export type Viewer = MemberAccess & { id: string; name: string; roleCodes: RoleCode[]; organizationId?: string | null };
 
@@ -79,7 +81,7 @@ const quietPayoff = (payoff: PayoffRequest): PayoffRequest => ({
 
 /** Removes what identifies the borrower, for a partner or buyer who hasn't closed on the loan. */
 function blind(deal: Deal): Deal {
-  return { ...deal, insurance: undefined, borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined, closure: undefined, defaults: undefined, extensions: undefined, paidOff: undefined, closing: undefined, wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, termSheets: undefined, pricingException: undefined, conditions: undefined, lienFile: undefined, completed: undefined, revenue: undefined, adverseAction: undefined, legalHold: undefined, propertyPhotos: undefined, partnerFunding: undefined, agents: undefined, ...quietPayments(deal, false) };
+  return { ...deal, insurance: undefined, friendReferral: undefined, borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined, closure: undefined, defaults: undefined, extensions: undefined, paidOff: undefined, closing: undefined, wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, termSheets: undefined, pricingException: undefined, conditions: undefined, lienFile: undefined, completed: undefined, revenue: undefined, adverseAction: undefined, legalHold: undefined, propertyPhotos: undefined, partnerFunding: undefined, agents: undefined, ...quietPayments(deal, false) };
 }
 
 /** The conditions that are the borrower's to meet (Spec B17), without who on the team handled them or why one was waived. */
@@ -113,7 +115,7 @@ const clientInsurance = (deal: Deal): Partial<Deal> => ({
 
 /** What only the team sees on a loan it shares with a client. Wire instructions never leave the team: a client who sees them is a client who can be sent fake ones. */
 function forClient(deal: Deal): Deal {
-  return { ...deal, ...latestForClient(deal), ...clientConditions(deal), ...clientRecords(deal), ...clientAgents(deal), ...clientInsurance(deal), partnerFunding: undefined, allocations: [], teaserSentTo: [], route: undefined, capitalStatus: "not_started", contractorIsGtAffiliate: undefined, source: "", fundingApprovers: undefined, creditReview: undefined, ...quietPayments(deal, true), ...quietExits(deal), wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined };
+  return { ...deal, ...latestForClient(deal), ...clientConditions(deal), ...clientRecords(deal), ...clientAgents(deal), ...clientInsurance(deal), partnerFunding: undefined, allocations: [], teaserSentTo: [], route: undefined, capitalStatus: "not_started", contractorIsGtAffiliate: undefined, source: "", fundingApprovers: undefined, creditReview: undefined, ...quietPayments(deal, true), ...quietExits(deal), wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, friendReferral: undefined };
 }
 
 /** The part of the book this account may see. Nothing else leaves the server. */
@@ -132,7 +134,7 @@ function scopeRecords(book: Book, viewer: Viewer): Book {
   if (view === "borrower") {
     const mine = book.deals.filter((deal) => deal.borrowerId === viewer.id);
     const ids = new Set(mine.map((deal) => deal.id));
-    return { ...empty, borrowerId: viewer.id, deals: mine.map((deal) => ({ ...forClient(deal), brokerId: undefined, brokerPoints: undefined })), draws: book.draws.filter((draw) => ids.has(draw.dealId)).map((draw) => ({ ...draw, approvers: [], override: undefined })), photoRequests: book.photoRequests.filter((request) => ids.has(request.dealId)), payoffs: book.payoffs.filter((payoff) => ids.has(payoff.dealId)).map(quietPayoff), messages: shared(ids) };
+    return { ...empty, borrowerId: viewer.id, deals: mine.map((deal) => ({ ...forClient(deal), brokerId: undefined, brokerPoints: undefined })), draws: book.draws.filter((draw) => ids.has(draw.dealId)).map((draw) => ({ ...draw, approvers: [], override: undefined })), photoRequests: book.photoRequests.filter((request) => ids.has(request.dealId)), payoffs: book.payoffs.filter((payoff) => ids.has(payoff.dealId)).map(quietPayoff), messages: shared(ids), myReferrals: referralsBy(book.deals, viewer.id) };
   }
 
   if (view === "broker") {
@@ -423,6 +425,16 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       // Starting a loan from a lead does this, after reading which broker's link the lead came from.
       if (!trusted) return no(NOT_ALLOWED);
       return dealOf(action.dealId) ? ok() : no(GONE);
+    case "referFriend": {
+      // Starting a loan from a lead does this, after reading whose link the lead came from and the bonus in Settings.
+      if (!trusted) return no(NOT_ALLOWED);
+      const problem = referralProblem(book.deals, action.dealId, action.referrerId);
+      return problem ? no(problem) : ok();
+    }
+    case "referralBonusPaid": {
+      const problem = bonusPaidProblem(dealOf(action.dealId), action.amount, action.on, serviceDay(book));
+      return problem ? no(problem) : staffOnlyAllowed("manage_capital", "service_loans") ? ok({ ...action, by: viewer.name }) : no(NOT_ALLOWED);
+    }
     case "setBrokerPoints": {
       const deal = dealOf(action.dealId);
       if (!deal?.brokerId) return no("This loan has no broker.");
@@ -541,6 +553,7 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       const refused = respondProblem(deal, serviceDay(book));
       if (refused) return no(refused);
       if (action.t === "requestTermSheetChanges" && !action.note.trim()) return no("Say what you'd like changed.");
+      if (action.t === "acceptTermSheet" && action.points !== undefined && !optionAt(latestSheet(deal)?.buyDowns, action.points)) return no("That rate and points choice isn't on this term sheet.");
       return ok(action.t === "requestTermSheetChanges" ? { ...action, note: action.note.trim(), by: viewer.name } : action);
     }
     case "issueTermSheet": case "requestPricingException": {

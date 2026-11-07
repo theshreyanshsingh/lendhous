@@ -36,11 +36,16 @@ export function openLead<Row extends { id: string } & Record<SealedField, string
  * email is sealed, so the recent quotes are opened to compare.
  */
 export async function recentQuoteFor(email: string, now = new Date()): Promise<Quote | null> {
+  return (await recentLeadFor(email, now))?.quote ?? null;
+}
+
+/** The same quote request with who referred it and whether a loan was started from it, for crediting the referral. */
+export async function recentLeadFor(email: string, now = new Date()) {
   const wanted = email.trim().toLowerCase();
-  const rows = await prisma.lead.findMany({ where: { ...notDeleted, quote: { not: null }, createdAt: { gte: new Date(now.getTime() - 30 * 86_400_000) } }, orderBy: { createdAt: "desc" }, take: 300, select: { id: true, quote: true } });
+  const rows = await prisma.lead.findMany({ where: { ...notDeleted, quote: { not: null }, createdAt: { gte: new Date(now.getTime() - 30 * 86_400_000) } }, orderBy: { createdAt: "desc" }, take: 300, select: { id: true, quote: true, brokerId: true, referrerId: true, loanId: true, createdAt: true } });
   for (const row of rows) {
     const quote = openQuote(row);
-    if (quote?.borrower.email.toLowerCase() === wanted) return quote;
+    if (quote?.borrower.email.toLowerCase() === wanted) return { ...row, quote };
   }
   return null;
 }

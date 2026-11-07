@@ -9,7 +9,7 @@ import { useStore } from "@/lib/store";
 
 const small = "h-9! px-3! text-xs!";
 const PRODUCTS: Product[] = ["fix_flip", "bridge", "ground_up", "dscr"];
-type Draft = Pick<ConditionTemplate, "title" | "detail" | "category" | "owner" | "needsUpload" | "products" | "dueDays" | "active"> & { id?: string };
+type Draft = Pick<ConditionTemplate, "title" | "detail" | "category" | "owner" | "needsUpload" | "products" | "dueDays" | "active" | "rental"> & { id?: string };
 const blank: Draft = { title: "", detail: "", category: "prior_to_funding", owner: "borrower", needsUpload: true, products: [], dueDays: 10, active: true };
 
 function TemplateForm({ draft, onSave, onCancel }: { draft: Draft; onSave: (draft: Draft) => Promise<boolean>; onCancel: () => void }) {
@@ -27,6 +27,7 @@ function TemplateForm({ draft, onSave, onCancel }: { draft: Draft; onSave: (draf
         <label className="block min-w-0"><span className="label">Due after (days)</span><input className="desk-input" inputMode="numeric" data-testid="template-days" value={days} onChange={(event) => setDays(event.target.value.replace(/[^0-9]/g, ""))} /></label>
       </div>
       <fieldset className="flex flex-wrap gap-x-4 gap-y-1 text-xs"><legend className="label">Loan types (none ticked means all)</legend>{PRODUCTS.map((product) => <label key={product} className="flex items-center gap-1.5"><input type="checkbox" checked={value.products.includes(product)} onChange={(event) => put({ products: event.target.checked ? [...value.products, product] : value.products.filter((item) => item !== product) })} />{productLabel[product]}</label>)}</fieldset>
+      {value.products.includes("dscr") && <label className="block text-xs"><span className="label">Rentals it applies to</span><select className="desk-input w-auto!" data-testid="template-rental" value={value.rental ?? ""} onChange={(event) => put({ rental: (event.target.value || undefined) as Draft["rental"] })}><option value="">Leased and short-term</option><option value="long_term">Leased only</option><option value="short_term">Short-term (Airbnb, VRBO) only</option></select></label>}
       <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={value.needsUpload} onChange={(event) => put({ needsUpload: event.target.checked })} /> It needs a file sent in</label>
       {problem && value.title && <p className="text-xs text-warn">{problem}</p>}
       <div className="flex flex-wrap gap-2"><button type="button" className={`btn-primary ${small}`} data-testid="save-template" disabled={Boolean(problem)} onClick={async () => { if (await onSave({ ...value, dueDays: Number(days) })) onCancel(); }}>Save</button><button type="button" className={`btn-ghost ${small}`} onClick={onCancel}>Cancel</button></div>
@@ -62,7 +63,7 @@ export function ConditionLibrary() {
                         <div className="min-w-0"><p className={`font-medium ${item.active ? "" : "text-muted-foreground line-through"}`}>{item.title}</p>{item.detail && <p className="text-xs text-muted-foreground">{item.detail}</p>}</div>
                         <span className="flex flex-wrap items-center gap-1.5"><Badge>{OWNERS[item.owner]}</Badge>{!item.active && <Badge tone="slate">Retired</Badge>}</span>
                       </div>
-                      <p className="text-xs text-muted-foreground">{item.products.length ? item.products.map((product) => productLabel[product]).join(", ") : "Every loan type"} · due {item.dueDays} days after it&apos;s added{item.needsUpload ? " · needs a file" : ""} · version {item.version}, {item.updatedBy}{item.version > 1 ? ` on ${shortDate(item.updatedAt)}` : ""}</p>
+                      <p className="text-xs text-muted-foreground">{item.products.length ? item.products.map((product) => productLabel[product]).join(", ") : "Every loan type"}{item.rental ? ` (${item.rental === "short_term" ? "short-term rentals" : "leased rentals"} only)` : ""} · due {item.dueDays} days after it&apos;s added{item.needsUpload ? " · needs a file" : ""} · version {item.version}, {item.updatedBy}{item.version > 1 ? ` on ${shortDate(item.updatedAt)}` : ""}</p>
                       <div className="flex flex-wrap gap-2">
                         <button type="button" className={`btn-ghost ${small}`} data-testid="edit-template" onClick={() => setEditing(item.id)}>Edit</button>
                         <button type="button" className={`btn-ghost ${small}`} data-testid={item.active ? "retire-template" : "restore-template"} onClick={() => void save({ ...item, active: !item.active })}>{item.active ? "Retire" : "Bring back"}</button>

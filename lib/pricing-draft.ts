@@ -2,7 +2,8 @@
 // loan terms, and the servicing and extension terms that go into the note. Everything else in the config (score weights,
 // geography, adjusters, the DSCR grid) carries over unchanged. Pure, so the editor and the server check it the same way.
 import { z } from "zod";
-import { repeatTiersOf } from "./engine";
+import { ratePerPointOf } from "./buy-down";
+import { repeatTiersOf, shortTermOf } from "./engine";
 import type { PricingConfig, Range, Tier } from "./pricing-config";
 
 const TIERS = [1, 2, 3, 4] as const;
@@ -24,10 +25,12 @@ export const draftSchema = z.object({
   fixFlip: z.object({ termMonths: months, tiers: z.object({ 1: flipTier, 2: flipTier, 3: flipTier, 4: flipTier }) }),
   bridge: z.object({ termMonths: months, tiers: z.object({ 1: bridgeTier, 2: bridgeTier, 3: bridgeTier, 4: bridgeTier }) }),
   groundUp: z.object({ termMonths: months, tiers: z.object({ none: buildTier, "1to3": buildTier, "4plus": buildTier }) }),
-  dscr: z.object({ baseRate: range(rate), points: range(points) }),
+  dscr: z.object({ baseRate: range(rate), points: range(points), shortTerm: z.object({ historyFactor: share, projectionFactor: share, cashOutFactorCut: share, rateAdd: z.number().finite().min(0).max(5), leverageCut: share }) }),
   loanSize: z.object({ min: z.number().int().min(0).max(100_000_000), maxInHouse: z.number().int().min(0).max(100_000_000), maxOverall: z.number().int().min(0).max(100_000_000) }),
   lenderFees: z.number().finite().min(0).max(100_000),
   servicing: z.object({ graceDays: z.number().int().min(0).max(30), lateFeePct: z.number().finite().min(0).max(0.2), delinquentDays: z.number().int().min(1).max(120), defaultRateAdd: z.number().finite().min(0).max(25), defaultRateMax: z.number().finite().min(0).max(36) }),
+  buyDownRatePerPoint: z.number().finite().min(0).max(2),
+  buyDownShortRatePerPoint: z.number().finite().min(0).max(2),
   repeatTiers: z.array(z.object({ loans: z.number().int().min(1).max(100), rateCut: z.number().finite().min(0).max(3), pointsCut: points })).min(1).max(6),
   extensions: z.object({ maxCount: z.number().int().min(0).max(6), monthsEach: z.number().int().min(1).max(12), feePoints: points, requestWindowDays: z.number().int().min(0).max(180) }),
 });
@@ -44,11 +47,13 @@ export function draftOf(config: PricingConfig): PricingDraft {
     fixFlip: { termMonths: config.fixFlip.termMonths, tiers: { 1: flip(1), 2: flip(2), 3: flip(3), 4: flip(4) } },
     bridge: { termMonths: config.bridge.termMonths, tiers: { 1: bridge(1), 2: bridge(2), 3: bridge(3), 4: bridge(4) } },
     groundUp: { termMonths: config.groundUp.termMonths, tiers: { none: build("none"), "1to3": build("1to3"), "4plus": build("4plus") } },
-    dscr: { baseRate: [...config.dscr.baseRate] as Range, points: [...config.dscr.points] as Range },
+    dscr: { baseRate: [...config.dscr.baseRate] as Range, points: [...config.dscr.points] as Range, shortTerm: { ...shortTermOf(config) } },
     loanSize: { ...config.loanSize },
     lenderFees: config.assumptions.lenderFees,
     servicing: { graceDays, lateFeePct, delinquentDays, defaultRateAdd, defaultRateMax },
     extensions: { ...config.extensions },
+    buyDownRatePerPoint: ratePerPointOf(config, "dscr"),
+    buyDownShortRatePerPoint: ratePerPointOf(config, "fix_flip"),
     repeatTiers: repeatTiersOf(config).map((tier) => ({ ...tier })),
   };
 }
@@ -62,12 +67,12 @@ export function applyDraft(base: PricingConfig, draft: PricingDraft, version: st
     fixFlip: { ...base.fixFlip, termMonths: draft.fixFlip.termMonths, tiers: Object.fromEntries(TIERS.map((tier) => [tier, { ...base.fixFlip.tiers[tier], ...draft.fixFlip.tiers[tier] }])) as PricingConfig["fixFlip"]["tiers"] },
     bridge: { ...base.bridge, termMonths: draft.bridge.termMonths, tiers: Object.fromEntries(TIERS.map((tier) => [tier, { ...base.bridge.tiers[tier], ...draft.bridge.tiers[tier] }])) as PricingConfig["bridge"]["tiers"] },
     groundUp: { ...base.groundUp, termMonths: draft.groundUp.termMonths, tiers: Object.fromEntries(BUILDS.map((key) => [key, { ...base.groundUp.tiers[key], ...draft.groundUp.tiers[key] }])) as PricingConfig["groundUp"]["tiers"] },
-    dscr: { ...base.dscr, baseRate: draft.dscr.baseRate, points: draft.dscr.points },
+    dscr: { ...base.dscr, baseRate: draft.dscr.baseRate, points: draft.dscr.points, shortTerm: draft.dscr.shortTerm },
     loanSize: draft.loanSize,
     assumptions: { ...base.assumptions, lenderFees: draft.lenderFees },
     servicing: { ...base.servicing, ...draft.servicing },
     extensions: draft.extensions,
-    adjusters: { ...base.adjusters, repeatTiers: draft.repeatTiers },
+    adjusters: { ...base.adjusters, repeatTiers: draft.repeatTiers, buyDownRatePerPoint: draft.buyDownRatePerPoint, buyDownShortRatePerPoint: draft.buyDownShortRatePerPoint },
   };
 }
 
@@ -85,6 +90,9 @@ export function draftProblems(draft: PricingDraft): string[] {
   if (draft.servicing.defaultRateMax < draft.servicing.defaultRateAdd) problems.push("The default rate cap is below the default margin.");
   if (draft.repeatTiers.some((tier, at) => at > 0 && tier.loans <= draft.repeatTiers[at - 1].loans)) problems.push("Each repeat-borrower tier needs more loans than the one before it.");
   if (draft.extensions.maxCount > 0 && draft.extensions.monthsEach < 1) problems.push("An extension needs at least one month.");
+  const shortTerm = draft.dscr.shortTerm;
+  if (shortTerm.historyFactor > 1 || shortTerm.projectionFactor > 1) problems.push("A short-term rental can't count more than all of its income.");
+  if (shortTerm.cashOutFactorCut >= Math.min(shortTerm.historyFactor, shortTerm.projectionFactor)) problems.push("The cash-out cut would leave a short-term rental with no income counted.");
   // Above 25% a year is criminal usury in Florida whatever the loan size (Fla. Stat. 687.071), so it can't be published.
   if (highestRate(draft) > 25) problems.push(`No rate can go above 25% a year: that's criminal usury in Florida (Fla. Stat. 687.071). The highest here is ${highestRate(draft)}%.`);
   if (draft.servicing.defaultRateMax > 25) problems.push("The default rate cap can't go above 25% a year (Fla. Stat. 687.071).");

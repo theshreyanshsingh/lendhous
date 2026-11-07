@@ -11,6 +11,7 @@ import { JOB_LABEL, staleJobs } from "@/lib/health";
 import { lastJobRuns } from "@/lib/health-store";
 import { unreadCount } from "@/lib/notifications";
 import { ROLE_LABEL, viewFor } from "@/lib/permissions";
+import { DEMO_BONUS } from "@/lib/referrals";
 import { getSettings } from "@/lib/settings";
 import { StoreProvider } from "@/lib/store";
 import { streetViewOn } from "@/lib/street-view";
@@ -44,7 +45,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const account = { name: user.name, email: user.email, roles: user.roleCodes.map((role) => ROLE_LABEL[role]), demo, canManageMembers, canViewAudit, canManageSettings, canManageFirms: canRouteCapital || canManageCapital, canManagePricing, canViewReports, canIssueLetters, canManageBrokers, staleJobs: stale.map((job) => JOB_LABEL[job]), openErrors, unread, offerSample: settings.offerSampleData !== false };
   return (
     // Every page, demo seats too, prices new quotes on the version the server does, so the two render the same.
-    <StoreProvider demo={demo} accountId={user.id} viewerName={user.name} viewerEmail={user.email} initialBook={demo ? undefined : await scopedBook(user)} pricing={(await loadPricing(), pricingPayload([]))} newLeads={newLeads} streetView={!demo && streetViewOn()} targets={targetsFrom(settings.slaTargets as never)} paymentInstructions={demo ? "" : settings.paymentInstructions}>
+    <StoreProvider demo={demo} accountId={user.id} viewerName={user.name} viewerEmail={user.email} initialBook={demo ? undefined : await scopedBook(user)} pricing={(await loadPricing(), pricingPayload([]))} newLeads={newLeads} streetView={!demo && streetViewOn()} targets={targetsFrom(settings.slaTargets as never)} paymentInstructions={demo ? "" : settings.paymentInstructions} referralBonus={demo ? DEMO_BONUS : settings.referralBonusCents / 100}>
       <Shell account={account} view={view}>{children}</Shell>
     </StoreProvider>
   );

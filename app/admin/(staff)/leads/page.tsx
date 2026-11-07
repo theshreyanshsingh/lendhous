@@ -25,8 +25,10 @@ export default async function Leads() {
   // Photos sent with each quote request, until the lead becomes a loan and they move to it.
   const photoRows = await prisma.document.findMany({ where: { ownerType: "LEAD", ownerId: { in: leads.map((lead) => lead.id) }, documentType: PROPERTY_PHOTO, ...notDeleted }, select: { id: true, ownerId: true }, orderBy: { createdAt: "asc" } });
   const photosFor = (leadId: string) => photoRows.filter((row) => row.ownerId === leadId);
-  // Leads that came by a broker's referral link, with the brokerage's name.
-  const brokers = leads.some((lead) => lead.brokerId) ? new Map((await readBook()).book.brokers.map((broker) => [broker.id, broker.name])) : new Map<string, string>();
+  // Leads that came by a broker's or a borrower's referral link, with the brokerage's or the borrower's name.
+  const book = leads.some((lead) => lead.brokerId || lead.referrerId) ? (await readBook()).book : null;
+  const brokers = new Map((book?.brokers ?? []).map((broker) => [broker.id, broker.name]));
+  const borrowers = new Map((book?.deals ?? []).map((deal) => [deal.borrowerId, deal.borrowerName]));
   return (
     <div className="space-y-4">
       <PageIntro eyebrow="Website" title="Website leads" lede="Quote requests from the public site, from borrowers and brokers. Send the borrower the secure application link to turn one into a loan." />
@@ -48,7 +50,7 @@ export default async function Leads() {
                   <td data-label="Received" className="lg:whitespace-nowrap">{when(lead.createdAt)}</td>
                   <td data-label="Project">
                     <div>
-                      <div>{lead.strategy}{lead.submitter === "broker" && <span className="ml-1 text-xs text-link">· broker</span>}{lead.channel && lead.channel !== "site" && <span className="ml-1 text-xs text-link" data-testid="lead-channel">· {channelLabel(lead.channel).toLowerCase()}</span>}{lead.brokerId && <span className="ml-1 text-xs text-link" data-testid="lead-referral">· referred by {brokers.get(lead.brokerId) ?? "a broker"}</span>}</div>
+                      <div>{lead.strategy}{lead.submitter === "broker" && <span className="ml-1 text-xs text-link">· broker</span>}{lead.channel && lead.channel !== "site" && <span className="ml-1 text-xs text-link" data-testid="lead-channel">· {channelLabel(lead.channel).toLowerCase()}</span>}{lead.brokerId && <span className="ml-1 text-xs text-link" data-testid="lead-referral">· referred by {brokers.get(lead.brokerId) ?? "a broker"}</span>}{lead.referrerId && <span className="ml-1 text-xs text-link" data-testid="lead-friend">· referred by {borrowers.get(lead.referrerId) ?? "a borrower"}, a borrower</span>}</div>
                       <div className="text-xs text-muted-foreground">{lead.request ? `${lead.request.address.street}, ${lead.request.address.city}, ${lead.request.address.state} ${lead.request.address.zip}` : `${lead.city}, ${lead.state}`}{lead.experience ? ` · ${lead.experience}` : ""}</div>
                       {lead.request && <div className="text-xs text-muted-foreground">{CREDIT_LABEL[lead.request.creditBand]} credit · {CITIZENSHIP_LABEL[lead.request.citizenship]}{lead.request.comps.length ? ` · ${lead.request.comps.length} comp${lead.request.comps.length === 1 ? "" : "s"}` : ""}</div>}
                       {lead.targetClosing && <div className="text-xs text-muted-foreground">Target closing {lead.targetClosing}</div>}

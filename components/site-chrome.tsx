@@ -41,6 +41,8 @@ export function SiteFooter() {
           <Link href="/about">About</Link>
           <Link href="/resources">Investor resources</Link>
           <Link href="/calculators">Calculators</Link>
+          <Link href="/rates">Rates and leverage</Link>
+          <Link href="/rewards">Borrower rewards</Link>
         </div>
         <div>
           <h3>GET STARTED</h3>

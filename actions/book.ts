@@ -12,7 +12,7 @@ import { encryptField } from "@/lib/crypto";
 import type { Book, BookAction } from "@/lib/book";
 import { isDemoEmail } from "@/lib/deploy";
 import { prisma } from "@/lib/prisma";
-import { borrowerFor, screenAutomatically } from "@/lib/loan-intake";
+import { borrowerFor, creditReferral, screenAutomatically } from "@/lib/loan-intake";
 import { TEAM_ROLES, type TeamRole } from "@/lib/loan-team";
 import { memberById, memberOf, teamCandidates } from "@/lib/loan-team-store";
 import { DEMO_TEAM, type TeamMember } from "@/lib/mockData";
@@ -215,12 +215,10 @@ export async function startLoan(input: NewLoan): Promise<BookReply & { dealId?: 
     const photos = await moveLeadPhotos(String(input.leadId), deal.id);
     const withPhotos = photos.length ? await runAction(actor, { t: "addPropertyPhotos", dealId: deal.id, photos, by: "Quote request" }, { trusted: true }) : null;
     if (withPhotos && !("error" in withPhotos)) latest = withPhotos.after;
-    // A lead from a broker's referral link makes the loan the broker's, from the day the request came in.
-    const lead = await prisma.lead.findFirst({ where: { id: String(input.leadId) }, select: { brokerId: true, createdAt: true } });
-    if (lead?.brokerId) {
-      const referred = await runAction(actor, { t: "referLoan", dealId: deal.id, brokerId: lead.brokerId, on: servicingDate(lead.createdAt) }, { trusted: true });
-      if (!("error" in referred)) latest = referred.after;
-    }
+    // A lead from a referral link: a broker's makes the loan theirs, a borrower's counts toward their referral bonus.
+    const lead = await prisma.lead.findFirst({ where: { id: String(input.leadId) }, select: { brokerId: true, referrerId: true, createdAt: true } });
+    const referred = lead && (await creditReferral(deal.id, lead));
+    if (referred) latest = referred;
     const updated = await prisma.lead.updateMany({ where: { id: String(input.leadId) }, data: { loanId: deal.id, contactedAt: new Date() } });
     if (updated.count) revalidatePath("/admin/leads");
   }

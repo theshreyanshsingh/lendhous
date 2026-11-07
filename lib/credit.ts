@@ -93,7 +93,10 @@ export function needsList(app: Application, sponsor: Sponsor | undefined): Doc[]
   else docs.push(doc("payoff", "Payoff letter for the current loan", "Property", "From the lender being paid off."), doc("hud-original", "Settlement statement from when you bought it", "Property", "Shows what was paid and when."));
   if (app.rehab > 0) docs.push(doc("sow", "Scope of work and budget", "Property", "Line by line. You can also fill it in online on this loan."), doc("contractor", "Contractor's license and bid", "Property", "Who is doing the work and what they're charging."));
   if (app.product === "ground_up") docs.push(doc("plans", "Plans and building permit", "Property", "Or the permit application if it hasn't been issued yet."));
-  if (app.product === "dscr") docs.push(doc("lease", app.occupancy === "tenant" ? "Current leases" : "Rent estimate or signed lease", "Property", app.occupancy === "tenant" ? "Every lease in place, signed." : "A lease if you have one; otherwise the appraisal's market rent is used."));
+  if (app.product === "dscr" && app.rentalType === "short_term") docs.push(app.strIncomeSource === "projection"
+    ? doc("str-income", "Short-term rental income projection", "Property", "An AirDNA report or the appraiser's short-term rental analysis for the property.")
+    : doc("str-income", "Payout statements, last 12 months", "Property", "From Airbnb, VRBO or your property manager, month by month, showing what was paid out."));
+  else if (app.product === "dscr") docs.push(doc("lease", app.occupancy === "tenant" ? "Current leases" : "Rent estimate or signed lease", "Property", app.occupancy === "tenant" ? "Every lease in place, signed." : "A lease if you have one; otherwise the appraisal's market rent is used."));
   docs.push(doc("bank", "Bank statements, 2 most recent months", "Liquidity", "Every page, showing the cash to close and reserves."));
   if (sponsor && sponsor.trackRecord.length) docs.push(doc("track", "Settlement statements for your past deals", "Experience", "One for each deal you listed, so your experience can be confirmed."));
   if (sponsor?.guarantors.some((item) => item.citizenship === "foreign")) docs.push(doc("foreign", "Passport, visa and foreign credit report", "Identity", "For each foreign national guarantor."));

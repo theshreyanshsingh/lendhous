@@ -4,6 +4,7 @@ import { exportIris, taxYearReport } from "@/actions/tax";
 import { Badge, Section, Skeleton, usd } from "@/components/ui";
 import { shortDay } from "@/lib/format";
 import { deadlines, TAX_CONFIG, taxYear, type FormLine } from "@/lib/tax-forms";
+import { bonusesPaidIn, MISC_THRESHOLD } from "@/lib/referrals";
 import { useStore } from "@/lib/store";
 
 const FORMS: { form: FormLine["form"]; title: string; who: string }[] = [
@@ -16,6 +17,7 @@ const FORMS: { form: FormLine["form"]; title: string; who: string }[] = [
 export function TaxBoard() {
   const { s, local } = useStore();
   const [year, setYear] = useState(2026);
+  const referralBonuses = bonusesPaidIn(s.deals, year);
   const [report, setReport] = useState<{ lines: FormLine[]; deadlines: ReturnType<typeof deadlines> } | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -68,6 +70,23 @@ export function TaxBoard() {
           </Section>
         );
       })}
+      {/* Not in the export: whether these go on a 1099-MISC (box 3, other income) is the CPA's call. */}
+      <Section title="Referral bonuses paid to borrowers">
+        <p className="mb-2 text-xs text-muted-foreground">Bonuses for referring an investor whose loan funded (lib/referrals.ts). Anyone paid {usd(MISC_THRESHOLD, 0)} or more in the year likely needs a 1099-MISC: ask the CPA, and get a W-9 from them before January.</p>
+        {referralBonuses.length === 0 ? <p className="text-sm text-muted-foreground">None paid in {year}.</p> : (
+          <table className="stack-table w-full text-sm" data-testid="tax-referrals">
+            <thead><tr><th>Borrower</th><th>Loans referred</th><th className="text-right">Paid</th><th>1099-MISC</th></tr></thead>
+            <tbody className="divide-y divide-border">{referralBonuses.map((row) => (
+              <tr key={row.referrerId} data-testid="tax-referral">
+                <td className="font-medium">{row.name}</td>
+                <td data-label="Loans referred" className="text-xs text-muted-foreground">{row.loans.join(", ")}</td>
+                <td data-label="Paid" className="text-right tabular-nums">{usd(row.total, 2)}</td>
+                <td data-label="1099-MISC">{row.needsForm ? <Badge tone="amber">Likely: ask the CPA</Badge> : <span className="text-xs text-muted-foreground">Under {usd(MISC_THRESHOLD, 0)}</span>}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        )}
+      </Section>
       <p className="text-xs text-faint">The thresholds and who counts as exempt are for LendHous&apos;s CPA to confirm. Upload the export at IRIS (the IRS&apos;s only e-file system from January 1, 2027), which also gives recipients&apos; copies to mail; check its columns against IRS&apos;s current CSV template first. Florida has no state filing for these.</p>
     </div>
   );

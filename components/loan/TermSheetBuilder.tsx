@@ -9,10 +9,12 @@ import { exceptionCovers, exceptionReasons, issueProblem, latestSheet, matrixOf,
 import { useServiceDay } from "./use-service-day";
 import { shortDay } from "@/lib/format";
 import { usuryCheck, usuryWarning } from "@/lib/usury";
+import { buyDownOptions } from "@/lib/buy-down";
+import { ratePercent } from "@/lib/format";
 
 const small = "h-9! px-3! text-xs!";
 const TONE = { sent: "amber", accepted: "green", changes_requested: "blue", declined: "rose", expired: "slate", superseded: "slate" } as const;
-const pct = (value: number) => `${value.toFixed(3).replace(/0$/, "")}%`;
+const pct = ratePercent;
 
 /** An owner's decision on an underwriter's request to price outside the matrix. Whoever asked can't decide it. */
 function ExceptionPanel({ deal }: { deal: Deal }) {
@@ -63,6 +65,8 @@ export function TermSheetBuilder({ deal }: { deal: Deal }) {
   const usuryFor = e ? usuryCheck({ amount: e.noteAmount, rate: draft.rate, points: draft.points, brokerPoints: deal.brokerPoints, termMonths: e.termMonths }) : null;
   const usury = usuryFor && !usuryFor.overLender ? usuryWarning(usuryFor, e!.termMonths, deal.brokerPoints) : null;
   const version = (deal.termSheets?.length ?? 0) + 1;
+  // What the borrower will be offered besides these terms (lib/buy-down.ts); none for an exception.
+  const choices = e && !reasons.length ? buyDownOptions(pricedApp(deal.app, draft), { rate: e.rate, points: e.pointsPct }, { rate: m.rate, points: m.points }) : [];
   const set = (key: "rate" | "points" | "termMonths", value: string) => { setText({ ...text, [key]: value }); setDraft({ ...draft, [key]: Number(value) }); };
   const run = async (action: Parameters<typeof dispatch>[0]) => { setBusy(true); const done = await dispatch(action); setBusy(false); return done; };
   const pdf = (v: number) => (local ? "/api/term-sheets/demo" : `/api/term-sheets/${deal.id}?v=${v}`);
@@ -91,6 +95,7 @@ export function TermSheetBuilder({ deal }: { deal: Deal }) {
             )}
             {broker && e && <p className="text-xs text-muted-foreground" data-testid="sheet-broker-fee">The broker&apos;s fee of {deal.brokerPoints} points ({usd((e.noteAmount * (deal.brokerPoints ?? 0)) / 100)}) is shown on the term sheet as a cost the borrower pays.</p>}
             {usury && <p className="rounded-md bg-warn/10 p-3 text-xs text-warn" role="alert" data-testid="sheet-usury">{usury}</p>}
+            {choices.length > 1 && <p className="text-xs text-muted-foreground" data-testid="sheet-choices">The borrower can also accept at {choices.length - 1} other rate-and-points choice{choices.length === 2 ? "" : "s"} inside the matrix and the usury cap: {pct(choices[0].rate)} with {choices[0].points} points to {pct(choices[choices.length - 1].rate)} with {choices[choices.length - 1].points}.</p>}
             {reasons.length > 0 && (
               <div className={`rounded-md p-3 text-xs ${covered ? "bg-good/10 text-good" : "bg-warn/10"}`} data-testid="sheet-exception">
                 <p className="font-medium">{covered ? `Outside the matrix, approved by ${deal.pricingException!.decidedBy}:` : "Outside the matrix:"}</p>

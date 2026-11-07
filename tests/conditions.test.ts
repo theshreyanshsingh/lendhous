@@ -33,7 +33,7 @@ const change = (t: "clearCondition" | "returnCondition" | "waiveCondition", cond
 describe("the conditions library", () => {
   it("starts with standard conditions and gives each loan type its own", () => {
     expect(libraryOf(emptyBook())).toBe(DEFAULT_LIBRARY);
-    const titles = (product: Deal["app"]["product"]) => templatesFor(DEFAULT_LIBRARY, product).map((item) => item.id);
+    const titles = (product: Deal["app"]["product"]) => templatesFor(DEFAULT_LIBRARY, { product }).map((item) => item.id);
     expect(titles("dscr")).toContain("std-lease");
     expect(titles("dscr")).not.toContain("std-budget");
     expect(titles("ground_up")).toEqual(expect.arrayContaining(["std-budget", "std-builders-risk"]));
@@ -52,7 +52,7 @@ describe("the conditions library", () => {
     expect(added).toMatchObject({ title: "Flood certificate", version: 1, updatedBy: "owner name" });
     const retired = run(after, owner, { t: "saveConditionTemplate", template: { ...added, active: false }, by: "x" }).after;
     expect(retired.conditionLibrary.find((item) => item.id === added.id)).toMatchObject({ active: false, version: 2 });
-    expect(templatesFor(libraryOf(retired), "fix_flip").some((item) => item.id === added.id)).toBe(false);
+    expect(templatesFor(libraryOf(retired), { product: "fix_flip" }).some((item) => item.id === added.id)).toBe(false);
     expect(retired.audit[0].text).toMatch(/retired "Flood certificate" \(version 2\)/);
   });
 });
@@ -63,7 +63,7 @@ describe("conditions on a loan", () => {
     const accepted = deal(b, "d8");
     const { after, action } = run(b, owner, { t: "advanceLoan", dealId: "d8" });
     const added = deal(after, "d8").conditions!;
-    expect(added.map((item) => item.templateId)).toEqual(templatesFor(DEFAULT_LIBRARY, accepted.app.product).map((item) => item.id));
+    expect(added.map((item) => item.templateId)).toEqual(templatesFor(DEFAULT_LIBRARY, accepted.app).map((item) => item.id));
     expect(added.every((item) => item.status === "open" && item.dueOn)).toBe(true);
     const told = alertsFor(b, after, action);
     expect(told.map((alert) => alert.to)).toEqual(["borrower", "broker"]);

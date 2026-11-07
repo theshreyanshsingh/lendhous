@@ -28,6 +28,7 @@ function Row({ item, today }: { item: QueueItem; today: string }) {
         </span>
         {due ? <span className={`shrink-0 rounded-[2px] px-2 py-0.5 text-xs font-medium ${due.urgent ? "bg-bad/10 text-bad" : "bg-warn/12 text-warn"}`} data-testid="queue-due">{due.text}</span>
           : item.clock ? <span className={`shrink-0 rounded-[2px] px-2 py-0.5 text-xs font-medium ${CLOCK_TONE[item.clock.state]}`} data-testid="queue-clock" data-state={item.clock.state} title={`Target: ${item.clock.target.hours} ${item.clock.target.business ? "business " : ""}hours`}>{item.clock.text}</span> : null}
+        {item.repeat && <span className="shrink-0 rounded-[2px] bg-good/12 px-2 py-0.5 text-xs font-medium text-good" data-testid="queue-repeat" title="Repeat borrower: worked first">Repeat</span>}
         {item.owner && !item.mine && <span className="grid size-6 shrink-0 place-items-center rounded-full bg-muted text-[10px] font-semibold" title={`${item.owner}'s loan`} aria-label={`${item.owner}'s loan`}>{initialsOf(item.owner)}</span>}
       </Link>
     </li>

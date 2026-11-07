@@ -13,6 +13,17 @@ export interface FlipTier { rate: Range; points: Range; maxLTC: number; maxLTARV
 export interface BridgeTier { rate: Range; points: Range; maxLTV: number; minFico: number }
 export interface GroundUpTier { rate: Range; points: Range; maxLTC: number; maxLTARV: number; maxLandLTV: number; minFico: number }
 export interface DscrCell { maxLTV: number; rateAdd: number }
+/**
+ * Short-term (Airbnb, VRBO) rentals on a DSCR loan: the share of the income counted as rent, and what it adds to the price.
+ * Payout statements for the last 12 months count for more than a projection; a cash-out counts less of either.
+ */
+export interface ShortTermRules { historyFactor: number; projectionFactor: number; cashOutFactorCut: number; rateAdd: number; leverageCut: number }
+/**
+ * PLACEHOLDER until GT sets them (research, 2026-11-07: Easy Street counts 75% of an AirDNA projection; Lima One 75% on a
+ * purchase and 70% on a cash-out; Ridge Street prices Airbnb DSCR from 6.0%). Also the fallback for pricing published
+ * before short-term rentals were priced.
+ */
+export const SHORT_TERM_DEFAULTS: ShortTermRules = { historyFactor: 0.8, projectionFactor: 0.75, cashOutFactorCut: 0.05, rateAdd: 0.25, leverageCut: 0.05 };
 
 export const pricingConfig = {
   version: "PLACEHOLDER-v3-2026-10-18",
@@ -65,6 +76,7 @@ export const pricingConfig = {
       [{ maxLTV: 0.75, rateAdd: 0.5 }, { maxLTV: 0.75, rateAdd: 0.625 }, { maxLTV: 0.7, rateAdd: 0.875 }, { maxLTV: 0.6, rateAdd: 1.5 }],
       [{ maxLTV: 0.7, rateAdd: 0.875 }, { maxLTV: 0.7, rateAdd: 1.0 }, { maxLTV: 0.65, rateAdd: 1.25 }, null],
     ] as (DscrCell | null)[][],
+    shortTerm: { ...SHORT_TERM_DEFAULTS } as ShortTermRules | undefined,
   },
 
   experienceTiers: [ { tier: 1 as Tier, min: 0 }, { tier: 2 as Tier, min: 2 }, { tier: 3 as Tier, min: 5 }, { tier: 4 as Tier, min: 10 } ],
@@ -87,6 +99,13 @@ export const pricingConfig = {
       { loans: 6, rateCut: 0.75, pointsCut: 0.5 },
       { loans: 10, rateCut: 1.0, pointsCut: 0.75 },
     ] as RepeatTier[] | undefined,
+    /**
+     * PLACEHOLDER until GT sets it: what a point buys off the rate when a borrower buys it down, or gives back when they buy
+     * it up (lib/buy-down.ts): on a DSCR rental, and on the loans of a year or so. Kiavi's rental "Compare Mode" offers the
+     * same choice.
+     */
+    buyDownRatePerPoint: 0.25 as number | undefined,
+    buyDownShortRatePerPoint: 0.5 as number | undefined,
   },
 
   geography: {

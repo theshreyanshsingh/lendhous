@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { PageHead } from "@/components/site-chrome";
-import { brokerByReferral } from "@/lib/broker-store";
+import { referralByCode } from "@/lib/broker-store";
 import { loadPricing } from "@/lib/pricing-store";
 import { currentPricing } from "@/lib/pricing-versions";
 import { getSettings } from "@/lib/settings";
@@ -16,13 +16,13 @@ export const dynamic = "force-dynamic";
 
 export default async function Start({ searchParams }: { searchParams: Promise<{ ref?: string }> }) {
   await loadPricing();
-  // A broker's referral link: the request, and the loan it becomes, are attributed to the brokerage.
-  const referral = await brokerByReferral((await searchParams).ref).catch(() => null);
+  // A referral link: the request, and the loan it becomes, are attributed to the brokerage or the borrower who sent it.
+  const referral = await referralByCode((await searchParams).ref).catch(() => null);
   return (
     <>
       <PageHead eyebrow="LOAN QUOTE" title="Tell us about the deal." description="See indicative terms from today's pricing as soon as the numbers are in, with no name or email needed. Save them, and a loan officer follows up the same business day." />
       <main className="content quote-layout">
-        <QuoteRequest pricing={currentPricing()} signupOpen={(await getSettings()).allowSignup !== false} referral={referral ? { code: (await searchParams).ref!, name: referral.name } : undefined} />
+        <QuoteRequest pricing={currentPricing()} signupOpen={(await getSettings()).allowSignup !== false} referral={referral ? { code: (await searchParams).ref!, name: referral.name, kind: referral.kind } : undefined} />
         <aside className="panel" style={{ position: "sticky", top: 24 }}>
           <div className="eyebrow">WHAT HAPPENS NEXT</div>
           <ol className="quote-next">

@@ -19,6 +19,8 @@ export function SiteMobileMenu() {
         <Link href="/about">About</Link>
         <Link href="/resources">Resources</Link>
         <Link href="/calculators">Calculators</Link>
+        <Link href="/rates">Rates and leverage</Link>
+        <Link href="/rewards">Borrower rewards</Link>
         <Link href="/login" data-testid="mobile-portal-login">Portal login</Link>
       </div>
     </>

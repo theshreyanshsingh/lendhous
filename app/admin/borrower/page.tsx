@@ -9,6 +9,7 @@ import Tracker from "@/components/Tracker";
 import { PageIntro } from "@/components/page-intro";
 import { Badge, usd, productLabel, statusLabel, Stat } from "@/components/ui";
 import { BorrowerLetters } from "@/components/BorrowerLetters";
+import { ReferAFriend } from "@/components/ReferAFriend";
 import { EmptyArt } from "@/components/art/HouseArt";
 import { OPEN_UPLOAD } from "@/components/UploadSheet";
 import { PropertyPicture } from "@/components/PropertyPicture";
@@ -38,6 +39,7 @@ export default function BorrowerHome() {
         </div>
       )}
       <BorrowerLetters />
+      <ReferAFriend />
       {closedLoans.length > 0 && (
         <div className="flex gap-2" role="tablist" aria-label="Your loans">
           {([["active", "Active", all.length - closedLoans.length], ["closed", "Paid off, declined and withdrawn", closedLoans.length]] as const).map(([key, label, count]) => <button key={key} type="button" role="tab" aria-selected={shown === key} data-testid={`loans-tab-${key}`} onClick={() => setShown(key)} className={`rounded-full px-3 py-1.5 text-xs font-medium ${shown === key ? "bg-primary text-primary-foreground" : "border border-rule text-muted-foreground hover:text-foreground"}`}>{label} ({count})</button>)}

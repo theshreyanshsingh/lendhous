@@ -3,7 +3,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useStore, est, inHouseAvailable, capitalSummary } from "@/lib/store";
-import { evaluate, recommendRoute, matchPartner, fullBoatReserve, dutchReserve, evenDraws, type Application } from "@/lib/engine";
+import { evaluate, recommendRoute, matchPartner, fullBoatReserve, dutchReserve, evenDraws, qualifyingRent, shortTermFactor, type Application } from "@/lib/engine";
 import { currentPricing, pricingFor } from "@/lib/pricing-versions";
 import { activeWire, maskAccount, wireVerified } from "@/lib/closing";
 import { PRE_FUNDING } from "@/lib/loan-exits";
@@ -29,11 +29,12 @@ import { InsurancePanel } from "@/components/loan/InsurancePanel";
 import { INSURED } from "@/lib/insurance";
 import { PropertyPhotos } from "@/components/loan/PropertyPhotos";
 import { LoanTeam } from "@/components/loan/LoanTeam";
-import { closingIn, shortDay } from "@/lib/format";
+import { closingIn, ratePercent, shortDay } from "@/lib/format";
 import { TermSheetCard } from "@/components/loan/TermSheetCard";
 import { useServiceDay } from "@/components/loan/use-service-day";
 import { Badge, GradeBadge, RatioPill, Section, Stat, usd, pct, k, productLabel, statusLabel, capTone, points, ratioGrid, statGrid } from "@/components/ui";
 import { BrokerFee } from "@/components/loan/BrokerFee";
+import { ReferralBonus } from "@/components/loan/ReferralBonus";
 import { LoanTimeline } from "@/components/loan/LoanTimeline";
 import { PropertyPicture } from "@/components/PropertyPicture";
 import { Showcase } from "@/components/loan/Showcase";
@@ -172,7 +173,15 @@ export default function DealWorkspace() {
               {num("purchasePrice", d.app.product === "ground_up" ? "Land value" : "Purchase / as-is")}
               {num("appraisedAsIs", "Appraised as-is (optional)")}
               {d.app.product !== "bridge" && d.app.product !== "dscr" && <>{num("rehab", "Rehab / construction budget")}{num("arv", "ARV (selected valuation)")}</>}
-              {d.app.product === "dscr" && <>{num("monthlyRent", "Qualifying rent / mo")}{num("taxesAnnual", "Taxes / yr")}{num("insuranceAnnual", "Insurance / yr")}</>}
+              {d.app.product === "dscr" && uwApp && <>
+                <label className="block"><span className="label">How it&apos;s rented</span><select className="desk-input" data-testid="uw-rental-type" value={uwApp.rentalType ?? "long_term"} onChange={(ev) => setOv({ ...ov, rentalType: ev.target.value as "long_term" | "short_term", ...(ev.target.value === "short_term" && !uwApp.strIncomeSource ? { strIncomeSource: "payouts" as const } : {}) })}><option value="long_term">On a lease</option><option value="short_term">By the night (Airbnb, VRBO)</option></select></label>
+                {uwApp.rentalType === "short_term" ? <>
+                  <label className="block"><span className="label">Income from</span><select className="desk-input" data-testid="uw-str-source" value={uwApp.strIncomeSource ?? "payouts"} onChange={(ev) => setOv({ ...ov, strIncomeSource: ev.target.value as "payouts" | "projection" })}><option value="payouts">12 months of payouts</option><option value="projection">A projection</option></select></label>
+                  {num("strAnnualIncome", uwApp.strIncomeSource === "projection" ? "Projected income / yr" : "Payouts, last 12 months")}
+                  <p className="text-[11px] text-faint" data-testid="uw-str-rent">Counted at {Math.round(shortTermFactor(uwApp, pricingConfig) * 100)}%: {usd(qualifyingRent(uwApp, pricingConfig))} a month for the DSCR.</p>
+                </> : num("monthlyRent", "Qualifying rent / mo")}
+                {num("taxesAnnual", "Taxes / yr")}{num("insuranceAnnual", "Insurance / yr")}
+              </>}
               {num("fico", "FICO (pulled)")}{num("verifiedDeals", "Verified deals (36 mo)")}{num("liquidity", "Verified liquidity")}
               <p className="text-[11px] text-faint">{locked ? "Edits are a live what-if. These numbers are locked once a loan clears to close." : "Edits are a live what-if until you save them."}</p>
             </div>
@@ -195,7 +204,7 @@ export default function DealWorkspace() {
             <div className="grid gap-4 md:grid-cols-2">
               <Section title="Pricing & cash">
                 <div className="grid grid-cols-2 gap-3">
-                  <Stat label="Rate" value={`${e.rate.toFixed(3)}%`} sub={`matrix ${e.rateRange.join("–")}% · pricing ${d.app.pricingVersion ?? currentPricing().version}`} />
+                  <Stat label="Rate" value={ratePercent(e.rate)} sub={`matrix ${e.rateRange.join("–")}% · pricing ${d.app.pricingVersion ?? currentPricing().version}`} />
                   <Stat label="Points" value={usd(e.points)} sub={`${e.pointsPct}%`} />
                   <Stat label="Cash to close" value={usd(e.cashToClose)} />
                   <Stat label="All-in annualized" value={pct(e.allIn, 2)} sub={`flag at ${pct(pricingConfig.allInCostFlagCeiling, 0)}`} />
@@ -231,6 +240,7 @@ export default function DealWorkspace() {
         <div className="grid gap-4 lg:grid-cols-2">
           <div className="min-w-0 space-y-4">
             <BrokerFee deal={d} />
+            <ReferralBonus deal={d} />
             <Section title="Recommendation">
               <div className="flex flex-wrap items-center gap-2" data-testid="route-rec"><Badge tone={rec.route === "IN_HOUSE" ? "green" : rec.route === "SPLIT" ? "violet" : "amber"}>{rec.route.replace(/_/g, " ")}</Badge><span className="text-sm text-muted-foreground">because: {rec.reasons.join("; ")}</span></div>
               <p className="mt-1 text-[11px] text-faint">First matching rule wins. A human always confirms.</p>

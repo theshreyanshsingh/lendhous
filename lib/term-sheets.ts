@@ -4,10 +4,12 @@
 // rules, the screens and the PDF all ask these, so the button a screen offers and the rule the server applies can't
 // disagree.
 import { evaluate, type Application, round2 } from "./engine";
-import type { Deal, PricingException, TermSheet } from "./mockData";
+import type { Deal, PricingException, TermSheet, TermSheetTerms } from "./mockData";
 import { BASE_VERSION, pricingFor } from "./pricing-versions";
 import { addDays, daysBetween, defaultRate, servicingTermsOf } from "./servicing";
+import { buyDownOptions } from "./buy-down";
 import { usuryCheck, USURY } from "./usury";
+import { ratePercent } from "./format";
 
 /** PLACEHOLDER until GT sets it (Spec B16): the days a term sheet stays open. */
 export const TERM_SHEET_DAYS = 7;
@@ -23,7 +25,7 @@ export const PRODUCT_NAMES: Record<Application["product"], string> = { fix_flip:
 export type TermsInput = { rate: number; points: number; termMonths: number; prepay: Prepay };
 
 const near = (a: number, b: number) => Math.abs(a - b) < 0.0005;
-const percent = (value: number) => `${value.toFixed(3).replace(/0$/, "")}%`;
+const percent = ratePercent;
 
 /** The application priced the way these terms would price it. A rental's term is its 30-year amortization, so it stays. */
 export const pricedApp = (app: Application, input: Pick<TermsInput, "rate" | "points" | "termMonths">): Application => ({ ...app, termRate: input.rate, termPoints: input.points, ...(app.product === "dscr" ? {} : { termMonths: input.termMonths }) });
@@ -118,14 +120,28 @@ export function draftSheet(deal: Deal, input: TermsInput, by: string, today: str
   const e = evaluate(app);
   const m = matrixOf(deal.app);
   const exception = exceptionReasons(deal.app, input).length && exceptionCovers(deal.pricingException, input) ? deal.pricingException : undefined;
+  const choices = exception ? [] : buyDownOptions(app, { rate: e.rate, points: e.pointsPct }, { rate: m.rate, points: m.points });
   return {
     version: (deal.termSheets?.length ?? 0) + 1, issuedAt: at, issuedOn: today, issuedBy: by, expiresOn: addDays(today, TERM_SHEET_DAYS), status: "sent",
     pricingVersion: deal.app.pricingVersion ?? BASE_VERSION,
     terms: { noteAmount: e.noteAmount, initialAdvance: e.initialAdvance, holdback: e.holdback, financedReserve: e.financedReserve, rate: e.rate, pointsPct: e.pointsPct, points: e.points, lenderFees: e.lenderFees, termMonths: e.termMonths, monthlyPayment: e.monthlyPayment, cashToClose: e.cashToClose, interestReserve: app.interestReserve, accrual: app.accrual, prepay: PREPAY[input.prepay], ...(deal.brokerPoints ? { brokerPoints: deal.brokerPoints, brokerFee: round2((e.noteAmount * deal.brokerPoints) / 100) } : {}) },
     matrix: { rate: m.rate, points: m.points },
     ...(exception ? { exception } : {}),
+    // Inside the matrix, the borrower can trade points for rate when they accept; an exception's terms stand as approved.
+    ...(!exception && choices.length > 1 ? { buyDowns: choices } : {}),
     conditions: conditionsOf(deal),
   };
+}
+
+/**
+ * The term sheet's terms at one of its rate-and-points choices: the loan priced at that pair, everything else as sent. The
+ * same terms if it's the pair it was sent with.
+ */
+export function chosenTerms(deal: Deal, sheet: TermSheet, choice: { rate: number; points: number }): TermSheetTerms {
+  if (near(choice.rate, sheet.terms.rate) && near(choice.points, sheet.terms.pointsPct)) return sheet.terms;
+  const e = evaluate({ ...deal.app, termRate: choice.rate, termPoints: choice.points, ...(deal.app.product === "dscr" ? {} : { termMonths: sheet.terms.termMonths }) }, pricingFor(sheet.pricingVersion));
+  const brokerFee = sheet.terms.brokerPoints ? { brokerFee: round2((e.noteAmount * sheet.terms.brokerPoints) / 100) } : {};
+  return { ...sheet.terms, noteAmount: e.noteAmount, initialAdvance: e.initialAdvance, holdback: e.holdback, financedReserve: e.financedReserve, rate: e.rate, pointsPct: e.pointsPct, points: e.points, lenderFees: e.lenderFees, monthlyPayment: e.monthlyPayment, cashToClose: e.cashToClose, ...brokerFee };
 }
 
 export const latestSheet = (deal: Pick<Deal, "termSheets">) => deal.termSheets?.[deal.termSheets.length - 1];
@@ -183,6 +199,11 @@ export function sheetContent(deal: Deal, sheet: TermSheet, lender = "LendHous"):
   if (t.financedReserve > 0) terms.push(["Interest reserve", `${money(t.financedReserve)}, held from the loan to pay interest`]);
   terms.push(["Interest rate", `${percent(t.rate)} a year, ${rental ? "30-year amortizing" : t.accrual === "full_boat" ? "interest only, on the full loan amount" : "interest only, on the money advanced"}`]);
   terms.push(["Origination points", `${t.pointsPct}% (${money(t.points)})`], ["Lender fees", money(t.lenderFees)]);
+  if (sheet.boughtDown) terms.push(["Rate and points chosen", `Sent at ${percent(sheet.boughtDown.rate)} with ${sheet.boughtDown.pointsPct}% in points; the borrower chose ${percent(t.rate)} with ${t.pointsPct}% when accepting`]);
+  else if (sheet.buyDowns && sheet.status === "sent") {
+    const [fewest, most] = [sheet.buyDowns[0], sheet.buyDowns[sheet.buyDowns.length - 1]];
+    terms.push(["Other rate choices", `From ${percent(fewest.rate)} with ${fewest.points}% in points to ${percent(most.rate)} with ${most.points}%, in quarter-point steps: choose one when accepting`]);
+  }
   if (t.brokerFee) terms.push(["Broker's fee", `${t.brokerPoints}% (${money(t.brokerFee)}), paid by the borrower to the broker at closing`]);
   terms.push(["Term", rental ? "30 years" : `${t.termMonths} months from closing`]);
   terms.push([rental ? "Monthly payment" : "First monthly payment (estimated)", money(t.monthlyPayment)], ["Cash to close (estimated)", money(t.cashToClose)]);

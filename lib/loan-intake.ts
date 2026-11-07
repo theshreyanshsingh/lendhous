@@ -8,6 +8,8 @@ import { accessFor } from "./member-rules";
 import { inviteMember } from "./members";
 import { prisma } from "./prisma";
 import { screenDeal } from "./sanctions-store";
+import { servicingDate } from "./servicing";
+import { freshSettings } from "./settings";
 
 export type IntakeActor = Viewer & { organizationId: string | null };
 
@@ -42,4 +44,27 @@ export async function screenAutomatically(dealId: string) {
   if ("error" in result) return null;
   await sendAlerts(result.before, result.after, result.action);
   return result.after;
+}
+
+const REFERRALS: Viewer = { id: "system", name: "Referral link", roleCodes: [] };
+
+/**
+ * A new loan from a quote request that came by a referral link: a broker's makes the loan theirs from the day the request
+ * came in, and a borrower's counts toward their referral bonus at the amount Settings names now. Returns the book after,
+ * or null when there was nothing to record (or the referral didn't count: a borrower can't refer themselves).
+ */
+export async function creditReferral(dealId: string, lead: { brokerId: string | null; referrerId: string | null; createdAt: Date }) {
+  const on = servicingDate(lead.createdAt);
+  let latest = null;
+  if (lead.brokerId) {
+    const result = await runAction(REFERRALS, { t: "referLoan", dealId, brokerId: lead.brokerId, on }, { trusted: true });
+    if (!("error" in result)) latest = result.after;
+  }
+  if (lead.referrerId) {
+    // Fresh, so a bonus an owner just set is the one this loan is credited with.
+    const bonus = (await freshSettings()).referralBonusCents / 100;
+    const result = await runAction(REFERRALS, { t: "referFriend", dealId, referrerId: lead.referrerId, on, bonus }, { trusted: true });
+    if (!("error" in result)) latest = result.after;
+  }
+  return latest;
 }

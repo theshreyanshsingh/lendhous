@@ -10,6 +10,7 @@ import { insuranceLapsed, openRenewals } from "./insurance";
 import { dueOf, staleLetter } from "./payoffs";
 import { noticeOwed } from "./adverse-action";
 import { needsExitAnswer } from "./exit-plans";
+import { bonusOf } from "./referrals";
 import { clockOf, SLA_TARGETS, type Clock, type Targets } from "./sla";
 import { servicingDate } from "./servicing";
 
@@ -26,7 +27,12 @@ export type QueueItem = {
   mine: boolean;
   /** Lower is more urgent among items with no deadline or clock. */
   priority: number;
+  /** A borrower with loans paid as agreed: worked first among items of the same kind (the Rewards page promises it). */
+  repeat?: boolean;
 };
+
+/** Whether a loan's borrower has earlier LendHous loans paid as agreed, with no late payment pausing it (lib/repeat-borrower.ts). */
+export const repeatBorrower = (deal: Pick<Deal, "app">) => Boolean((deal.app.repeat?.loans || deal.app.repeatBorrower) && !deal.app.repeat?.pausedBy);
 
 const tab = (deal: Deal, name?: string) => `/admin/deals/${deal.id}${name ? `?tab=${encodeURIComponent(name)}` : ""}`;
 const firstStage = (deal: Deal, statuses: string[]) => (deal.stages ?? []).filter((stage) => statuses.includes(stage.status)).map((stage) => stage.at).sort()[0];
@@ -37,7 +43,8 @@ export function workQueue(book: Book, viewer: { id: string; email?: string }, no
   const items: QueueItem[] = [];
   const add = (item: Omit<QueueItem, "mine" | "owner" | "deal"> & { deal?: Deal }) => {
     const { deal } = item;
-    items.push({ ...item, deal: deal && { id: deal.id, loanNumber: deal.loanNumber, borrowerName: deal.borrowerName, address: deal.address }, mine: Boolean(deal && isMine(deal, viewer)), owner: deal?.team?.officer?.name ?? deal?.team?.processor?.name });
+    const repeat = Boolean(deal && repeatBorrower(deal));
+    items.push({ ...item, deal: deal && { id: deal.id, loanNumber: deal.loanNumber, borrowerName: deal.borrowerName, address: deal.address }, mine: Boolean(deal && isMine(deal, viewer)), owner: deal?.team?.officer?.name ?? deal?.team?.processor?.name, ...(repeat ? { repeat, priority: item.priority - 0.5 } : {}) });
   };
   const today = servicingDate(now);
   for (const deal of book.deals) {
@@ -72,6 +79,7 @@ export function workQueue(book: Book, viewer: { id: string; email?: string }, no
       const since = deal.completed?.at ?? firstStage(deal, ["underwriting"]);
       add({ key: `sheet:${deal.id}`, label: "Build and send the term sheet", href: tab(deal, "Term sheet"), deal, since, clock: since ? clockOf(since, now, targets.termSheet) : undefined, priority: 15 });
     }
+    if (bonusOf(deal).state === "earned") add({ key: `referral:${deal.id}`, label: `Pay ${deal.friendReferral!.referrerName}'s referral bonus`, href: tab(deal, "Capital Routing"), deal, since: firstStage(deal, ["funded"]) ?? deal.closingDate, priority: 19 });
     if (needsOfficer(deal)) add({ key: `officer:${deal.id}`, label: "Needs a loan officer", href: tab(deal), deal, priority: 16 });
   }
   for (const payoff of book.payoffs) {

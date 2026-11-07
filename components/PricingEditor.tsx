@@ -116,6 +116,9 @@ export function PricingEditor({ current, history, canPublish }: { current: Prici
         <Section title="DSCR rentals">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{ranges(["dscr"], "points")}{num("Base rate from", ["dscr", "baseRate", 0])}{num("Base rate to", ["dscr", "baseRate", 1])}</div>
           <p className="mt-2 text-xs text-muted-foreground">The grid of LTV limits and rate adds by FICO and DSCR is unchanged here; the developer edits it.</p>
+          <h3 className="mt-4 text-sm font-medium">Short-term rentals (Airbnb, VRBO)</h3>
+          <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3" data-testid="pricing-short-term">{num("Income counted from 12 months of payouts (%)", ["dscr", "shortTerm", "historyFactor"], { pct: true, step: 5, testid: "str-history" })}{num("Income counted from a projection (%)", ["dscr", "shortTerm", "projectionFactor"], { pct: true, step: 5 })}{num("Less on a cash-out (%)", ["dscr", "shortTerm", "cashOutFactorCut"], { pct: true, step: 5 })}{num("Rate add (%)", ["dscr", "shortTerm", "rateAdd"])}{num("Leverage cut (%)", ["dscr", "shortTerm", "leverageCut"], { pct: true, step: 5 })}</div>
+          <p className="mt-2 text-xs text-muted-foreground">Rent for the DSCR is the yearly income at the share counted, over 12. The rate add and leverage cut are on top of the grid.</p>
         </Section>
         <Section title="Loan sizes and fees">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -123,6 +126,10 @@ export function PricingEditor({ current, history, canPublish }: { current: Prici
             {num("Largest overall ($)", ["loanSize", "maxOverall"], { step: 50000 })}{num("Lender fees ($)", ["lenderFees"], { step: 100 })}
             <label className="block min-w-0"><span className="label">Quotes use the range&apos;s</span><select className="desk-input" value={draft.estimatePricePoint} onChange={(event) => setDraft({ ...draft, estimatePricePoint: event.target.value as PricingDraft["estimatePricePoint"] })}><option value="low">Low end</option><option value="mid">Middle</option><option value="high">High end</option></select></label>
           </div>
+        </Section>
+        <Section title="Buying the rate down">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">{num("Rate a point buys on a rental (%)", ["buyDownRatePerPoint"], { testid: "buy-down-rate" })}{num("On a flip, bridge or build (%)", ["buyDownShortRatePerPoint"], { testid: "buy-down-short-rate" })}</div>
+          <p className="mt-2 text-xs text-muted-foreground">Each extra point at closing takes this much off the rate, and each point less adds it, in quarter-point steps. Borrowers choose on the quote and on their term sheet, only inside the loan&apos;s matrix and Florida&apos;s usury cap.</p>
         </Section>
         <Section title="Repeat borrowers">
           <div className="space-y-2" data-testid="repeat-tiers">{draft.repeatTiers.map((_, at) => (

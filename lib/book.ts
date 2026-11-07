@@ -9,6 +9,7 @@ import { activeWire, fundsProblem, missingClosingItems, recordingProblem, verify
 import { latestScreening, ofacBlocker, sameResult, screeningSubjects } from "./ofac";
 import { carryOverDocs, carryOverTrackRecord, earlierLoans, repeatHistory, trackDocCarried } from "./repeat-borrower";
 import { referralCodeFor, referralHolds } from "./brokers";
+import { DEMO_BONUS, type MyReferral } from "./referrals";
 import { cureError, defaultError, executeError, extensionFee, extensionRequestError, payoffError, payoffOn, PRE_FUNDING, reopenTo, closureReason, DEFAULT_KINDS } from "./loan-exits";
 import { canAdvance, nextStage } from "./loan-stages";
 import { issueProblem, latestLetter, letterFigures, receivedOnFor } from "./payoffs";
@@ -16,13 +17,14 @@ import { isLarge, noticeDueOn, noticeOwed, reasonsProblem, requestProblem, start
 import { defaultNocExpiry, drawHolds, lienFileProblem, partiesFor, unreleasedHolds, waiverCheckProblem } from "./lien-law";
 import { insuranceChecks, insuranceFileOf, policiesOf, policyProblem, policyWord, putPolicy, renewalProblem, withInsurance } from "./insurance";
 import { addProblem, changeProblem, DEFAULT_LIBRARY, fromTemplate, libraryOf, missingStandard, templateProblem, templatesFor, type ConditionInput } from "./conditions";
-import { draftSheet, exceptionDecisionProblem, exceptionReasons, exceptionRequestProblem, issueProblem as sheetProblem, latestSheet, matrixOf, pricedApp, respondProblem, startingTerms, termSheetChecks, type Prepay } from "./term-sheets";
+import { chosenTerms, draftSheet, exceptionDecisionProblem, exceptionReasons, exceptionRequestProblem, issueProblem as sheetProblem, latestSheet, matrixOf, pricedApp, respondProblem, startingTerms, termSheetChecks, type Prepay } from "./term-sheets";
+import { optionAt } from "./buy-down";
 import { DEMO_TEAM, seedDeals, seedBids, seedDraws, seedLoanSales, seedLoanOffers, seedMessages, seedPhotoRequests, DEMO_SPONSORS, capitalSources, partners as seedPartners, brokers as seedBrokers, loanBuyers, BORROWER_ID, DEMO_PARTNER_ID, DEMO_BUYER_ID, DEMO_BROKER_ID, type Broker, type ClosingAgent, type Closure, type Deal, type DefaultKind, type Bid, type DrawRequest, type DrawRequestLine, type LoanExtension, type LoanMessage, type Screening, type WireInstruction, type Partner, type PayoffChannel, type PayoffLetter, type PayoffRequest, type NoticeToOwner, type LienWaiver, type ConditionTemplate, type LoanCondition, type DocStatus, type CapitalSource, type LoanBuyer, type LoanOffer, type LoanSale, type LoanPayment, type LoanStatus, type TeamMember, type PaymentMethod, type PhotoRequest, type RequestPhoto, type ScopeLine, type Sponsor, type StageEntry, type PolicyKind, type InsurancePolicy, type InsuranceRenewal } from "./mockData";
 import { BASE_VERSION, currentPricing, type PricingPayload } from "./pricing-versions";
 import { TEAM_ROLE_LABEL, type TeamRole } from "./loan-team";
 import { addDays, DEMO_SERVICING_DAY, firstDueDate, ledger, maturityOf, payoffFor, SERVICED, servicingDate, settle } from "./servicing";
 
-export interface Book { partnerId: string; buyerId: string; brokerId: string; borrowerId: string; loanPrefix: string; deals: Deal[]; bids: Bid[]; partners: Partner[]; buyers: LoanBuyer[]; brokers: Broker[]; sales: LoanSale[]; offers: LoanOffer[]; draws: DrawRequest[]; photoRequests: PhotoRequest[]; payoffs: PayoffRequest[]; messages: LoanMessage[]; sources: CapitalSource[]; conditionLibrary: ConditionTemplate[]; audit: { at: string; text: string }[]; sample?: boolean; /** The pricing its loans use, as sent to a browser. Not part of the records. */ pricing?: PricingPayload }
+export interface Book { partnerId: string; buyerId: string; brokerId: string; borrowerId: string; loanPrefix: string; deals: Deal[]; bids: Bid[]; partners: Partner[]; buyers: LoanBuyer[]; brokers: Broker[]; sales: LoanSale[]; offers: LoanOffer[]; draws: DrawRequest[]; photoRequests: PhotoRequest[]; payoffs: PayoffRequest[]; messages: LoanMessage[]; sources: CapitalSource[]; conditionLibrary: ConditionTemplate[]; audit: { at: string; text: string }[]; sample?: boolean; /** A borrower's own referrals, summed up for them: friends' loans are never in their book (lib/referrals.ts). */ myReferrals?: MyReferral[]; /** The pricing its loans use, as sent to a browser. Not part of the records. */ pricing?: PricingPayload }
 
 export type BookAction =
   | { t: "submitApp"; app: Application; address: string; city: string; zip: string; entityName: string; exitStrategy: string; closingDate?: string; client?: { name: string; borrowerId?: string; brokerId?: string; brokerPoints?: number }; source?: string; sponsor?: Sponsor; refinances?: string }
@@ -64,6 +66,9 @@ export type BookAction =
   | { t: "brokerFeePaid"; dealId: string; amount: number; on: string; reference: string; by: string }
   /** A loan started from a lead that came by a broker's referral link. Only the server does it: it reads the lead. */
   | { t: "referLoan"; dealId: string; brokerId: string; on: string }
+  /** A loan started from a lead that came by a borrower's referral link, with the bonus Settings named that day. Server only. */
+  | { t: "referFriend"; dealId: string; referrerId: string; on: string; bonus: number }
+  | { t: "referralBonusPaid"; dealId: string; amount: number; on: string; reference: string; by: string }
   | { t: "setBrokerPoints"; dealId: string; points: number }
   /** Puts someone on the loan as its officer or processor, or takes them off (null). Only the server does it: it looks the person up. */
   | { t: "assignLoanTeam"; dealId: string; role: TeamRole; member: TeamMember | null; by: string }
@@ -74,7 +79,8 @@ export type BookAction =
   | { t: "firmScreened"; kind: "partner" | "buyer"; firmId: string; screening: Screening }
   /** Someone with clear_ofac decides a possible match on a partner, buyer or brokerage, with what they compared. */
   | { t: "decideFirmScreening"; kind: "partner" | "buyer" | "broker"; firmId: string; screeningId: string; decision: "cleared" | "match"; reason: string; by: string }
-  | { t: "acceptTermSheet"; dealId: string; signedName: string }
+  /** points: one of the term sheet's rate-and-points choices (lib/buy-down.ts); without it, the terms as sent. */
+  | { t: "acceptTermSheet"; dealId: string; signedName: string; points?: number }
   | { t: "addCondition"; dealId: string; condition: ConditionInput; by: string }
   | { t: "clearCondition"; dealId: string; conditionId: string; note: string; by: string }
   | { t: "returnCondition"; dealId: string; conditionId: string; reason: string; by: string }
@@ -82,7 +88,7 @@ export type BookAction =
   /** A file sent in for a condition. The server records it once the file is stored; a demo browser keeps the name only. */
   | { t: "conditionFile"; dealId: string; conditionId: string; fileName: string; documentId?: string; by: string }
   /** A standard condition in the library, new or changed. Retiring one sets active to false; nothing is deleted. */
-  | { t: "saveConditionTemplate"; template: Pick<ConditionTemplate, "title" | "detail" | "category" | "owner" | "needsUpload" | "products" | "dueDays" | "active"> & { id?: string }; by: string }
+  | { t: "saveConditionTemplate"; template: Pick<ConditionTemplate, "title" | "detail" | "category" | "owner" | "needsUpload" | "products" | "dueDays" | "active" | "rental"> & { id?: string }; by: string }
   /** The underwriter's terms go out as the next version (Spec A9), setting the loan's rate and points. */
   | { t: "issueTermSheet"; dealId: string; rate: number; points: number; termMonths: number; prepay: Prepay; by: string }
   | { t: "requestPricingException"; dealId: string; rate: number; points: number; termMonths: number; prepay: Prepay; note: string; by: string }
@@ -224,6 +230,8 @@ function demoTeam(deal: Deal): Deal["team"] {
   return { officer: Number(deal.loanNumber.slice(-1)) % 2 ? uma : olivia, processor: pat };
 }
 
+const DEMO_REFERRALS: Record<string, { on: string; paidOn?: string }> = { d12: { on: "2026-03-10", paidOn: "2026-04-15" }, d17: { on: "2026-09-28" }, d16: { on: "2026-10-30" } };
+
 /** The demo's firms were screened with its loans; the unsigned prospect has a possible match to review. */
 function withDemoScreening<T extends Partner | LoanBuyer>(firm: T): T {
   const review = firm.id === "p-d";
@@ -269,7 +277,7 @@ export function demoBook(): Book {
     }
     // Conditions: d3 is working through them; d7 and d15 have cleared everything before closing.
     if (d.id === "d3" || d.id === "d7" || d.id === "d15") {
-      const conditions = templatesFor(DEFAULT_LIBRARY, d.app.product).map((template, n): LoanCondition => {
+      const conditions = templatesFor(DEFAULT_LIBRARY, d.app).map((template, n): LoanCondition => {
         const made = fromTemplate(template, `cond-demo-${d.id}-${n}`, "Pat Processor (FAKE)", "2026-10-26", "2026-10-26T09:00:00-07:00");
         if (template.category === "post_closing") return made;
         if (d.id !== "d3") return { ...made, status: "cleared", cleared: { by: "Uma Underwriter (FAKE)", at: "2026-10-29T11:00:00-07:00", note: "" } };
@@ -298,6 +306,9 @@ export function demoBook(): Book {
       if (separate) policies.push({ kind: "windstorm", carrier: "Coastal Wind Pool (FAKE)", policy: `CW-${d.loanNumber.slice(-4)}`, expiresOn: "2027-05-31", mortgagee: true, by: "Pat Processor (FAKE)", at }, { kind: "flood", carrier: "Sample Flood (FAKE)", policy: `SF-${d.loanNumber.slice(-4)}`, expiresOn: "2027-03-01", coverage: 250_000, mortgagee: true, by: "Pat Processor (FAKE)", at });
       deals[i] = { ...deals[i], insurance: { policies, flood: { sfha: separate, zone: separate ? "AE" : "X", by: "Pat Processor (FAKE)", at } } };
     }
+    // Three friends the demo borrower referred: one whose bonus was paid, one funded and owed, one still applying.
+    const referred = DEMO_REFERRALS[d.id];
+    if (referred) deals[i] = { ...deals[i], friendReferral: { referrerId: BORROWER_ID, referrerName: "Alex Sample (FAKE)", on: referred.on, bonus: DEMO_BONUS, ...(referred.paidOn ? { paid: { amount: DEMO_BONUS, on: referred.paidOn, reference: "ACH 2026-04-15 (FAKE)", by: "Cam Capital (FAKE)", at: `${referred.paidOn}T15:00:00Z` } } : {}) } };
     if (d.id === "d5") {
       const input = { ...startingTerms(d), rate: matrixOf(d.app).rate[0] - 0.5 };
       deals[i] = { ...d, pricingException: { rate: input.rate, points: input.points, termMonths: input.termMonths, reasons: exceptionReasons(d.app, input), note: "Fourth loan with us, all paid early; a competing offer at this rate (FAKE)", requestedBy: "Uma Underwriter (FAKE)", requestedAt: "2026-10-30T15:00:00-07:00", status: "pending" } };
@@ -438,7 +449,11 @@ function apply(s: Book, a: BookAction): Book {
       const holdback = evaluate(app).holdback;
       // A new rehab budget starts its scope of work over, because the old split no longer adds up.
       const scope = holdback === evaluate(deal.app).holdback ? deal.scope : defaultScope(app.product, holdback);
-      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, app, scope })), audit: log(`${deal.loanNumber}: underwriting numbers updated`) };
+      // A rental found to be let by the night (or the other way) asks for what its income now rests on: payout statements or
+      // a projection in place of the lease. Anything already sent stays.
+      const income = (item: Application) => (item.product === "dscr" ? `${item.rentalType ?? "long_term"}:${item.strIncomeSource ?? ""}` : "");
+      const docs = income(app) === income(deal.app) ? deal.docs : [...deal.docs.filter((doc) => !["lease", "str-income"].includes(doc.id) || doc.status !== "requested"), ...needsList(app, deal.sponsor).filter((doc) => ["lease", "str-income"].includes(doc.id) && !deal.docs.some((have) => have.id === doc.id && have.status !== "requested"))];
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, app, scope, docs })), audit: log(`${deal.loanNumber}: underwriting numbers updated`) };
     }
     case "addOwnDoc": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
@@ -487,6 +502,15 @@ function apply(s: Book, a: BookAction): Book {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
       const broker = s.brokers.find((item) => item.id === a.brokerId);
       return { ...s, deals: upd(a.dealId, (d) => ({ ...d, referredBy: { brokerId: a.brokerId, on: a.on }, brokerId: d.brokerId ?? a.brokerId })), audit: log(`${deal.loanNumber}: referred by ${broker?.name ?? "a broker"}`) };
+    }
+    case "referFriend": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const referrerName = s.deals.find((item) => item.borrowerId === a.referrerId)?.borrowerName ?? "A borrower";
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, friendReferral: { referrerId: a.referrerId, referrerName, on: a.on, bonus: round2(Math.max(0, a.bonus)) } })), audit: log(`${deal.loanNumber}: referred by ${referrerName}, a LendHous borrower`) };
+    }
+    case "referralBonusPaid": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, friendReferral: { ...d.friendReferral!, paid: { amount: round2(a.amount), on: a.on, reference: a.reference.trim(), by: a.by, at: now() } } })), audit: log(`${deal.loanNumber}: referral bonus of $${round2(a.amount).toLocaleString("en-US")} paid to ${deal.friendReferral?.referrerName ?? "the referrer"}`) };
     }
     case "setBrokerPoints": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
@@ -618,17 +642,24 @@ function apply(s: Book, a: BookAction): Book {
       const library = libraryOf(s);
       const prior = a.template.id ? library.find((item) => item.id === a.template.id) : undefined;
       if (a.template.id && !prior) return s;
-      const saved: ConditionTemplate = { ...a.template, id: prior?.id ?? `tpl${uid()}`, title: a.template.title.trim(), detail: a.template.detail.trim(), version: (prior?.version ?? 0) + 1, updatedBy: a.by, updatedAt: now() };
+      const { rental, ...template } = a.template;
+      const saved: ConditionTemplate = { ...template, ...(rental && (!template.products.length || template.products.includes("dscr")) ? { rental } : {}), id: prior?.id ?? `tpl${uid()}`, title: a.template.title.trim(), detail: a.template.detail.trim(), version: (prior?.version ?? 0) + 1, updatedBy: a.by, updatedAt: now() };
       return { ...s, conditionLibrary: prior ? library.map((item) => (item.id === prior.id ? saved : item)) : [...library, saved], audit: log(`Conditions library: ${prior ? (saved.active ? "changed" : prior.active ? "retired" : "changed") : "added"} "${saved.title}" (version ${saved.version})`) };
     }
     case "acceptTermSheet": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
       if (respondProblem(deal, serviceDay(s)) || !a.signedName.trim()) return s;
       const at = now(); const name = a.signedName.trim();
-      const e = evaluate(deal.app);
+      // A choice of rate and points has to be one the term sheet offered.
+      const sheet = latestSheet(deal);
+      const choice = a.points === undefined ? undefined : optionAt(sheet?.buyDowns, a.points);
+      if (a.points !== undefined && !choice) return s;
+      const app = choice ? { ...deal.app, termRate: choice.rate, termPoints: choice.points } : deal.app;
+      const e = evaluate(app);
+      const moved = Boolean(sheet && choice && (Math.abs(choice.rate - sheet.terms.rate) > 1e-9 || Math.abs(choice.points - sheet.terms.pointsPct) > 1e-9));
       // Accepting locks the rate and points: nothing priced later moves them (Spec A9).
-      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, app: { ...d.app, termRate: e.rate, termPoints: e.pointsPct }, status: "term_sheet_accepted", daysInStage: 0, termSheetSignedBy: name, termSheetSignedAt: at,
-        termSheets: d.termSheets?.map((x, i, all) => (i === all.length - 1 ? { ...x, status: "accepted" as const, response: { at, by: name, signedName: name } } : x)) })), audit: log(`${deal.loanNumber}: term sheet${latestSheet(deal) ? ` ${latestSheet(deal)!.version}` : ""} accepted by ${name}`) };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, app: { ...app, termRate: e.rate, termPoints: e.pointsPct }, status: "term_sheet_accepted", daysInStage: 0, termSheetSignedBy: name, termSheetSignedAt: at,
+        termSheets: d.termSheets?.map((x, i, all) => (i === all.length - 1 ? { ...x, status: "accepted" as const, response: { at, by: name, signedName: name }, ...(moved ? { terms: chosenTerms(d, x, choice!), boughtDown: { rate: x.terms.rate, pointsPct: x.terms.pointsPct } } : {}) } : x)) })), audit: log(`${deal.loanNumber}: term sheet${sheet ? ` ${sheet.version}` : ""} accepted by ${name}${moved ? `, choosing ${e.rate}% with ${e.pointsPct} points` : ""}`) };
     }
     case "issueTermSheet": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;

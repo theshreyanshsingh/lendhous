@@ -71,7 +71,7 @@ await page.goto(BASE + "/admin");
 ok("a signed-out visitor is sent to sign-in", page.url().includes("/login?next=%2Fadmin"));
 
 // The public site: every page opens without an account, and Portal login leads to sign-in
-const publicRoutes = ["/", "/programs", "/programs/fix-flip", "/programs/dscr", "/programs/bridge", "/programs/construction", "/programs/portfolio", "/about", "/resources", "/resources/first-investment", "/resources/leverage", "/resources/dscr-explained", "/resources/draws", "/resources/interest-only", "/calculators", "/start", "/disclosures"];
+const publicRoutes = ["/", "/programs", "/rates", "/rewards", "/programs/fix-flip", "/programs/dscr", "/programs/bridge", "/programs/construction", "/programs/portfolio", "/about", "/resources", "/resources/first-investment", "/resources/leverage", "/resources/dscr-explained", "/resources/draws", "/resources/interest-only", "/calculators", "/start", "/disclosures"];
 const statuses = await Promise.all(publicRoutes.map(async (r) => [r, (await fetch(BASE + r, { redirect: "manual" })).status]));
 const broken = statuses.filter(([, status]) => status !== 200);
 ok(`all ${publicRoutes.length} public pages open without an account${broken.length ? ` (${broken.join("; ")})` : ""}`, broken.length === 0);
@@ -141,6 +141,13 @@ const cashBefore = await page.getByTestId("quote-cash").innerText();
 await page.getByTestId("quote-rehab").fill("90000");
 ok("the terms follow the numbers as they change", (await page.getByTestId("quote-cash").innerText()) !== cashBefore);
 await page.getByTestId("quote-rehab").fill("80000");
+// Buying the rate down: more points for a lower rate, priced on the spot.
+const rateOf = async (p) => parseFloat((await p.getByTestId("quote-rate").innerText()).replace(/[^0-9.]/g, ""));
+const quoteRate = await rateOf(page);
+const quoteSlider = page.getByTestId("quote-buy-down-slider");
+ok("the quote offers to buy the rate down", await seen(quoteSlider));
+await quoteSlider.fill(await quoteSlider.getAttribute("max"));
+ok("and more points lower the rate on the terms", (await rateOf(page)) < quoteRate);
 await shot(page, "00c-site-quote-request.png");
 ok("nothing about the visitor is kept until they save", (await prisma.lead.count({ where: OWN_LEAD })) === 0);
 await page.getByTestId("quote-broker").click();
@@ -158,6 +165,27 @@ await page.getByTestId("quote-signup-link").click();
 ok("the borrower can go on to create an account, already filled in", await page.getByTestId("signup-name").waitFor({ timeout: 5000 }).then(async () => (await page.getByTestId("signup-name").inputValue()) === LEAD_NAME && (await page.getByTestId("signup-email").inputValue()) === LEAD_EMAIL, () => false));
 ok("without their details in the address bar", !page.url().includes("@") && !page.url().includes("Smoke"));
 await shot(page, "00h-signup.png");
+// A short-term rental: sized on part of its yearly payouts instead of a monthly rent.
+const nightly = await ctx.newPage();
+await nightly.goto(BASE + "/start");
+await nightly.getByTestId("quote-loan-dscr").click();
+await nightly.getByTestId("quote-citizen").selectOption("us");
+await nightly.getByTestId("quote-credit").selectOption("760+");
+await nightly.getByTestId("quote-experience").selectOption("3-4");
+await nightly.getByTestId("quote-address-street").fill("1 Smoke Test Beach Rd");
+await nightly.getByTestId("quote-address-city").fill("Hollywood");
+await nightly.getByTestId("quote-address-state").fill("FL");
+await nightly.getByTestId("quote-address-zip").fill("33019");
+await nightly.getByTestId("quote-address-county").fill("Broward");
+await nightly.getByTestId("quote-purchasePrice").fill("400000");
+await nightly.getByTestId("quote-date").fill("2026-12-15");
+await nightly.getByTestId("quote-rental-type").selectOption("short_term");
+ok("a rental let by the night asks for its yearly income, not a monthly rent", (await nightly.getByTestId("quote-monthlyRent").count()) === 0 && (await seen(nightly.getByTestId("quote-strAnnualIncome"))));
+await nightly.getByTestId("quote-strAnnualIncome").fill("60000");
+await nightly.getByTestId("quote-see-terms").click();
+ok("and is priced on it", (await seen(nightly.getByTestId("quote-live"))) && (await nightly.getByTestId("quote-amount").innerText()).startsWith("up to $"));
+await shot(nightly, "00e-site-quote-short-term.png");
+await nightly.close();
 // The quote widget: a page for other sites to frame, and the only one that may be framed.
 const widgetReply = await page.goto(BASE + "/embed/quote?site=wholesale");
 ok("the quote widget opens on its own, without the site's header", (await seen(page.getByTestId("embed-quote"))) && (await page.locator("header").count()) === 0 && (await page.getByTestId("quote-see-terms").isVisible()));
@@ -393,10 +421,16 @@ ok("the sample pre-approval letter is a PDF", sampleLetter.headers()["content-ty
 await page.goto(BASE + "/verify/demo");
 ok("its QR code opens a page saying it's genuine, whom it's for and the limits", (await seen(page.getByTestId("verify-valid"))) && (await page.getByTestId("verify-letter").innerText()).includes("$340,000"));
 await shot(page, "25-verify-letter.png");
+// A borrower's referral: the loan it brought in shows who referred it and the bonus owed, which the team records paid.
+await page.goto(BASE + "/admin/deals/d17?tab=Capital%20Routing");
+ok("a referred loan shows the borrower who referred it and the bonus it earned them", (await seen(page.getByTestId("referral-bonus"))) && (await page.getByTestId("referral-bonus").innerText()).includes("Alex Sample (FAKE)"));
+await page.getByTestId("referral-paid-save").click();
+ok("the team records the bonus paid", await seen(page.getByTestId("referral-paid")));
 await page.goto(BASE + "/admin/tax");
 ok("the owners' tax page lists the year's forms and who has no W-9", (await seen(page.getByTestId("tax-summary"))) && (await page.getByTestId("tax-summary").innerText()).startsWith("3 forms due for 2026") && (await page.getByTestId("tax-1099-INT").getByTestId("tax-line").count()) === 2 && (await page.getByTestId("tax-deadlines").innerText()).includes("Feb 1, 2027"));
 await page.getByTestId("tax-export").click();
 ok("a demo seat has no taxpayer IDs to export", await seen(page.getByTestId("tax-board-error")));
+ok("and the year's referral bonuses by borrower, with the 1099-MISC question", (await seen(page.getByTestId("tax-referrals"))) && (await page.getByTestId("tax-referral").innerText()).includes("$1,000.00") && (await page.getByTestId("tax-referral").innerText()).includes("Likely"));
 await shot(page, "26-admin-tax-forms.png");
 await page.goto(BASE + "/admin/errors");
 ok("owners have the server's errors page", await seen(page.getByTestId("errors-summary")));
@@ -644,6 +678,10 @@ ok("the owner can't remove their own account", await page.getByTestId("member-ro
 
 // 8. The loan from the borrower's side: accept the terms, budget the work, ask for a draw, get a payoff, send a message
 await signIn(page, SEATS.borrower);
+await page.goto(BASE + "/admin/borrower");
+// Demo seats share one book, so the bonus the team recorded paid on LH-DEMO-1017 shows here: $1,000 in all.
+ok("a borrower with a funded loan gets a referral link, and sees where each bonus stands", (await seen(page.getByTestId("refer-friend"))) && (await page.getByTestId("friend-url").innerText()).includes("/start?ref=") && (await page.getByTestId("friend-referral").count()) === 3 && (await page.getByTestId("friend-summary").innerText()).includes("$1,000 paid to you"));
+ok("but never who the friends are", !(await page.getByTestId("refer-friend").innerText()).match(/Harper|Logan|Blake/));
 await page.goto(BASE + "/admin/borrower/d18");
 await seen(page.getByTestId("term-sheet"));
 ok("the borrower sees the term sheet's numbers", (await page.getByTestId("term-sheet").innerText()).includes("Cash to close"));
@@ -651,11 +689,16 @@ ok("a term sheet can't be accepted without a name and agreement", await page.get
 ok("the borrower sees how long the term sheet is open", (await page.getByTestId("term-sheet-expires").innerText()).includes("Nov 4, 2026"));
 const sampleSheet = await page.request.get(BASE + (await page.getByTestId("term-sheet-download").getAttribute("href")));
 ok("the term sheet downloads as a PDF", sampleSheet.headers()["content-type"] === "application/pdf" && (await sampleSheet.body()).subarray(0, 5).toString() === "%PDF-");
+ok("the term sheet offers other rate-and-points choices", await seen(page.getByTestId("rate-choice")));
+const choiceSlider = page.getByTestId("rate-choice-slider");
+await choiceSlider.fill(await choiceSlider.getAttribute("max"));
+ok("more points show a lower rate before accepting", (await seen(page.getByTestId("rate-choice-note"))) && (await page.getByTestId("accept-term-sheet").innerText()).startsWith("Accept at "));
 await page.getByTestId("term-sheet-name").fill("Alex Sample");
 await page.getByTestId("term-sheet-agree").check();
 await shot(page, "16-borrower-term-sheet.png");
 await page.getByTestId("accept-term-sheet").click();
 ok("the borrower accepts the term sheet online", (await seen(page.getByTestId("term-sheet-signed"))) && (await page.getByTestId("term-sheet-signed").innerText()).includes("Alex Sample"));
+ok("at the rate and points they chose", (await page.getByTestId("term-sheet").innerText()).includes("Rate and points chosen"));
 // With the term sheet accepted, the closing needs the borrower's title/escrow and insurance agents: asked for once.
 ok("the borrower is asked for their title and insurance agents", await seen(page.getByTestId("agents-prompt")));
 await page.getByTestId("agents-prompt-save").click();
@@ -988,7 +1031,19 @@ await seen(page.getByTestId("pricing-editor"));
 await page.getByTestId("flip-2-ltc").fill("80");
 ok("the pricing editor shows what a change does to open applications", (await page.getByTestId("pricing-changes").innerText()).includes("maxLTC") && (await page.getByTestId("what-if-row").count()) > 0);
 ok("a demo seat can't publish pricing", await page.getByTestId("publish-pricing").isDisabled());
+ok("pricing has the short-term rental and buy-down numbers", (await seen(page.getByTestId("pricing-short-term"))) && (await page.getByTestId("str-history").inputValue()) === "80" && (await page.getByTestId("buy-down-rate").inputValue()) === "0.25");
 await shot(page, "20-admin-pricing.png");
+await page.goto(BASE + "/admin/deals/d4?tab=Numbers%20%26%20Ratios");
+await page.getByTestId("uw-rental-type").selectOption("short_term");
+await page.getByTestId("uw-str-source").selectOption("payouts");
+ok("an underwriter can size a rental on its short-term income", (await page.getByTestId("uw-str-rent").innerText()).includes("Counted at 80%"));
+await page.goto(BASE + "/rates");
+ok("the public rate grid shows every program from today's pricing", (await page.locator('[data-testid^="rate-grid-"] table').count()) === 4 && (await page.getByTestId("rate-grid-row").count()) === 15 && (await page.getByTestId("rate-grid-adjustments").innerText()).includes("Short-term rentals"));
+await shot(page, "00f-site-rates.png");
+await page.goto(BASE + "/rewards");
+ok("the rewards page shows the repeat-borrower tiers from the pricing and the perks", (await page.getByTestId("rewards-tier").count()) === 4 && (await seen(page.getByTestId("rewards-perks"))));
+ok("and says nothing about a referral bonus until one is set", (await page.getByTestId("rewards-referral").count()) === 0);
+await shot(page, "00g-site-rewards.png");
 
 // Sanctions: a possible match holds the application until someone with authority reviews it.
 await page.goto(BASE + "/admin/deals/d6");

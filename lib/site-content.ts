@@ -31,9 +31,9 @@ export const PROGRAMS: Program[] = [
     title: "DSCR rental",
     summary: "Investment property financing where rental income is central to evaluating the property’s ability to support its debt.",
     homeSummary: "Financing centered on rental income for investors taking the longer view.",
-    audience: "Investors purchasing or refinancing income-producing rental properties.",
-    structure: "A rental-focused loan may offer amortizing or interest-only payment structures, depending on eligibility. Compare the full payment, reserves, prepayment provisions, and long-term operating costs.",
-    prepare: ["Lease or market-rent evidence", "Property taxes, insurance, and association dues", "Property valuation and condition", "Borrower credit, entity information, reserves, and existing liens"],
+    audience: "Investors purchasing or refinancing income-producing rental properties, on a lease or as a short-term rental on Airbnb or VRBO.",
+    structure: "A rental-focused loan may offer amortizing or interest-only payment structures, depending on eligibility. A short-term rental is sized on part of its yearly income: twelve months of payout statements, or a projection where there's no history yet. Compare the full payment, reserves, prepayment provisions, and long-term operating costs.",
+    prepare: ["Lease or market-rent evidence, or twelve months of short-term rental payout statements", "For a short-term rental: the Florida vacation rental license, any local registration, and association rules that allow stays under 30 days", "Property taxes, insurance, and association dues", "Property valuation and condition", "Borrower credit, entity information, reserves, and existing liens"],
     consider: "A coverage ratio is not the same as net cash flow. Maintenance, vacancy, management, and capital expenditures still affect investment performance.",
   },
   {

@@ -63,6 +63,8 @@ Ranked by money and risk to LendHous, against the effort.
 
 ### 1.3 A borrower referral program, and loyalty perks people can see
 
+**Built 2026-11-07** (`lib/referrals.ts`): a borrower with a funded loan gets a link once an owner sets the bonus in Settings (off until then); a new borrower's first loan through it is credited when the team or the friend starts it, the bonus goes from expected to earned to paid with emails to the referrer, and the Tax page flags $600+ a year. `/rewards` shows the tiers from the live pricing, the bonus and the perks; repeat borrowers' items rank first in the queue. Still to come: a credit for the friend at closing, an appraisal credit, and paying the bonus through a payments vendor.
+
 - **Today:**
   - Repeat-borrower tiers exist: placeholders of 0.25% to 1.00% off the rate, editable at `/admin/pricing`.
   - A borrower sees their own tier on a funded loan (`components/loan/NextLoan.tsx`).
@@ -108,6 +110,8 @@ Ranked by money and risk to LendHous, against the effort.
 
 ### 1.5 Short-term rental (Airbnb) DSCR
 
+**Built 2026-11-07** (`qualifyingRent` in `lib/engine.ts`): a DSCR rental let by the night is sized on 80% of 12 months of payouts or 75% of a projection (less on a cash-out), with 5% less leverage and 0.25% more (PLACEHOLDER, on the pricing page); every form asks how it's rented, the documents ask for the payouts or projection, and four Florida short-term rental conditions are added. AirDNA projections still wait for a vendor.
+
 - **Today:** DSCR loans size on a lease or market rent only.
 - **Competitors:**
   - Easy Street counts 75% of AirDNA's projection. C, easystreetcap.com/dscr-loans-florida.
@@ -152,6 +156,8 @@ Ranked by money and risk to LendHous, against the effort.
   Do it together with N.
 
 ### 1.7 Buying the rate down, and a public rate grid
+
+**Built 2026-11-07** (`lib/buy-down.ts`, `lib/rate-grid.ts`): quarter-point steps of points for rate (PLACEHOLDER 0.5% a point on short loans, 0.25% on rentals), inside the matrix and Florida's usury cap, on the quote and fixed on each term sheet for the borrower to choose when accepting; `/rates` publishes leverage and starting rates by experience and credit from the live pricing. Today's placeholder points ranges are narrow (half a point on flips), so GT widening them gives borrowers more room.
 
 - **Today:**
   - The quote shows a rate and its range.
@@ -338,7 +344,7 @@ These extend the vendor list in `docs/next-features-prompt.md`.
 | Fix and flip closing | 24h without an appraisal (Easy Street); 48h after approval (Dominion); 5–7 business days (Kiavi, Express) | 5 business days |
 | DSCR closing | 10 days (Dominion); 15 (CoreVest); 25–35 (Kiavi) | none set |
 | Draws | same day when complete (SLA); "as little as 1 day" (Lima One) | 24 hours |
-| Referral bonus | $350 to $1,000 per funded loan | none |
+| Referral bonus | $350 to $1,000 per funded loan | set in Settings (off until GT sets it) |
 | Loyalty | 50–100 bps off the rate and 25–75 bps off origination | 25–100 bps off the rate (placeholder) |
 | Broker pay | YSP up to 2.5% (Kiavi); up to 5% in all (Visio) | points only |
 

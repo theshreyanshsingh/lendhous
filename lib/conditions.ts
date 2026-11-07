@@ -24,7 +24,13 @@ export const DEFAULT_LIBRARY: ConditionTemplate[] = [
   standard("std-valuation", "Valuation supports the loan", "The appraisal or BPO is in and supports the value the loan was sized on.", "prior_to_docs", "underwriter", false),
   standard("std-title", "Title commitment reviewed", "The commitment's requirements are listed for closing and nothing on it stops the loan.", "prior_to_docs", "processor", false),
   standard("std-budget", "Scope of work and budget approved", "The rehab or construction budget is reviewed against the scope and the after-repair value.", "prior_to_docs", "underwriter", false, ["fix_flip", "ground_up"]),
-  standard("std-lease", "Leases or rent roll", "Signed leases for occupied units, or a rent roll with the market rent for vacant ones.", "prior_to_docs", "borrower", true, ["dscr"]),
+  { ...standard("std-lease", "Leases or rent roll", "Signed leases for occupied units, or a rent roll with the market rent for vacant ones.", "prior_to_docs", "borrower", true, ["dscr"]), rental: "long_term" },
+  // Short-term rentals in Florida (PLACEHOLDER until the attorney confirms): the state's vacation rental license, any local
+  // registration, association rules that allow stays under 30 days, and income that supports the loan.
+  { ...standard("std-str-income", "Short-term rental income supports the loan", "The payout statements for the last 12 months, or the projection for a property without them, support the income the loan was sized on.", "prior_to_docs", "underwriter", false, ["dscr"]), rental: "short_term" },
+  { ...standard("std-str-hoa", "Association rules allow short-term rentals", "The HOA or condo declaration and rules allow rentals shorter than 30 days, with any minimum stay or yearly limit noted. A copy, or a letter from the association.", "prior_to_docs", "borrower", true, ["dscr"]), rental: "short_term" },
+  { ...standard("std-str-license", "Vacation rental license", "The property's Florida vacation rental license from DBPR (Fla. Stat. 509.241), or proof it's been applied for.", "prior_to_funding", "borrower", true, ["dscr"]), rental: "short_term" },
+  { ...standard("std-str-local", "Local rental registration and tourist tax", "The city's or county's short-term rental registration where it requires one, and the county tourist development tax and Florida sales tax accounts.", "prior_to_funding", "borrower", true, ["dscr"]), rental: "short_term" },
   standard("std-insurance", "Insurance naming LendHous", "A binder for the property's insurance, with LendHous as mortgagee and loss payee.", "prior_to_funding", "borrower", true),
   standard("std-builders-risk", "Builder's risk insurance", "A builder's risk policy covering the construction, with LendHous as loss payee.", "prior_to_funding", "borrower", true, ["ground_up"]),
   standard("std-funds", "Funds to close", "A current bank statement showing the cash to close and the reserves.", "prior_to_funding", "borrower", true),
@@ -35,8 +41,8 @@ export const DEFAULT_LIBRARY: ConditionTemplate[] = [
 /** The library as it stands: the one saved for this account, or the starting one until someone edits it. */
 export const libraryOf = (book: { conditionLibrary?: ConditionTemplate[] }) => (book.conditionLibrary?.length ? book.conditionLibrary : DEFAULT_LIBRARY);
 
-/** The active standard conditions for a product. */
-export const templatesFor = (library: ConditionTemplate[], product: Product) => library.filter((item) => item.active && (!item.products.length || item.products.includes(product)));
+/** The active standard conditions for a loan: its product's, and a rental's only for the way it's let (lease or by the night). */
+export const templatesFor = (library: ConditionTemplate[], app: Pick<Deal["app"], "product" | "rentalType">) => library.filter((item) => item.active && (!item.products.length || item.products.includes(app.product)) && (!item.rental || item.rental === (app.rentalType ?? "long_term")));
 
 /** A condition made from a standard one, due its number of days from today. */
 export const fromTemplate = (template: ConditionTemplate, id: string, by: string, today: string, at: string): LoanCondition => ({
@@ -45,7 +51,7 @@ export const fromTemplate = (template: ConditionTemplate, id: string, by: string
 });
 
 /** The standard conditions a loan doesn't have yet. */
-export const missingStandard = (deal: Pick<Deal, "conditions" | "app">, library: ConditionTemplate[]) => templatesFor(library, deal.app.product).filter((template) => !(deal.conditions ?? []).some((item) => item.templateId === template.id));
+export const missingStandard = (deal: Pick<Deal, "conditions" | "app">, library: ConditionTemplate[]) => templatesFor(library, deal.app).filter((template) => !(deal.conditions ?? []).some((item) => item.templateId === template.id));
 
 export const isDone = (condition: LoanCondition) => condition.status === "cleared" || condition.status === "waived";
 /** Conditions that hold up clear to close: prior to documents or prior to funding, not cleared or waived. */

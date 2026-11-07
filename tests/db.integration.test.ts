@@ -907,7 +907,7 @@ describe("conditions", () => {
     const started = await store.runAction(owner, { t: "advanceLoan", dealId: "conditions-loan" });
     if ("error" in started) throw new Error(started.error);
     const conditions = (await store.readBook()).book.deals.find((deal) => deal.id === "conditions-loan")!.conditions!;
-    expect(conditions.map((item) => item.title)).toEqual([...templatesFor(DEFAULT_LIBRARY, base.app.product).map((item) => item.title), "Flood zone certificate 8812"]);
+    expect(conditions.map((item) => item.title)).toEqual([...templatesFor(DEFAULT_LIBRARY, base.app).map((item) => item.title), "Flood zone certificate 8812"]);
   });
 });
 

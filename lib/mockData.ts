@@ -123,6 +123,8 @@ export interface Deal {
   brokerFeePaid?: { amount: number; on: string; reference: string; by: string; at: string };
   /** The broker whose referral link brought this borrower, and when (lib/brokers.ts). */
   referredBy?: { brokerId: string; on: string };
+  /** The borrower whose referral link brought this one, the bonus it earns them once it funds, and its payment (lib/referrals.ts). */
+  friendReferral?: { referrerId: string; referrerName: string; on: string; bonus: number; paid?: { amount: number; on: string; reference: string; by: string; at: string } };
   /** The borrower's choice to show this loan on the website's "Recently funded" list (lib/showcase.ts). Off unless they turn it on. */
   showcase?: { on: boolean; by: string; at: string };
   /** How the borrower says the loan will end, and when they said it (lib/exit-plans.ts). */
@@ -272,6 +274,8 @@ export interface ConditionTemplate {
   id: string; title: string; detail: string; category: ConditionCategory; owner: ConditionOwner; needsUpload: boolean;
   /** The products it applies to; empty means all. */
   products: Product[];
+  /** Only for a rental let this way: on a lease, or by the night (Airbnb, VRBO). Unset applies to both. */
+  rental?: "long_term" | "short_term";
   /** Days from being added to when it's due. */
   dueDays: number; active: boolean; version: number; updatedBy: string; updatedAt: string;
 }
@@ -297,6 +301,8 @@ export interface PricingException {
   rate: number; points: number; termMonths: number; reasons: string[]; note: string; requestedBy: string; requestedAt: string;
   status: "pending" | "approved" | "declined"; decidedBy?: string; decidedAt?: string; decision?: string;
 }
+/** One rate-and-points choice on a term sheet, with what it does to the loan. */
+export interface BuyDownChoice { points: number; rate: number; noteAmount: number; monthlyPayment: number; pointsDollars: number; cashToClose: number }
 export interface TermSheet {
   version: number; issuedAt: string; issuedOn: string; issuedBy: string;
   /** The last day it can be accepted. */
@@ -308,6 +314,13 @@ export interface TermSheet {
   exception?: PricingException;
   /** What was still needed from the borrower when it was sent. */
   conditions: string[];
+  /**
+   * The rate-and-points choices the borrower can accept instead (lib/buy-down.ts), each priced when it was sent: more points
+   * for a lower rate, or fewer for a higher one. Only when the terms are inside the matrix.
+   */
+  buyDowns?: BuyDownChoice[];
+  /** The rate and points it was sent with, when the borrower accepted one of the other choices. */
+  boughtDown?: { rate: number; pointsPct: number };
   /** The day the borrower was reminded it's about to expire. */
   remindedOn?: string;
   response?: { at: string; by: string; signedName?: string; note?: string };

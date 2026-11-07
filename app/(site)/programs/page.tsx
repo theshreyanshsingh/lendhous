@@ -50,7 +50,7 @@ export default async function Programs() {
               </Link>
             ))}
           </div>
-          <p className="compare-note">Rates and leverage from today&apos;s pricing for the most experienced borrowers; your terms depend on the deal, your experience and credit. Not an offer to lend. Not sure which fits? <Link href="/start" className="text-link">Request a quote</Link> and a loan officer will match you the same day.</p>
+          <p className="compare-note">Rates and leverage from today&apos;s pricing for the most experienced borrowers; your terms depend on the deal, your experience and credit. Not an offer to lend. <Link href="/rates" className="text-link">See the full rate grid</Link> by experience and credit. Not sure which fits? <Link href="/start" className="text-link">Request a quote</Link> and a loan officer will match you the same day.</p>
         </section>
         <div className="cta">
           <h2>Start with the property.<br /><em>Build around the plan.</em></h2>

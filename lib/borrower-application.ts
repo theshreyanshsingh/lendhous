@@ -23,7 +23,9 @@ export type AppDraft = {
   contact: { firstName: string; lastName: string; email: string; phone: string };
   loanType: LoanType;
   property: { address: AddressValue; floodZone: "" | "yes" | "no" | "unsure"; propertyType: "" | "sfr" | "2_4" | "condo" | "townhome"; beds: string; baths: string; sqft: string; lotAcres: string; occupancy: "" | "vacant" | "tenant" };
-  loan: { purpose: "purchase" | "refinance" | "cash_out"; purchasePrice: string; asIsValue: string; rehab: string; arv: string; requestedAmount: string; plan: string; exit: "" | "sell" | "refinance" | "hold" | "cash"; closeDate: string; monthlyRent: string; taxesAnnual: string; insuranceAnnual: string; liquidity: string };
+  loan: { purpose: "purchase" | "refinance" | "cash_out"; purchasePrice: string; asIsValue: string; rehab: string; arv: string; requestedAmount: string; plan: string; exit: "" | "sell" | "refinance" | "hold" | "cash"; closeDate: string; monthlyRent: string; taxesAnnual: string; insuranceAnnual: string; liquidity: string;
+    /** A DSCR rental let by the night: sized on its yearly income (lib/engine.ts qualifyingRent). */
+    rentalType: "long_term" | "short_term"; strAnnualIncome: string; strIncomeSource: "payouts" | "projection" };
   vesting: { hasLlc: boolean | null; entityName: string; entityState: string; ein: string; address: AddressValue };
   guarantors: GuarantorInfo[];
   trackRecord: TrackDeal[];
@@ -36,7 +38,7 @@ export const blankGuarantor = (): GuarantorInfo => ({ firstName: "", lastName: "
 export const blankDraft = (): AppDraft => ({
   contact: { firstName: "", lastName: "", email: "", phone: "" }, loanType: "fix_flip",
   property: { address: blankAddress(), floodZone: "", propertyType: "", beds: "", baths: "", sqft: "", lotAcres: "", occupancy: "" },
-  loan: { purpose: "purchase", purchasePrice: "", asIsValue: "", rehab: "", arv: "", requestedAmount: "", plan: "", exit: "", closeDate: "", monthlyRent: "", taxesAnnual: "", insuranceAnnual: "", liquidity: "" },
+  loan: { purpose: "purchase", purchasePrice: "", asIsValue: "", rehab: "", arv: "", requestedAmount: "", plan: "", exit: "", closeDate: "", monthlyRent: "", taxesAnnual: "", insuranceAnnual: "", liquidity: "", rentalType: "long_term", strAnnualIncome: "", strIncomeSource: "payouts" },
   vesting: { hasLlc: null, entityName: "", entityState: "FL", ein: "", address: blankAddress() },
   guarantors: [blankGuarantor()], trackRecord: [],
 });
@@ -113,6 +115,8 @@ const fullAddress = (address: AddressValue) => Boolean(address.street.trim() && 
 const ageOn = (dob: string, today: string) => { const [y, m, d] = dob.split("-").map(Number); const [ty, tm, td] = today.split("-").map(Number); return ty - y - (tm < m || (tm === m && td < d) ? 1 : 0); };
 const rehabLoan = (type: LoanType) => type === "fix_flip" || type === "ground_up";
 const rental = (type: LoanType) => type.startsWith("dscr") || type === "second";
+/** A DSCR rental let by the night (Airbnb, VRBO), which is sized on its yearly income instead of a monthly rent. */
+export const nightly = (draft: Pick<AppDraft, "loanType" | "loan">) => draft.loanType === "dscr" && draft.loan.rentalType === "short_term";
 
 /** What still stops this step, in words for the borrower. Empty when they can go on. */
 export function stepProblems(draft: AppDraft, step: number, today: string): string[] {
@@ -136,7 +140,8 @@ export function stepProblems(draft: AppDraft, step: number, today: string): stri
     if (l.purpose !== "purchase" && !num(l.asIsValue)) out.push("What it's worth today.");
     if (rehabLoan(draft.loanType) && num(l.rehab) === undefined) out.push("The renovation or construction budget.");
     if (rehabLoan(draft.loanType) && !num(l.arv)) out.push("The after-repair value (ARV).");
-    if (rental(draft.loanType) && !num(l.monthlyRent)) out.push("The monthly rent.");
+    if (nightly(draft) && !num(l.strAnnualIncome)) out.push("The yearly income from short-term stays.");
+    else if (rental(draft.loanType) && !nightly(draft) && !num(l.monthlyRent)) out.push("The monthly rent.");
     if (!l.plan.trim()) out.push("A short description of the plan.");
     if (!l.exit) out.push("Your exit strategy.");
     if (!/^\d{4}-\d{2}-\d{2}$/.test(l.closeDate) || l.closeDate < today) out.push("A closing date from today on.");
@@ -247,7 +252,8 @@ export function toLoan(draft: AppDraft) {
     purchasePrice: value, originalPurchasePrice: l.purpose === "purchase" ? undefined : purchase,
     rehab: rehabLoan(draft.loanType) ? num(l.rehab) ?? 0 : 0, arv: rehabLoan(draft.loanType) ? num(l.arv) ?? value : value,
     landValue: product === "ground_up" ? value : undefined, hardCosts: product === "ground_up" ? num(l.rehab) : undefined,
-    requestedAmount: num(l.requestedAmount), monthlyRent: num(l.monthlyRent), taxesAnnual: num(l.taxesAnnual), insuranceAnnual: num(l.insuranceAnnual),
+    requestedAmount: num(l.requestedAmount), monthlyRent: nightly(draft) ? undefined : num(l.monthlyRent), taxesAnnual: num(l.taxesAnnual), insuranceAnnual: num(l.insuranceAnnual),
+    ...(product === "dscr" && nightly(draft) ? { rentalType: "short_term" as const, strAnnualIncome: num(l.strAnnualIncome), strIncomeSource: l.strIncomeSource } : {}),
     interestReserve: "none", accrual: "full_boat", fico: 0, verifiedDeals: 0, liquidity: num(l.liquidity) ?? 0, valuationSource: "borrower_estimate",
   };
   const borrower = draft.guarantors[0] ? name(draft.guarantors[0]) : name(draft.contact);
@@ -278,7 +284,7 @@ export function draftFromQuote(quote: import("./quote").Quote): AppDraft {
   draft.contact = { ...quote.borrower };
   draft.loanType = quote.loanType;
   draft.property = { ...draft.property, address: { ...quote.address }, propertyType: type, beds: quote.beds ? String(quote.beds) : "", baths: quote.baths ? String(quote.baths) : "", sqft: text(quote.sqft) };
-  draft.loan = { ...draft.loan, purpose: quote.purpose, purchasePrice: text(quote.purchasePrice), rehab: text(quote.rehab), arv: text(quote.arv), requestedAmount: text(quote.requestedAmount), monthlyRent: text(quote.monthlyRent), closeDate: quote.fundingDate, exit: quote.exit, plan: quote.notes };
+  draft.loan = { ...draft.loan, purpose: quote.purpose, purchasePrice: text(quote.purchasePrice), rehab: text(quote.rehab), arv: text(quote.arv), requestedAmount: text(quote.requestedAmount), monthlyRent: text(quote.monthlyRent), rentalType: quote.rentalType ?? "long_term", strAnnualIncome: text(quote.strAnnualIncome), strIncomeSource: quote.strIncomeSource ?? "payouts", closeDate: quote.fundingDate, exit: quote.exit, plan: quote.notes };
   draft.guarantors = [{ ...blankGuarantor(), firstName: quote.borrower.firstName, lastName: quote.borrower.lastName, email: quote.borrower.email, phone: quote.borrower.phone, citizenship: quote.citizenship }];
   return draft;
 }
@@ -302,7 +308,7 @@ export function draftFromDeal(deal: import("./mockData").Deal, email: string): A
   draft.contact = { ...who, email, phone: "" };
   draft.loanType = PRODUCT_TYPE[app.product] ?? "fix_flip";
   draft.property = { ...draft.property, address: { street: deal.address, city: deal.city, state: app.state, zip: deal.zip, county: app.county }, propertyType: app.propertyType, occupancy: app.occupancy === "tenant" ? "tenant" : app.occupancy === "vacant" ? "vacant" : "" };
-  draft.loan = { ...draft.loan, purpose: app.purpose === "purchase" ? "purchase" : app.purpose === "refi_rt" ? "refinance" : "cash_out", purchasePrice: text(app.originalPurchasePrice ?? app.purchasePrice), asIsValue: app.purpose === "purchase" ? "" : text(app.purchasePrice), rehab: text(app.rehab), arv: text(app.arv), requestedAmount: text(app.requestedAmount), monthlyRent: text(app.monthlyRent), taxesAnnual: text(app.taxesAnnual), insuranceAnnual: text(app.insuranceAnnual), liquidity: text(app.liquidity), closeDate: deal.closingDate, exit: deal.exitStrategy === "Refi" ? "refinance" : deal.exitStrategy === "Hold" ? "hold" : "sell" };
+  draft.loan = { ...draft.loan, purpose: app.purpose === "purchase" ? "purchase" : app.purpose === "refi_rt" ? "refinance" : "cash_out", purchasePrice: text(app.originalPurchasePrice ?? app.purchasePrice), asIsValue: app.purpose === "purchase" ? "" : text(app.purchasePrice), rehab: text(app.rehab), arv: text(app.arv), requestedAmount: text(app.requestedAmount), monthlyRent: text(app.monthlyRent), rentalType: app.rentalType ?? "long_term", strAnnualIncome: text(app.strAnnualIncome), strIncomeSource: app.strIncomeSource ?? "payouts", taxesAnnual: text(app.taxesAnnual), insuranceAnnual: text(app.insuranceAnnual), liquidity: text(app.liquidity), closeDate: deal.closingDate, exit: deal.exitStrategy === "Refi" ? "refinance" : deal.exitStrategy === "Hold" ? "hold" : "sell" };
   draft.vesting = { ...draft.vesting, hasLlc: deal.entityName ? true : null, entityName: deal.entityName, entityState: deal.sponsor?.entityState ?? "FL" };
   draft.guarantors = deal.sponsor?.guarantors.length
     ? deal.sponsor.guarantors.map((g, index) => ({ ...blankGuarantor(), ...split(g.name), email: index === 0 ? email : "", ownershipPct: String(g.ownershipPct), fico: String(g.fico), citizenship: g.citizenship }))

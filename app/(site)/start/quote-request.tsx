@@ -7,17 +7,20 @@ import { PropertyPhotoPicker } from "@/components/PropertyPhotoPicker";
 import { SIGNUP_PREFILL } from "@/components/signup-form";
 import { Arrive, Reveal } from "@/components/motion";
 import type { PricingConfig } from "@/lib/pricing-config";
-import { cashToCloseParts, CITIZENSHIP_LABEL, CREDIT_LABEL, dealProblem, EXITS, EXPERIENCE_LABEL, indicativeTerms, LOAN_TYPES, PRICED, PROPERTY_TYPES, PURPOSES, quoteProblem, quoteSummary, type LoanType, type Quote, type QuoteDeal } from "@/lib/quote";
+import { quoteBuyDowns } from "@/lib/buy-down";
+import { ratePercent } from "@/lib/format";
+import { evaluate } from "@/lib/engine";
+import { cashToCloseParts, CITIZENSHIP_LABEL, CREDIT_LABEL, dealProblem, EXITS, EXPERIENCE_LABEL, indicativeTerms, LOAN_TYPES, PRICED, PROPERTY_TYPES, PURPOSES, quoteApplication, quoteProblem, quoteSummary, type LoanType, type Quote, type QuoteDeal } from "@/lib/quote";
 import { embedChannel, type QuoteStep } from "@/lib/quote-funnel";
 
 type Draft = {
   submitter: "borrower" | "broker"; broker: { name: string; company: string; email: string; phone: string };
   borrower: { firstName: string; lastName: string; email: string; phone: string };
   citizenship: string; creditBand: string; experience: string; address: AddressValue; propertyType: string; beds: string; baths: string; sqft: string;
-  loanType: LoanType; purpose: string; purchasePrice: string; rehab: string; arv: string; requestedAmount: string; monthlyRent: string; fundingDate: string;
+  loanType: LoanType; purpose: string; purchasePrice: string; rehab: string; arv: string; requestedAmount: string; monthlyRent: string; rentalType: "long_term" | "short_term"; strAnnualIncome: string; strIncomeSource: "payouts" | "projection"; buyDownPoints?: number; fundingDate: string;
   comps: { address: string; price: string; soldOn: string }[]; exit: string; notes: string;
 };
-const blank = (): Draft => ({ submitter: "borrower", broker: { name: "", company: "", email: "", phone: "" }, borrower: { firstName: "", lastName: "", email: "", phone: "" }, citizenship: "", creditBand: "", experience: "", address: emptyAddress(), propertyType: "sfr", beds: "", baths: "", sqft: "", loanType: "fix_flip", purpose: "purchase", purchasePrice: "", rehab: "", arv: "", requestedAmount: "", monthlyRent: "", fundingDate: "", comps: [], exit: "sell", notes: "" });
+const blank = (): Draft => ({ submitter: "borrower", broker: { name: "", company: "", email: "", phone: "" }, borrower: { firstName: "", lastName: "", email: "", phone: "" }, citizenship: "", creditBand: "", experience: "", address: emptyAddress(), propertyType: "sfr", beds: "", baths: "", sqft: "", loanType: "fix_flip", purpose: "purchase", purchasePrice: "", rehab: "", arv: "", requestedAmount: "", monthlyRent: "", rentalType: "long_term", strAnnualIncome: "", strIncomeSource: "payouts", fundingDate: "", comps: [], exit: "sell", notes: "" });
 const num = (text: string) => { const value = Number(text.replace(/[^0-9.]/g, "")); return text.trim() === "" || !Number.isFinite(value) ? undefined : value; };
 const dollars = (text: string) => { const value = num(text); return value === undefined ? "" : value.toLocaleString("en-US"); };
 const usd = (amount: number) => `${amount < 0 ? "−" : ""}$${Math.abs(Math.round(amount)).toLocaleString("en-US")}`;
@@ -27,7 +30,9 @@ function toDeal(draft: Draft) {
   return {
     citizenship: draft.citizenship, creditBand: draft.creditBand, experience: draft.experience, address: draft.address, propertyType: draft.propertyType,
     beds: num(draft.beds), baths: num(draft.baths), sqft: num(draft.sqft), loanType: draft.loanType, purpose: draft.purpose,
-    purchasePrice: num(draft.purchasePrice) ?? 0, rehab: num(draft.rehab) ?? 0, arv: num(draft.arv), requestedAmount: num(draft.requestedAmount), monthlyRent: num(draft.monthlyRent),
+    purchasePrice: num(draft.purchasePrice) ?? 0, rehab: num(draft.rehab) ?? 0, arv: num(draft.arv), requestedAmount: num(draft.requestedAmount), monthlyRent: draft.loanType === "dscr" && draft.rentalType === "short_term" ? undefined : num(draft.monthlyRent),
+    ...(draft.loanType === "dscr" && draft.rentalType === "short_term" ? { rentalType: draft.rentalType, strAnnualIncome: num(draft.strAnnualIncome), strIncomeSource: draft.strIncomeSource } : {}),
+    ...(draft.buyDownPoints !== undefined ? { buyDownPoints: draft.buyDownPoints } : {}),
     fundingDate: draft.fundingDate, comps: draft.comps.filter((comp) => comp.address.trim()).map((comp) => ({ address: comp.address, price: num(comp.price) ?? 0, soldOn: comp.soldOn })), exit: draft.exit, notes: draft.notes,
   };
 }
@@ -39,7 +44,7 @@ const toQuote = (draft: Draft): unknown => ({ submitter: draft.submitter, broker
  * in their browser, with nothing sent or kept. Saving the terms asks who they are and sends the request to the team.
  * `embed` is the quote widget on a partner's or GT's own site (/embed/quote).
  */
-export function QuoteRequest({ pricing, signupOpen = false, referral, embed }: { pricing: PricingConfig; signupOpen?: boolean; referral?: { code: string; name: string }; embed?: { site: string } }) {
+export function QuoteRequest({ pricing, signupOpen = false, referral, embed }: { pricing: PricingConfig; signupOpen?: boolean; referral?: { code: string; name: string; kind: "broker" | "borrower" }; embed?: { site: string } }) {
   const channel = embed ? embedChannel(embed.site) : "site";
   const [draft, setDraft] = useState<Draft>(blank);
   const [error, setError] = useState("");
@@ -60,6 +65,8 @@ export function QuoteRequest({ pricing, signupOpen = false, referral, embed }: {
   const put = (changes: Partial<Draft>) => { count("started"); setDraft((current) => ({ ...current, ...changes })); };
   const rehabLoan = draft.loanType === "fix_flip" || draft.loanType === "ground_up";
   const rental = draft.loanType.startsWith("dscr") || draft.loanType === "second";
+  // A DSCR rental let by the night is sized on its yearly income instead of a monthly rent.
+  const nightly = draft.loanType === "dscr" && draft.rentalType === "short_term";
   // Once the terms are showing they follow the numbers; while an edit leaves the deal incomplete, the last good terms stay.
   const live = shown ? dealProblem(toDeal(draft)) : null;
   const deal = live && "deal" in live ? live.deal : shown;
@@ -105,7 +112,7 @@ export function QuoteRequest({ pricing, signupOpen = false, referral, embed }: {
   const text = (label: string, value: string, set: (value: string) => void, extra: { type?: string; testid?: string; auto?: string; required?: boolean; max?: number; placeholder?: string } = {}) => (
     <label>{label}{extra.required === false ? "" : " *"}<input type={extra.type ?? "text"} data-testid={extra.testid} autoComplete={extra.auto} required={extra.required !== false} maxLength={extra.max ?? 120} placeholder={extra.placeholder} value={value} onChange={(event) => set(event.target.value)} /></label>
   );
-  const money = (label: string, key: "purchasePrice" | "rehab" | "arv" | "requestedAmount" | "monthlyRent", required = true, hint?: string) => (
+  const money = (label: string, key: "purchasePrice" | "rehab" | "arv" | "requestedAmount" | "monthlyRent" | "strAnnualIncome", required = true, hint?: string) => (
     <label>{label}{required ? " *" : ""}<input inputMode="numeric" data-testid={`quote-${key}`} required={required} placeholder="$0" value={draft[key]} onChange={(event) => put({ [key]: dollars(event.target.value) })} />{hint && <small className="quote-hint">{hint}</small>}</label>
   );
   const select = <K extends string>(label: string, value: string, options: Record<K, string>, set: (value: K) => void, testid: string) => (
@@ -114,7 +121,7 @@ export function QuoteRequest({ pricing, signupOpen = false, referral, embed }: {
 
   return (
     <form className="quote-form" onSubmit={submit} data-testid="quote-form" noValidate>
-      {referral && <p className="panel quote-small" data-testid="quote-referral">Referred by <b>{referral.name}</b>. They&apos;ll be kept up to date on this request.</p>}
+      {referral && <p className="panel quote-small" data-testid="quote-referral">Referred by <b>{referral.name}</b>{referral.kind === "borrower" ? ", a LendHous borrower." : ". They'll be kept up to date on this request."}</p>}
 
       {/* The kind of loan comes first: it decides what the rest of the form asks. */}
       <section className="panel">
@@ -162,7 +169,10 @@ export function QuoteRequest({ pricing, signupOpen = false, referral, embed }: {
         <div className="fields">
           {money(draft.purpose === "purchase" ? "Purchase price" : "Current value", "purchasePrice")}
           {rehabLoan && money(draft.loanType === "ground_up" ? "Construction budget" : "Renovation budget", "rehab")}
-          {rental && money("Monthly rent (lease or market)", "monthlyRent")}
+          {draft.loanType === "dscr" && select("How it's rented", draft.rentalType, { long_term: "On a lease", short_term: "By the night (Airbnb, VRBO)" }, (rentalType) => put({ rentalType }), "quote-rental-type")}
+          {rental && !nightly && money("Monthly rent (lease or market)", "monthlyRent")}
+          {nightly && select("Income from", draft.strIncomeSource, { payouts: "The last 12 months of payouts", projection: "A projection (no history yet)" }, (strIncomeSource) => put({ strIncomeSource }), "quote-str-source")}
+          {nightly && money(draft.strIncomeSource === "projection" ? "Projected income a year" : "Payouts in the last 12 months", "strAnnualIncome", true, "Before cleaning and management costs. We count part of it as rent.")}
           {money("Loan amount you'd like", "requestedAmount", false, "Leave blank for the most it qualifies for.")}
           {text("Funding date you'd like", draft.fundingDate, (fundingDate) => put({ fundingDate }), { type: "date", testid: "quote-date" })}
         </div>
@@ -192,7 +202,7 @@ export function QuoteRequest({ pricing, signupOpen = false, referral, embed }: {
           <div ref={termsRef} className="panel quote-live" data-testid="quote-live">
             <div className="eyebrow">YOUR INDICATIVE TERMS</div>
             {live && "error" in live && <p className="quote-small quote-stale" data-testid="quote-stale">{live.error} These are the terms before that change.</p>}
-            <TermsCard deal={deal} pricing={pricing} />
+            <TermsCard deal={deal} pricing={pricing} onPoints={(buyDownPoints) => put({ buyDownPoints })} />
           </div>
 
           <section className="panel">
@@ -249,8 +259,30 @@ function useEmbedHeight(on: boolean) {
   }, [on]);
 }
 
+/**
+ * More points for a lower rate, or fewer for a higher one (lib/buy-down.ts), on the indicative terms: each choice re-prices
+ * the whole card. The pick goes with the saved request as a preference.
+ */
+function RateSlider({ deal, pricing, onPoints }: { deal: QuoteDeal; pricing: PricingConfig; onPoints: (points: number | undefined) => void }) {
+  const app = quoteApplication(deal);
+  const options = app ? quoteBuyDowns(app, pricing) : [];
+  if (options.length < 2) return null;
+  const start = evaluate(app!, pricing).pointsPct;
+  // A pick the new numbers no longer allow falls back to the estimate's own points, as the terms above do.
+  const index = (points: number) => options.findIndex((option) => Math.abs(option.points - points) < 1e-9);
+  const at = Math.max(0, deal.buyDownPoints !== undefined && index(deal.buyDownPoints) >= 0 ? index(deal.buyDownPoints) : index(start));
+  return (
+    <div className="quote-slider" data-testid="quote-buy-down">
+      <label>Buy the rate down, or keep the points low
+        <input type="range" min={0} max={options.length - 1} step={1} value={at} data-testid="quote-buy-down-slider" aria-valuetext={`${ratePercent(options[at].rate)} with ${options[at].points} points`} onChange={(event) => { const option = options[Number(event.target.value)]; onPoints(Math.abs(option.points - start) < 1e-9 ? undefined : option.points); }} />
+      </label>
+      <div className="quote-slider-ends"><span>Fewer points, higher rate</span><span>More points, lower rate</span></div>
+    </div>
+  );
+}
+
 /** Indicative terms for a deal on today's pricing: what it could borrow, at what cost, and the cash to close, itemized. */
-function TermsCard({ deal, pricing }: { deal: QuoteDeal; pricing: PricingConfig }) {
+function TermsCard({ deal, pricing, onPoints }: { deal: QuoteDeal; pricing: PricingConfig; onPoints?: (points: number | undefined) => void }) {
   const terms = indicativeTerms(deal, pricing);
   if (!terms) return <p data-testid="quote-review">A loan officer prices {LOAN_TYPES[deal.loanType].toLowerCase()} loans by hand. Save the request and they&apos;ll be in touch shortly.</p>;
   if (!terms.eligible) return <p data-testid="quote-review">This one needs a closer look before we can put numbers on it: {terms.hardStops[0] ?? "a ratio is outside our limits"}. Save it and a loan officer will call you about it.</p>;
@@ -261,12 +293,13 @@ function TermsCard({ deal, pricing }: { deal: QuoteDeal; pricing: PricingConfig 
       <p>Based on what you entered, a {LOAN_TYPES[deal.loanType].toLowerCase()} loan on this property could look like:</p>
       <dl>
         <div><dt>Loan amount</dt><dd data-testid="quote-amount">up to {usd(terms.noteAmount)}</dd></div>
-        <div><dt>Rate</dt><dd data-testid="quote-rate">about {terms.rate.toFixed(2)}%</dd>{high > low && <small className="quote-hint">{low.toFixed(2)}–{high.toFixed(2)}% for this kind of loan</small>}</div>
+        <div><dt>Rate</dt><dd data-testid="quote-rate">about {ratePercent(terms.rate)}</dd>{high > low && <small className="quote-hint">{low.toFixed(2)}–{high.toFixed(2)}% for this kind of loan</small>}</div>
         <div><dt>Points</dt><dd>{terms.pointsPct}</dd></div>
         <div><dt>Term</dt><dd>{PRICED[deal.loanType] === "dscr" ? "30 years" : `${terms.termMonths} months`}</dd></div>
         <div><dt>Monthly payment</dt><dd>about {usd(terms.monthlyPayment)}</dd></div>
         <div><dt>Cash to close</dt><dd data-testid="quote-cash">about {usd(terms.cashToClose)}</dd></div>
       </dl>
+      {onPoints && <RateSlider deal={deal} pricing={pricing} onPoints={onPoints} />}
       <details className="quote-cash-parts" data-testid="quote-cash-parts">
         <summary>Where the cash to close goes</summary>
         <ul>

@@ -315,6 +315,9 @@ model PlatformSettings {
   slaTargets                    Json?
   // How borrowers pay: LendHous's own receiving instructions, shown on funded loans and statements. Blank says to call.
   paymentInstructions           String   @default("")
+  // What a borrower earns when a friend they referred has their first loan fund (lib/referrals.ts). 0 keeps the program
+  // off: no links, and nothing about it on the site.
+  referralBonusCents            Int      @default(0)
   updatedAt                     DateTime @updatedAt
 }
 
@@ -345,6 +348,9 @@ model Lead {
   loanId             String?
   // The approved broker whose referral link the visitor came from (lib/brokers.ts). Their loan is attributed to it.
   brokerId           String?
+  // The LendHous borrower whose referral link the visitor came from (lib/referrals.ts). Their first loan earns that
+  // borrower the referral bonus.
+  referrerId         String?
   // Where the request was sent from: "site" (the /start page) or "embed" / "embed:<site>" (the quote widget on a
   // partner's or one of GT's own sites, lib/quote-funnel.ts).
   channel            String    @default("site")

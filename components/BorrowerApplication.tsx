@@ -9,7 +9,7 @@ import { PropertyPhotoPicker } from "@/components/PropertyPhotoPicker";
 import { Logo } from "@/components/logo";
 import { Arrive, Reveal, StepSwap } from "@/components/motion";
 import { TrackRecordFields } from "@/components/SponsorForm";
-import { blankGuarantor, CONSENTS, num, signProblems, stepProblems, STEPS, toLoan, type AppDraft, type ConsentKey, type GuarantorInfo } from "@/lib/borrower-application";
+import { blankGuarantor, CONSENTS, nightly, num, signProblems, stepProblems, STEPS, toLoan, type AppDraft, type ConsentKey, type GuarantorInfo } from "@/lib/borrower-application";
 import { CITIZENSHIP, DECLARATIONS, needsList, withSponsor } from "@/lib/credit";
 import { evaluate } from "@/lib/engine";
 import { LOAN_TYPES, type LoanType } from "@/lib/quote";
@@ -194,7 +194,9 @@ export function BorrowerApplication({ token, initial, startStep, savedAt, office
                   {draft.loan.purpose !== "purchase" && loanMoney("What it's worth today", "asIsValue")}
                   {rehab && loanMoney(draft.loanType === "ground_up" ? "Construction budget" : "Renovation budget", "rehab")}
                   {rehab && loanMoney("After-repair value (ARV)", "arv", "What it sells for once the work is done.")}
-                  {rental && <>{loanMoney("Monthly rent", "monthlyRent")}{loanMoney("Property taxes a year", "taxesAnnual")}{loanMoney("Insurance a year", "insuranceAnnual")}</>}
+                  {draft.loanType === "dscr" && <div className="sm:col-span-2"><span className="label">How it&apos;s rented</span><Pills value={draft.loan.rentalType} testid="app-rental-type" onChange={(rentalType) => put({ loan: { ...draft.loan, rentalType } })} options={[{ v: "long_term" as const, l: "On a lease" }, { v: "short_term" as const, l: "By the night (Airbnb, VRBO)" }]} /></div>}
+                  {nightly(draft) && <div className="sm:col-span-2"><span className="label">Income from</span><Pills value={draft.loan.strIncomeSource} testid="app-str-source" onChange={(strIncomeSource) => put({ loan: { ...draft.loan, strIncomeSource } })} options={[{ v: "payouts" as const, l: "The last 12 months of payouts" }, { v: "projection" as const, l: "A projection (no history yet)" }]} /></div>}
+                  {rental && <>{nightly(draft) ? loanMoney(draft.loan.strIncomeSource === "projection" ? "Projected income a year" : "Payouts in the last 12 months", "strAnnualIncome", "Before cleaning and management costs. You'll send the statements or the projection.") : loanMoney("Monthly rent", "monthlyRent")}{loanMoney("Property taxes a year", "taxesAnnual")}{loanMoney("Insurance a year", "insuranceAnnual")}</>}
                   {loanMoney("Loan amount you'd like", "requestedAmount", "Leave blank for the most it qualifies for.")}
                   {loanMoney("Cash you can show on bank statements", "liquidity", "For closing costs and reserves.")}
                   <Field label="Closing date you'd like">{input(draft.loan.closeDate, (closeDate) => put({ loan: { ...draft.loan, closeDate } }), { type: "date", testid: "app-close" })}</Field>
