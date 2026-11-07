@@ -2,7 +2,8 @@
 import { serviceDay, type Book } from "./book";
 import { activeWire, wireVerified } from "./closing";
 import { lienReleaseOpen, openExtension, PRE_FUNDING } from "./loan-exits";
-import { latestScreening } from "./ofac";
+import { firmHeld, latestScreening } from "./ofac";
+import { insuranceLapsed, openRenewals } from "./insurance";
 import { dueOf, staleLetter } from "./payoffs";
 import { noticeOwed } from "./adverse-action";
 import { needsOfficer } from "./loan-team";
@@ -27,12 +28,18 @@ export function attentionCounts(s: Book, newLeads: number) {
 
 export function attentionItems(s: Book, newLeads: number): AttentionItem[] {
   const counts = attentionCounts(s, newLeads);
+  const today = serviceDay(s);
   const toReview = s.deals.filter((deal) => deal.docs.some((doc) => doc.status === "uploaded" || doc.status === "in_review"));
   const docs = toReview.reduce((sum, deal) => sum + deal.docs.filter((doc) => doc.status === "uploaded" || doc.status === "in_review").length, 0);
   const newApps = s.deals.filter((deal) => deal.status === "submitted");
   const bids = s.bids.filter((bid) => bid.status === "submitted");
   const funding = s.deals.filter((deal) => deal.status === "closing" && (deal.fundingApprovers?.length ?? 0) < 2);
   const sanctions = s.deals.filter((deal) => { const status = latestScreening(deal)?.status; return status === "review" || status === "match"; });
+  // Firms whose money LendHous takes count too; they're reviewed on their own pages.
+  const heldFirms = [...s.partners, ...s.buyers].filter(firmHeld).length;
+  const heldBrokers = s.brokers.filter(firmHeld).length;
+  const lapsed = s.deals.filter((deal) => insuranceLapsed(deal, today));
+  const renewals = s.deals.filter((deal) => openRenewals(deal).length);
   const wires = s.deals.filter((deal) => activeWire(deal) && !wireVerified(deal) && PRE_FUNDING.includes(deal.status));
   const exceptions = s.deals.filter((deal) => deal.pricingException?.status === "pending");
   const notices = s.deals.filter((deal) => noticeOwed(deal));
@@ -46,10 +53,11 @@ export function attentionItems(s: Book, newLeads: number): AttentionItem[] {
   const items: AttentionItem[] = [
     { key: "notices", label: "Decline notices to send (Reg B)", count: notices.length, href: firstDeal(notices.map((deal) => deal.id)), due: noticeDue },
     { key: "payoffs", label: "Payoff requests", count: counts.payoffs, href: "/admin/servicing", due: letterDue },
-    { key: "sanctions", label: "Possible sanctions matches to review", count: sanctions.length, href: firstDeal(sanctions.map((deal) => deal.id)) },
+    { key: "sanctions", label: "Possible sanctions matches to review", count: sanctions.length + heldFirms + heldBrokers, href: sanctions.length ? firstDeal(sanctions.map((deal) => deal.id)) : heldFirms ? "/admin/partners" : "/admin/brokers" },
     { key: "wires", label: "Wire instructions to verify by phone", count: wires.length, href: firstDeal(wires.map((deal) => deal.id)) },
     { key: "funding", label: "Loans waiting on funding approval", count: funding.length, href: firstDeal(funding.map((deal) => deal.id)) },
     { key: "late", label: "Loans past due", count: counts.late, href: "/admin/servicing" },
+    { key: "insurance", label: "Funded loans with lapsed insurance", count: lapsed.length, href: firstDeal(lapsed.map((deal) => deal.id)) },
     { key: "matured", label: "Loans past maturity", count: counts.matured, href: "/admin/servicing" },
     { key: "extensions", label: "Extension requests to decide", count: counts.extensions, href: "/admin/servicing" },
     { key: "releases", label: "Mortgage releases to record", count: counts.releases, href: "/admin/servicing" },
@@ -58,6 +66,7 @@ export function attentionItems(s: Book, newLeads: number): AttentionItem[] {
     { key: "draws", label: "Draws in progress", count: counts.draws, href: "/admin/draws" },
     { key: "conditions", label: "Conditions sent in to review", count: conditionCount, href: firstDeal(submitted.map((deal) => deal.id)) },
     { key: "documents", label: "Documents to review", count: docs, href: firstDeal(toReview.map((deal) => deal.id)) },
+    { key: "renewals", label: "Insurance renewals to check", count: renewals.reduce((sum, deal) => sum + openRenewals(deal).length, 0), href: firstDeal(renewals.map((deal) => deal.id)) },
     { key: "applications", label: "New applications", count: newApps.length, href: firstDeal(newApps.map((deal) => deal.id)) },
     { key: "unassigned", label: "Applications with no loan officer", count: s.deals.filter(needsOfficer).length, href: "/admin?team=unassigned" },
     { key: "leads", label: "Quote requests to answer", count: counts.leads, href: "/admin/leads" },

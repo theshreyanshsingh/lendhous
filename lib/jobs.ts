@@ -9,6 +9,7 @@ import { sendAlerts } from "@/lib/book-alerts";
 import { readBook, runAction } from "@/lib/book-store";
 import { PRE_FUNDING } from "@/lib/loan-exits";
 import { refreshSanctionsList, screenDeal } from "@/lib/sanctions-store";
+import { screenBrokerage, screenFirm } from "@/lib/firm-screening";
 import { encryptStoredData } from "@/lib/encrypt-data";
 import { notifyTeam } from "@/lib/email";
 import { unansweredLeads } from "@/lib/lead-store";
@@ -116,7 +117,22 @@ async function checkSanctions(now: Date) {
     await sendAlerts(result.before, result.after, result.action);
     if (screening.status === "review") flagged++;
   }
-  return `list of ${refreshed.names} names${refreshed.changed ? " (updated)" : ""}; screened ${active.length} loans; ${flagged} possible matches`;
+  // The firms whose money LendHous takes, and the brokerages that have applied, the same way.
+  const firms = [...book.partners.map((firm) => ["partner", firm.id] as const), ...book.buyers.map((firm) => ["buyer", firm.id] as const)];
+  for (const [kind, firmId] of firms) {
+    const result = await screenFirm(kind, firmId, SCREENER, now);
+    if ("error" in result) { if (/hasn't been downloaded/.test(result.error)) throw new Error(result.error); continue; }
+    await sendAlerts(result.before, result.after, result.action);
+    if ((kind === "partner" ? result.after.partners : result.after.buyers).find((firm) => firm.id === firmId)?.screening?.status === "review") flagged++;
+  }
+  const brokers = book.brokers.filter((broker) => broker.application);
+  for (const broker of brokers) {
+    const result = await screenBrokerage((await readBook()).book, broker.id, SCREENER, now);
+    if ("error" in result) continue;
+    await sendAlerts(result.before, result.after, result.action);
+    if (result.after.brokers.find((item) => item.id === broker.id)?.screening?.status === "review") flagged++;
+  }
+  return `list of ${refreshed.names} names${refreshed.changed ? " (updated)" : ""}; screened ${active.length} loans, ${firms.length} partners and buyers and ${brokers.length} brokerages; ${flagged} possible matches`;
 }
 
 // Partners', buyers' and borrowers' statements for last month (Spec P8, P9, 8.6). Every night until each is made, so a missed 1st catches up.

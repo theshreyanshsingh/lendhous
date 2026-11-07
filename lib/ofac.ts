@@ -160,3 +160,38 @@ export function ofacBlocker(deal: Pick<Deal, "entityName" | "borrowerName" | "sp
   }
   return null;
 }
+
+// Firms whose money LendHous takes or pays: partner lenders and loan buyers (and brokerages, screened when they apply).
+// Each is screened with its owners and officers and the people who sign in for it; a possible match holds its teasers,
+// bids and money until someone with clear_ofac reviews it, and a confirmed one stops everything.
+type Firm = { name: string; principals?: string[]; screening?: Screening };
+
+/** Who at a firm is screened: the firm, its owners and officers, and anyone else named (the people with its seats). */
+export function firmSubjects(firm: Pick<Firm, "name" | "principals">, people: string[] = []): { name: string; role: ScreeningRole }[] {
+  const all = [{ name: firm.name, role: "entity" as const }, ...[...(firm.principals ?? []), ...people].map((name) => ({ name, role: "principal" as const }))].filter((subject) => subject.name.trim());
+  const seen = new Set<string>();
+  return all.filter((subject) => { const key = nameTokens(subject.name).join(" "); if (!key || seen.has(key)) return false; seen.add(key); return true; });
+}
+
+/** A possible or confirmed match: nothing goes to or comes from the firm until it's cleared. */
+export const firmHeld = (firm: Pick<Firm, "screening"> | undefined) => firm?.screening?.status === "review" || firm?.screening?.status === "match";
+
+/**
+ * What stops LendHous taking a firm's commitment or money, or null: never screened, a match open or confirmed, a name the
+ * last screening didn't check, or (with today, when money moves) a screening older than a few days.
+ */
+export function firmOfacBlocker(firm: Firm | undefined, today?: string) {
+  if (!firm) return "That firm is no longer on file";
+  const latest = firm.screening;
+  if (!latest) return `${firm.name} hasn't been screened against the OFAC sanctions list yet`;
+  if (latest.status === "match") return `${firm.name} is a confirmed OFAC sanctions match: no money can move`;
+  if (latest.status === "review") return `A possible OFAC sanctions match on ${firm.name} needs review`;
+  const checked = new Set(latest.subjects.map((subject) => nameTokens(subject.name).join(" ")));
+  const missing = firmSubjects(firm).filter((subject) => !checked.has(nameTokens(subject.name).join(" "))).map((subject) => subject.name);
+  if (missing.length) return `${missing.join(", ")} not screened against the OFAC list yet`;
+  if (today) {
+    const since = new Date(Date.parse(today) - OFAC.freshDays * 86_400_000).toISOString().slice(0, 10);
+    if (servicingDate(new Date(latest.checkedAt)) < since) return `${firm.name}'s OFAC screening is more than ${OFAC.freshDays} days old: screen again before money moves`;
+  }
+  return null;
+}

@@ -2,7 +2,8 @@
 import { useState } from "react";
 import { Reveal } from "@/components/motion";
 import { Badge, Section, shortDate } from "@/components/ui";
-import { defaultNocExpiry, INSURANCE_KINDS, insuranceDaysLeft, insuranceProblem, lienFileProblem, LIENOR_ROLES, mortgageRecordedOn, NOC_START_DAYS, nocProblems } from "@/lib/lien-law";
+import { defaultNocExpiry, lienFileProblem, LIENOR_ROLES, mortgageRecordedOn, NOC_START_DAYS, nocProblems } from "@/lib/lien-law";
+import { insuranceHold } from "@/lib/insurance";
 import type { Deal, NoticeToOwner } from "@/lib/mockData";
 import { addDays } from "@/lib/servicing";
 import { useStore } from "@/lib/store";
@@ -14,7 +15,7 @@ const small = "h-9! px-3! text-xs!";
 /**
  * The loan's construction lien file (Fla. Stat. ch. 713), for the team: the contractor and the Notice of Commencement,
  * checked against the mortgage, its 90 days and its end date; the notices to owner, each of which needs a waiver with
- * every draw after it; and the builder's risk or hazard policy draws depend on.
+ * every draw after it. The policies draws depend on are on the Insurance card (components/loan/InsurancePanel.tsx).
  */
 export function LienProtection({ deal }: { deal: Deal }) {
   const { dispatch, viewerName } = useStore();
@@ -25,16 +26,12 @@ export function LienProtection({ deal }: { deal: Deal }) {
   const [form, setForm] = useState({ contractor: lien?.contractor ?? "", recordedOn: noc?.recordedOn ?? "", reference: noc?.reference ?? "", expiresOn: noc?.expiresOn ?? "", commencedOn: noc?.commencedOn ?? "", lenderNamed: noc?.lenderNamed ?? false, mortgageFirst: noc?.mortgageFirst ?? false, mortgageRecordedOn: lien?.mortgageRecordedOn ?? "" });
   const [notice, setNotice] = useState({ lienor: "", role: "subcontractor" as NoticeToOwner["role"], servedOn: "" });
   const [adding, setAdding] = useState(false);
-  const policy = lien?.insurance;
-  const [cover, setCover] = useState({ kind: policy?.kind ?? (deal.app.product === "ground_up" ? "builders_risk" : "hazard"), carrier: policy?.carrier ?? "", policy: policy?.policy ?? "", expiresOn: policy?.expiresOn ?? "" });
-  const [coverOpen, setCoverOpen] = useState(!policy);
   const put = (changes: Partial<typeof form>) => setForm((current) => ({ ...current, ...changes }));
   const fromTitle = Boolean(deal.closing?.recording?.on);
   const input = { contractor: form.contractor, ...(form.recordedOn ? { noc: { recordedOn: form.recordedOn, reference: form.reference, expiresOn: form.expiresOn || defaultNocExpiry(form.recordedOn), ...(form.commencedOn ? { commencedOn: form.commencedOn } : {}), lenderNamed: form.lenderNamed, mortgageFirst: form.mortgageFirst } } : {}) };
   const problem = today ? lienFileProblem(input, today) : null;
   const problems = today ? nocProblems(deal, today) : [];
-  const insurance = today ? insuranceProblem(deal, today) : null;
-  const daysLeft = today ? insuranceDaysLeft(deal, today) : null;
+  const insurance = today ? insuranceHold(deal, today) : null;
   const save = async () => { if (await dispatch({ t: "saveLienFile", dealId: deal.id, ...input, ...(!fromTitle && form.mortgageRecordedOn ? { mortgageRecordedOn: form.mortgageRecordedOn } : {}), by: viewerName })) setEditing(false); };
   return (
     <Section title="Lien protection (Florida construction lien law)" right={<Badge tone={problems.length || insurance ? "amber" : "green"}>{problems.length || insurance ? "Draws on hold" : "In place"}</Badge>}>
@@ -84,25 +81,7 @@ export function LienProtection({ deal }: { deal: Deal }) {
           </Reveal>
         </div>
 
-        <div className="space-y-2 border-t border-border pt-3">
-          <p className="font-medium">Insurance</p>
-          {policy && !coverOpen ? (
-            <div className="space-y-0.5 text-xs" data-testid="insurance-summary">
-              <p>{INSURANCE_KINDS[policy.kind]} · {policy.carrier}{policy.policy ? ` · policy ${policy.policy}` : ""} · ends {shortDay(policy.expiresOn)}</p>
-              <p className={insurance ? "text-bad" : daysLeft !== null && daysLeft <= 30 ? "text-warn" : "text-muted-foreground"}>{insurance ?? (daysLeft !== null ? `${daysLeft} days left. Draws stop if it lapses.` : "")}</p>
-              <button type="button" className={`btn-ghost ${small} mt-1`} data-testid="edit-insurance" onClick={() => setCoverOpen(true)}>Update it</button>
-            </div>
-          ) : (
-            <div className="flex flex-wrap items-end gap-2" data-testid="insurance-form">
-              <label className="block"><span className="label">Policy</span><select className="desk-input" data-testid="insurance-kind" value={cover.kind} onChange={(event) => setCover({ ...cover, kind: event.target.value as "builders_risk" | "hazard" })}>{Object.entries(INSURANCE_KINDS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
-              <label className="block min-w-0 flex-1 basis-40"><span className="label">Insurance company</span><input className="desk-input" data-testid="insurance-carrier" maxLength={160} value={cover.carrier} onChange={(event) => setCover({ ...cover, carrier: event.target.value })} /></label>
-              <label className="block min-w-0 basis-32"><span className="label">Policy number</span><input className="desk-input" data-testid="insurance-policy" maxLength={120} value={cover.policy} onChange={(event) => setCover({ ...cover, policy: event.target.value })} /></label>
-              <label className="block"><span className="label">Ends on</span><input className="desk-input" type="date" data-testid="insurance-expires" value={cover.expiresOn} onChange={(event) => setCover({ ...cover, expiresOn: event.target.value })} /></label>
-              <button type="button" className={`btn-primary ${small}`} data-testid="save-insurance" disabled={!cover.carrier.trim() || !cover.expiresOn} onClick={async () => { if (await dispatch({ t: "saveInsurance", dealId: deal.id, ...cover, by: viewerName })) setCoverOpen(false); }}>Save</button>
-              {policy && <button type="button" className={`btn-ghost ${small}`} onClick={() => setCoverOpen(false)}>Cancel</button>}
-            </div>
-          )}
-        </div>
+        {insurance && <p className="border-t border-border pt-3 text-xs text-warn" data-testid="lien-insurance-hold">{insurance} Draws are held until it&apos;s on the Insurance card.</p>}
       </div>
     </Section>
   );

@@ -8,6 +8,7 @@ import type { Deal } from "@/lib/mockData";
 import { currentPricing } from "@/lib/pricing-versions";
 import { DEFAULT_KINDS, maturityAfter, WITHDRAW_REASONS } from "@/lib/loan-exits";
 import { latestSheet } from "@/lib/term-sheets";
+import { policiesOf, policyWord } from "@/lib/insurance";
 import { dueOf, fromThirdParty, letterChanges, receivedOf, requesterLine, staleLetter } from "@/lib/payoffs";
 import { prisma } from "@/lib/prisma";
 import { defaultInterestFrom, defaultRateOf, ledger, maturityOf, servicingTermsOf } from "@/lib/servicing";
@@ -131,13 +132,26 @@ function actionAlerts(before: Book, after: Book, action: BookAction): Alert[] {
     }
     case "checkInsurance":
       return after.deals.flatMap((deal): Alert[] => {
-        const now = deal.lienFile?.insurance; const was = before.deals.find((item) => item.id === deal.id)?.lienFile?.insurance;
-        if (!now || !was) return [];
-        const kind = now.kind === "builders_risk" ? "builder's risk" : "hazard";
-        if (now.lapseNoticeOn && !was.lapseNoticeOn) return [{ to: "borrower", dealId: deal.id, subject: `Your insurance has lapsed: ${deal.loanNumber}`, body: `The ${kind} policy on ${deal.address}, ${deal.city} ended on ${longDate(now.expiresOn)}. No draws can be released until we have the renewal. Please send it now.`, event: "insurance.lapsed" }, { to: "team", subject: `Insurance lapsed: ${deal.loanNumber}`, body: `${deal.borrowerName}'s ${kind} policy (${now.carrier}) ended on ${longDate(now.expiresOn)}. Draws are on hold until it's renewed; consider whether it's a default.`, event: "insurance.lapsed" }];
-        if (now.remindedOn && !was.remindedOn) return [{ to: "borrower", dealId: deal.id, subject: `Your insurance renews soon: ${deal.loanNumber}`, body: `The ${kind} policy on ${deal.address}, ${deal.city} ends on ${longDate(now.expiresOn)}. Please send the renewal before then; draws can't be released on a lapsed policy.`, event: "insurance.expiring" }, { to: "team", subject: `Insurance ending soon: ${deal.loanNumber}`, body: `${deal.borrowerName}'s ${kind} policy (${now.carrier}) ends on ${longDate(now.expiresOn)}.`, event: "insurance.expiring" }];
-        return [];
+        const was = before.deals.find((item) => item.id === deal.id);
+        if (!was) return [];
+        return policiesOf(deal).flatMap((now): Alert[] => {
+          const prior = policiesOf(was).find((item) => item.kind === now.kind);
+          const kind = policyWord(now.kind);
+          if (now.lapseNoticeOn && !prior?.lapseNoticeOn) return [{ to: "borrower", dealId: deal.id, subject: `Your insurance has lapsed: ${deal.loanNumber}`, body: `The ${kind} policy on ${deal.address}, ${deal.city} ended on ${longDate(now.expiresOn)}. The property has to stay insured under your loan, and no draws can be released until we have the renewal. Send it from your loan page now.`, event: "insurance.lapsed" }, { to: "team", subject: `Insurance lapsed: ${deal.loanNumber}`, body: `${deal.borrowerName}'s ${kind} policy on ${deal.address}, ${deal.city} ended on ${longDate(now.expiresOn)}. Draws are held. Chase the renewal today.`, event: "insurance.lapsed" }];
+          if (now.remindedOn && !prior?.remindedOn) return [{ to: "borrower", dealId: deal.id, subject: `Your insurance renews soon: ${deal.loanNumber}`, body: `The ${kind} policy on ${deal.address}, ${deal.city} ends on ${longDate(now.expiresOn)}. Please send the renewal from your loan page before then, naming LendHous as mortgagee; draws can't be released on a lapsed policy.`, event: "insurance.expiring" }, { to: "team", subject: `Insurance ending soon: ${deal.loanNumber}`, body: `${deal.borrowerName}'s ${kind} policy on ${deal.address}, ${deal.city} ends on ${longDate(now.expiresOn)}.`, event: "insurance.expiring" }];
+          return [];
+        });
       });
+    case "insuranceRenewal": {
+      const deal = loan(action.dealId);
+      return deal ? [{ to: "team", dealId: deal.id, subject: `Insurance renewal to check: ${deal.loanNumber}`, body: `${action.by} sent the renewed ${policyWord(action.kind)} policy, to ${longDate(action.expiresOn)}. Check it names LendHous as mortgagee and covers enough, then accept it on the loan's Servicing tab.`, event: "insurance.renewal_sent" }] : [];
+    }
+    case "decideRenewal": {
+      const deal = loan(action.dealId);
+      const renewal = deal?.insurance?.renewals?.find((item) => item.id === action.renewalId);
+      if (!deal || !renewal) return [];
+      return action.accept ? [{ to: "borrower", dealId: deal.id, subject: `Insurance renewal accepted: ${deal.loanNumber}`, body: `Thank you. The ${policyWord(renewal.kind)} policy is on file through ${longDate(renewal.expiresOn)}.`, event: "insurance.renewal_accepted" }] : [{ to: "borrower", dealId: deal.id, subject: `Your insurance renewal needs another look: ${deal.loanNumber}`, body: `We couldn't accept the ${policyWord(renewal.kind)} policy you sent: ${action.note.trim().replace(/\.$/, "")}. Please send a corrected one from your loan page.`, event: "insurance.renewal_returned" }];
+    }
     case "addCondition": {
       const deal = loan(action.dealId);
       const added = deal?.conditions?.find((item) => !before.deals.find((old) => old.id === deal.id)?.conditions?.some((prior) => prior.id === item.id));
@@ -265,6 +279,23 @@ function actionAlerts(before: Book, after: Book, action: BookAction): Alert[] {
       const added = deal?.screenings?.at(-1);
       if (!deal || added?.id !== action.screening.id || added.status !== "review") return [];
       return [{ to: "team", subject: `Possible OFAC match: ${deal.loanNumber}`, body: `Screening ${deal.loanNumber} against the OFAC sanctions list found a possible match. Nothing moves on the loan until someone with authority reviews it on the Credit review tab. Don't tell the borrower.`, event: "ofac.review" }];
+    }
+    case "firmScreened": {
+      const firm = (action.kind === "partner" ? after.partners : after.buyers).find((item) => item.id === action.firmId);
+      const was = (action.kind === "partner" ? before.partners : before.buyers).find((item) => item.id === action.firmId);
+      if (!firm || firm.screening?.id !== action.screening.id || action.screening.status !== "review" || was?.screening?.id === action.screening.id) return [];
+      return [{ to: "team", subject: `Possible OFAC match: ${firm.name}`, body: `Screening ${firm.name}, a ${action.kind === "partner" ? "partner lender" : "loan buyer"}, against the OFAC sanctions list found a possible match. No teasers, bids, sales or money with them until someone with authority reviews it on the Partners & buyers page. Don't tell the firm.`, event: "ofac.review" }];
+    }
+    case "brokerScreened": {
+      const broker = after.brokers.find((item) => item.id === action.brokerId);
+      const was = before.brokers.find((item) => item.id === action.brokerId);
+      if (!broker || action.screening.status !== "review" || was?.screening?.status === "review" || !was?.screening) return [];
+      return [{ to: "team", subject: `Possible OFAC match: ${broker.name}`, body: `Screening ${broker.name}, a brokerage, against the OFAC sanctions list found a possible match. It can't send deals until someone with authority reviews it on the Brokers page. Don't tell the firm.`, event: "ofac.review" }];
+    }
+    case "decideFirmScreening": {
+      if (action.decision !== "match") return [];
+      const firm = (action.kind === "partner" ? after.partners : action.kind === "buyer" ? after.buyers : after.brokers).find((item) => item.id === action.firmId);
+      return [{ to: "team", subject: `Confirmed OFAC match: ${firm?.name ?? action.firmId}`, body: `${action.by} confirmed an OFAC sanctions match on ${firm?.name ?? action.firmId}. Don't take, move or return any of its money. Call counsel now: blocked property and rejected transactions have to be reported to OFAC within 10 business days (31 CFR 501.603, 501.604).`, event: "ofac.match" }];
     }
     case "decideScreening": {
       const deal = loan(action.dealId);

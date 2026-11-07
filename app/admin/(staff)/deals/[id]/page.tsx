@@ -25,6 +25,8 @@ import { ScopeOfWork } from "@/components/loan/ScopeOfWork";
 import { TermSheetBuilder } from "@/components/loan/TermSheetBuilder";
 import { ConditionsPanel } from "@/components/loan/ConditionsPanel";
 import { LienProtection } from "@/components/loan/LienProtection";
+import { InsurancePanel } from "@/components/loan/InsurancePanel";
+import { INSURED } from "@/lib/insurance";
 import { PropertyPhotos } from "@/components/loan/PropertyPhotos";
 import { LoanTeam } from "@/components/loan/LoanTeam";
 import { closingIn, shortDay } from "@/lib/format";
@@ -277,8 +279,9 @@ export default function DealWorkspace() {
       {tab === "Term sheet" && <TermSheetBuilder deal={d} />}
       {tab === "Conditions" && <ConditionsPanel deal={d} />}
       {tab === "Credit review" && <div className="space-y-4"><ApplicationRecord deal={d} /><ApplicationOnFile deal={d} /><OfacPanel deal={d} /><CreditReview deal={d} /></div>}
-      {tab === "Closing" && <div className="space-y-4"><ClosingPanel deal={d} />{(d.app.product === "fix_flip" || d.app.product === "ground_up" || d.lienFile) && <LienProtection deal={d} />}<OfacPanel deal={d} /></div>}
+      {tab === "Closing" && <div className="space-y-4"><ClosingPanel deal={d} />{INSURED.includes(d.status) && <InsurancePanel deal={d} />}{(d.app.product === "fix_flip" || d.app.product === "ground_up" || d.lienFile) && <LienProtection deal={d} />}<OfacPanel deal={d} /></div>}
       {tab === "Servicing" && (SERVICED.includes(d.status) || d.status === "paid_off") && <LoanLedger deal={d} />}
+      {tab === "Servicing" && SERVICED.includes(d.status) && <InsurancePanel deal={d} />}
       {tab === "Servicing" && SERVICED.includes(d.status) && <ExitPlanCard deal={d} side="team" />}
       {tab === "Servicing" && (SERVICED.includes(d.status) || d.status === "paid_off") && <TeamLoanStatements deal={d} />}
 

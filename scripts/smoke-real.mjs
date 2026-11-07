@@ -647,6 +647,21 @@ try {
   await owner.getByTestId("verify-read-back").check();
   await owner.getByTestId("confirm-verify-wire").click();
   ok("a second person verifies the wire by call-back", await seen(owner.getByTestId("wire-verified")));
+  // The property is insured before it funds: the flood zone, then a hazard policy with wind, naming LendHous.
+  ok("funding waits on the insurance", (await owner.getByTestId("stage-blockers").innerText()).includes("No hazard or builder's risk policy on file"));
+  await owner.getByTestId("flood-sfha").selectOption("no");
+  await owner.getByTestId("flood-zone-code").fill("X");
+  await owner.getByTestId("save-flood").click();
+  await seen(owner.getByTestId("flood-zone"));
+  await owner.getByTestId("insurance-carrier").fill("Gulf Builders Mutual");
+  await owner.getByTestId("insurance-policy").fill("GBM-77");
+  await owner.getByTestId("insurance-expires").fill(new Date(Date.now() + 180 * 86_400_000).toISOString().slice(0, 10));
+  await owner.getByTestId("insurance-coverage").fill("600000");
+  await owner.getByTestId("insurance-wind").check();
+  await owner.getByTestId("insurance-mortgagee").check();
+  await owner.getByTestId("save-insurance").click();
+  await seen(owner.getByTestId("insurance-summary"));
+  ok("with the policy on file, nothing about insurance holds funding", !/policy|flood zone/.test(await owner.getByTestId("stage-blockers").innerText()));
   await go(under, dealHref);
   await seen(under.getByTestId("approve-funding"));
   ok("funding waits for approval", await under.getByTestId("advance-loan").isDisabled());
@@ -659,6 +674,22 @@ try {
   await owner.getByTestId("advance-loan").filter({ hasText: "Start servicing" }).click();
   await gone(owner.getByTestId("stage-panel"));
   ok("a second person funds it and it moves to servicing", (await owner.getByTestId("stage-panel").count()) === 0);
+  // Before the policy ends, the borrower sends the renewal from the loan page and the team accepts it.
+  await go(borrower, `/admin/borrower/${dealId}`);
+  await borrower.getByTestId("send-renewal").click();
+  await borrower.getByTestId("renewal-kind").selectOption("hazard");
+  await borrower.getByTestId("renewal-policy").fill("GBM-78");
+  await borrower.getByTestId("renewal-expires").fill(new Date(Date.now() + 540 * 86_400_000).toISOString().slice(0, 10));
+  await borrower.getByTestId("renewal-file").setInputFiles({ name: "renewal-declarations.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 renewal") });
+  await borrower.getByTestId("submit-renewal").click();
+  ok("the borrower sends their insurance renewal", await seen(borrower.getByTestId("renewal-sent")));
+  ok("it's stored encrypted, and the team is told", (await prisma.document.count({ where: { documentType: "insurance_renewal" } })) === 1 && !(await rawRows("Document")).includes("renewal-declarations.pdf") && (await prisma.notification.count({ where: { eventCode: "insurance.renewal_sent" } })) >= 1);
+  await go(owner, dealHref);
+  await owner.getByTestId("tab-Servicing").click();
+  await owner.getByTestId("insurance-renewal").getByTestId("renewal-mortgagee").check();
+  await owner.getByTestId("insurance-renewal").getByTestId("accept-renewal").click();
+  ok("the team accepts it, and it's the policy on file", await seen(owner.getByTestId("insurance-summary").getByText(/GBM-78/)));
+  ok("and the borrower hears", (await prisma.notification.count({ where: { toEmail: `borrower@${DOMAIN}`, eventCode: "insurance.renewal_accepted" } })) === 1);
   // After funding, title confirms the money reached escrow and where the mortgage was recorded.
   await title.goto(BASE + new URL(titleLink).pathname);
   await title.getByTestId("title-funds-amount").fill("250000");
@@ -834,11 +865,6 @@ try {
   await owner.getByTestId("noc-mortgage-first").check();
   await owner.getByTestId("save-noc").click();
   ok("the Notice of Commencement is on file, after the mortgage", (await seen(owner.getByTestId("noc-summary"))) && (await owner.getByTestId("noc-problems").count()) === 0);
-  await owner.getByTestId("insurance-carrier").fill("Gulf Builders Mutual");
-  await owner.getByTestId("insurance-policy").fill("GBM-77");
-  await owner.getByTestId("insurance-expires").fill(new Date(Date.now() + 180 * 86_400_000).toISOString().slice(0, 10));
-  await owner.getByTestId("save-insurance").click();
-  await seen(owner.getByTestId("insurance-summary"));
   await owner.getByTestId("add-notice").click();
   await owner.getByTestId("notice-lienor").fill("Sunny Supply Co");
   await owner.getByTestId("notice-role").selectOption("supplier");
@@ -1081,6 +1107,19 @@ try {
   await owner.getByTestId("firm-name").fill("Parker Capital");
   await owner.getByTestId("save-firm").click();
   await seen(owner.getByTestId("firm-row").filter({ hasText: "Parker Capital" }));
+  const parker = owner.getByTestId("firm-row").filter({ hasText: "Parker Capital" });
+  ok("a partner is screened against the OFAC list when it's saved", await seen(parker.getByTestId("firm-ofac").getByText("Clear")));
+  // An owner on the list holds the firm until someone with clear_ofac compares the listing and clears it.
+  const reviewsBefore = await prisma.notification.count({ where: { eventCode: "ofac.review" } });
+  await parker.getByTestId("edit-firm").click();
+  await owner.getByTestId("firm-principals").fill("Paula Parker\nJonathan Doe");
+  await owner.getByTestId("save-firm").click();
+  ok("with its owners, and a listed name holds it for review", (await seen(parker.getByTestId("firm-ofac-review"))) && (await parker.getByTestId("firm-ofac-hit").innerText()).includes("DOE, Jonathan"));
+  ok("and the team is told", (await prisma.notification.count({ where: { eventCode: "ofac.review" } })) > reviewsBefore);
+  await parker.getByTestId("firm-ofac-clear").click();
+  await parker.getByTestId("firm-ofac-reason").fill("Paula's partner Jonathan Doe was born 1985 in Tampa; the listed one wasn't (smoke)");
+  await parker.getByTestId("firm-ofac-decide").click();
+  ok("an owner clears it, for the record", await seen(parker.getByTestId("firm-ofac-decided")));
   await owner.getByTestId("firm-row").filter({ hasText: `buyer@${DOMAIN}` }).getByTestId("edit-firm").click();
   await owner.getByTestId("firm-name").fill("Blair Notes");
   await owner.getByTestId("save-firm").click();
@@ -1465,11 +1504,12 @@ try {
 
   ok(`no browser errors${errors.length ? `: ${errors[0]}` : ""}`, errors.length === 0);
 } finally {
+  // Printed here so a step that times out still shows every check that ran before it.
+  console.log(checks.join("\n"));
   await browser.close();
   await wipe();
 // A small stand-in for Treasury's sanctions list, so applications are screened as they arrive (the nightly job downloads the real one).
 await prisma.sanctionsList.create({ data: { id: "sdn", fetchedAt: new Date(), names: 2, hash: "smoke", entries: [[90001, "DOE, Jonathan", "individual", "SDGT"], [90002, "LISTED TRADING CO", "entity", "SDNTK"]] } });
   await prisma.$disconnect();
 }
-console.log(checks.join("\n"));
 if (checks.some((check) => check.startsWith("FAIL"))) process.exitCode = 1;

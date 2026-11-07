@@ -2,6 +2,7 @@
 // sheet; and a loan can't clear to close with documents open or its capital not committed.
 import { activeWire, wireVerified } from "./closing";
 import { blockingConditions } from "./conditions";
+import { insuranceGaps } from "./insurance";
 import type { Estimate } from "./engine";
 import { ofacBlocker } from "./ofac";
 import { partnerFundsBlocker } from "./partner-funding";
@@ -54,6 +55,8 @@ export function nextStage(deal: Deal, e: Estimate, today?: string): NextStage | 
   }
   if (step.to === "funded" && !wireVerified(deal)) blockers.push(activeWire(deal) ? "The wire instructions haven't been verified by a call-back (Closing tab)" : "No wire instructions yet (Closing tab)");
   if (step.to === "funded") { const waiting = partnerFundsBlocker(deal); if (waiting) blockers.push(waiting); }
+  // The property is insured, with LendHous named, before any money goes out (lib/insurance.ts).
+  if (step.to === "funded" && today) blockers.push(...insuranceGaps(deal, today));
   if (step.to === "funded" && (deal.fundingApprovers?.length ?? 0) < 2) blockers.push(`Needs two people to approve funding (${deal.fundingApprovers?.length ?? 0} of 2)`);
   return { ...step, blockers, borrowerStep: deal.status === "term_sheet_issued" };
 }

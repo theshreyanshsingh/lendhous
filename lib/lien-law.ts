@@ -3,17 +3,15 @@
 // (713.07), and it lapses if work doesn't start within 90 days or once a year passes (713.13(2), (6)). Subcontractors and
 // suppliers not hired by the borrower serve notices to owner (713.06(2)); each draw then needs a statutory lien waiver
 // from the contractor and every one of them (713.20), and the last one final waivers and the contractor's final payment
-// affidavit (713.06(3)(d)). A lapsed builder's risk or hazard policy stops draws too. An owner can release past these
+// affidavit (713.06(3)(d)). No policy on the building, or any lapsed policy (lib/insurance.ts), stops draws too. An owner can release past these
 // holds with a reason. The reducer, the access rules and the screens all ask these, so they can't disagree.
+import { insuranceHold } from "./insurance";
 import type { Deal, DrawRequest, LienFile, LienWaiver } from "./mockData";
-import { addDays, daysBetween } from "./servicing";
+import { addDays } from "./servicing";
 
 /** Days after recording the notice in which work has to start, or the notice is void (713.13(2)). */
 export const NOC_START_DAYS = 90;
-/** PLACEHOLDER until GT sets it: how long before a policy lapses the team and the borrower are told. */
-export const INSURANCE_NOTICE_DAYS = 30;
 export const LIENOR_ROLES: Record<"subcontractor" | "supplier" | "sub_subcontractor" | "other", string> = { subcontractor: "Subcontractor", supplier: "Supplier", sub_subcontractor: "Sub-subcontractor", other: "Other lienor" };
-export const INSURANCE_KINDS = { builders_risk: "Builder's risk", hazard: "Hazard (property)" } as const;
 /** The default end of a Notice of Commencement: a year after it's recorded (713.13(6)). */
 export const defaultNocExpiry = (recordedOn: string) => { const [year, month, day] = recordedOn.split("-").map(Number); return new Date(Date.UTC(year + 1, month - 1, day)).toISOString().slice(0, 10); };
 
@@ -39,15 +37,6 @@ export function nocProblems(deal: Pick<Deal, "closing" | "lienFile">, today: str
   return problems;
 }
 
-/** Why the property's insurance stops draws today, or null. */
-export function insuranceProblem(deal: Pick<Deal, "lienFile">, today: string) {
-  const policy = deal.lienFile?.insurance;
-  if (!policy) return "No builder's risk or hazard policy is on file.";
-  if (policy.expiresOn < today) return `The ${INSURANCE_KINDS[policy.kind].toLowerCase()} policy lapsed on ${longDay(policy.expiresOn)}.`;
-  return null;
-}
-export const insuranceDaysLeft = (deal: Pick<Deal, "lienFile">, today: string) => (deal.lienFile?.insurance ? daysBetween(today, deal.lienFile.insurance.expiresOn) : null);
-
 /** The holdback left before this draw. */
 const holdbackLeft = (deal: Pick<Deal, "scope">) => (deal.scope ?? []).reduce((sum, line) => sum + line.budget - line.released, 0);
 /** The last draw: marked so, or one that uses up what's left of the holdback. */
@@ -66,7 +55,7 @@ export const waiverFrom = (draw: DrawRequest, key: string, kind: LienWaiver["kin
 /** Everything that holds a draw's release under the lien law and insurance. Empty when it can go. */
 export function drawHolds(deal: Deal, draw: DrawRequest, today: string) {
   const holds = [...nocProblems(deal, today)];
-  const insurance = insuranceProblem(deal, today);
+  const insurance = insuranceHold(deal, today);
   if (insurance) holds.push(insurance);
   if (!deal.lienFile?.contractor) holds.push("The contractor isn't on file, so its lien waiver can't be checked.");
   const kind = isFinalDraw(deal, draw) ? "final" : "progress";
@@ -100,16 +89,4 @@ export function lienFileProblem(input: { contractor: string; noc?: { recordedOn:
   if (!/^\d{4}-\d{2}-\d{2}$/.test(noc.expiresOn) || noc.expiresOn <= noc.recordedOn) return "The notice ends after it was recorded.";
   if (noc.commencedOn && (!/^\d{4}-\d{2}-\d{2}$/.test(noc.commencedOn) || noc.commencedOn > today)) return "Enter the day work started, today or earlier.";
   return null;
-}
-
-/** Policies to warn about tonight: lapsing within the notice period and not warned yet, or lapsed and not told yet. */
-export function insuranceChecks(deals: Deal[], today: string, serviced: string[]) {
-  const remind: string[] = []; const lapsed: string[] = [];
-  for (const deal of deals) {
-    const policy = deal.lienFile?.insurance;
-    if (!policy || !serviced.includes(deal.status)) continue;
-    if (policy.expiresOn < today) { if (!policy.lapseNoticeOn) lapsed.push(deal.id); }
-    else if (!policy.remindedOn && daysBetween(today, policy.expiresOn) <= INSURANCE_NOTICE_DAYS) remind.push(deal.id);
-  }
-  return { remind, lapsed };
 }

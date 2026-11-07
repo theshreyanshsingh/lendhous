@@ -13,10 +13,11 @@ import { cureError, defaultError, executeError, extensionFee, extensionRequestEr
 import { canAdvance, nextStage } from "./loan-stages";
 import { issueProblem, latestLetter, letterFigures, receivedOnFor } from "./payoffs";
 import { isLarge, noticeDueOn, noticeOwed, reasonsProblem, requestProblem, startAdverseAction, STATEMENT_DAYS } from "./adverse-action";
-import { defaultNocExpiry, drawHolds, insuranceChecks, lienFileProblem, partiesFor, unreleasedHolds, waiverCheckProblem } from "./lien-law";
+import { defaultNocExpiry, drawHolds, lienFileProblem, partiesFor, unreleasedHolds, waiverCheckProblem } from "./lien-law";
+import { insuranceChecks, insuranceFileOf, policiesOf, policyProblem, policyWord, putPolicy, renewalProblem, withInsurance } from "./insurance";
 import { addProblem, changeProblem, DEFAULT_LIBRARY, fromTemplate, libraryOf, missingStandard, templateProblem, templatesFor, type ConditionInput } from "./conditions";
 import { draftSheet, exceptionDecisionProblem, exceptionReasons, exceptionRequestProblem, issueProblem as sheetProblem, latestSheet, matrixOf, pricedApp, respondProblem, startingTerms, termSheetChecks, type Prepay } from "./term-sheets";
-import { DEMO_TEAM, seedDeals, seedBids, seedDraws, seedLoanSales, seedLoanOffers, seedMessages, seedPhotoRequests, DEMO_SPONSORS, capitalSources, partners as seedPartners, brokers as seedBrokers, loanBuyers, BORROWER_ID, DEMO_PARTNER_ID, DEMO_BUYER_ID, DEMO_BROKER_ID, type Broker, type ClosingAgent, type Closure, type Deal, type DefaultKind, type Bid, type DrawRequest, type DrawRequestLine, type LoanExtension, type LoanMessage, type Screening, type WireInstruction, type Partner, type PayoffChannel, type PayoffLetter, type PayoffRequest, type NoticeToOwner, type LienWaiver, type ConditionTemplate, type LoanCondition, type DocStatus, type CapitalSource, type LoanBuyer, type LoanOffer, type LoanSale, type LoanPayment, type LoanStatus, type TeamMember, type PaymentMethod, type PhotoRequest, type RequestPhoto, type ScopeLine, type Sponsor, type StageEntry } from "./mockData";
+import { DEMO_TEAM, seedDeals, seedBids, seedDraws, seedLoanSales, seedLoanOffers, seedMessages, seedPhotoRequests, DEMO_SPONSORS, capitalSources, partners as seedPartners, brokers as seedBrokers, loanBuyers, BORROWER_ID, DEMO_PARTNER_ID, DEMO_BUYER_ID, DEMO_BROKER_ID, type Broker, type ClosingAgent, type Closure, type Deal, type DefaultKind, type Bid, type DrawRequest, type DrawRequestLine, type LoanExtension, type LoanMessage, type Screening, type WireInstruction, type Partner, type PayoffChannel, type PayoffLetter, type PayoffRequest, type NoticeToOwner, type LienWaiver, type ConditionTemplate, type LoanCondition, type DocStatus, type CapitalSource, type LoanBuyer, type LoanOffer, type LoanSale, type LoanPayment, type LoanStatus, type TeamMember, type PaymentMethod, type PhotoRequest, type RequestPhoto, type ScopeLine, type Sponsor, type StageEntry, type PolicyKind, type InsurancePolicy, type InsuranceRenewal } from "./mockData";
 import { BASE_VERSION, currentPricing, type PricingPayload } from "./pricing-versions";
 import { TEAM_ROLE_LABEL, type TeamRole } from "./loan-team";
 import { addDays, DEMO_SERVICING_DAY, firstDueDate, ledger, maturityOf, payoffFor, SERVICED, servicingDate, settle } from "./servicing";
@@ -68,7 +69,11 @@ export type BookAction =
   | { t: "assignLoanTeam"; dealId: string; role: TeamRole; member: TeamMember | null; by: string }
   | { t: "saveSource"; source: CapitalSource }
   | { t: "removeSource"; id: string }
-  | { t: "saveFirm"; kind: "partner" | "buyer"; id: string; name: string; buyBox: BuyBox }
+  | { t: "saveFirm"; kind: "partner" | "buyer"; id: string; name: string; buyBox: BuyBox; principals?: string[] }
+  /** A partner lender or loan buyer, its owners and its people, screened against the sanctions list. Only the server does it. */
+  | { t: "firmScreened"; kind: "partner" | "buyer"; firmId: string; screening: Screening }
+  /** Someone with clear_ofac decides a possible match on a partner, buyer or brokerage, with what they compared. */
+  | { t: "decideFirmScreening"; kind: "partner" | "buyer" | "broker"; firmId: string; screeningId: string; decision: "cleared" | "match"; reason: string; by: string }
   | { t: "acceptTermSheet"; dealId: string; signedName: string }
   | { t: "addCondition"; dealId: string; condition: ConditionInput; by: string }
   | { t: "clearCondition"; dealId: string; conditionId: string; note: string; by: string }
@@ -102,7 +107,14 @@ export type BookAction =
   /** The loan's lien file: the contractor and the Notice of Commencement (Fla. Stat. 713.13). */
   | { t: "saveLienFile"; dealId: string; contractor: string; noc?: { recordedOn: string; reference: string; expiresOn: string; commencedOn?: string; lenderNamed: boolean; mortgageFirst?: boolean }; mortgageRecordedOn?: string; by: string }
   | { t: "addNoticeToOwner"; dealId: string; lienor: string; role: NoticeToOwner["role"]; servedOn: string; by: string }
-  | { t: "saveInsurance"; dealId: string; kind: "builders_risk" | "hazard"; carrier: string; policy: string; expiresOn: string; by: string }
+  /** A policy on the property, put on file by the team (lib/insurance.ts). It replaces the one of its kind. */
+  | { t: "saveInsurance"; dealId: string; kind: PolicyKind; carrier: string; policy: string; expiresOn: string; coverage?: number; windIncluded?: boolean; mortgagee?: boolean; by: string }
+  /** Whether the property is in a special flood hazard area, which makes flood insurance required. */
+  | { t: "setFloodZone"; dealId: string; sfha: boolean; zone: string; by: string }
+  /** The borrower sent a renewed policy. The server records it once the file is stored; a demo browser keeps the name only. */
+  | { t: "insuranceRenewal"; dealId: string; kind: PolicyKind; carrier: string; policy: string; expiresOn: string; fileName: string; documentId?: string; by: string }
+  /** The team checked a renewal: accepted, it becomes the policy on file; sent back, the borrower sees why. */
+  | { t: "decideRenewal"; dealId: string; renewalId: string; accept: boolean; mortgagee: boolean; windIncluded?: boolean; coverage?: number; note: string; by: string }
   /** A lien waiver or the final affidavit came in for a draw. The server records it once the file is stored; a demo browser keeps the name only. */
   | { t: "lienWaiverReceived"; drawId: string; partyKey: string; kind: "progress" | "final"; fileName: string; documentId?: string; by: string }
   | { t: "affidavitReceived"; drawId: string; fileName: string; documentId?: string; by: string }
@@ -212,6 +224,13 @@ function demoTeam(deal: Deal): Deal["team"] {
   return { officer: Number(deal.loanNumber.slice(-1)) % 2 ? uma : olivia, processor: pat };
 }
 
+/** The demo's firms were screened with its loans; the unsigned prospect has a possible match to review. */
+function withDemoScreening<T extends Partner | LoanBuyer>(firm: T): T {
+  const review = firm.id === "p-d";
+  const hits = review ? [{ uid: 990_002, name: "UNSIGNED PROSPECT HOLDINGS (FAKE)", type: "entity", program: "SDGT", score: 0.93 }] : [];
+  return { ...firm, screening: { id: `ofac-demo-${firm.id}`, at: "2026-10-30T12:00:00Z", by: "Nightly sanctions check", checkedAt: "2026-10-30T12:00:00Z", list: { fetchedAt: "2026-10-30T11:00:00Z", names: 18_240 }, status: review ? "review" : "clear", subjects: [{ name: firm.name, role: "entity", hits }] } };
+}
+
 export function demoBook(): Book {
   const deals = seedDeals.map((d) => {
     const e = evaluate(d.app);
@@ -261,15 +280,23 @@ export function demoBook(): Book {
       deals[i] = { ...deals[i], conditions };
     }
     // Lien files on the funded rehab and construction loans: the Notice of Commencement recorded the day after the
-    // mortgage, naming LendHous. One supplier has served a notice to owner, one policy ends soon and one has lapsed.
+    // mortgage, naming LendHous. One supplier has served a notice to owner.
     if (SERVICED.includes(d.status) && (d.app.product === "fix_flip" || d.app.product === "ground_up")) {
-      const insuranceEnds = d.id === "d9" ? "2026-11-20" : d.id === "d13" ? "2026-10-15" : "2027-06-30";
       deals[i] = { ...deals[i], lienFile: {
         contractor: `${d.entityName.split(" ")[0]} Construction (FAKE)`, mortgageRecordedOn: d.closingDate,
         noc: { recordedOn: addDays(d.closingDate, 1), reference: `OR ${d.loanNumber.slice(-4)}/${d.closingDate.slice(5, 7)} (FAKE)`, expiresOn: "2027-09-30", commencedOn: addDays(d.closingDate, 7), lenderNamed: true, by: "Pat Processor (FAKE)", at: `${d.closingDate}T16:00:00-07:00` },
         notices: d.id === "d12" ? [{ id: "nto-demo-1", lienor: "Coastal Lumber Supply (FAKE)", role: "supplier", servedOn: "2026-06-10", by: "Pat Processor (FAKE)", at: "2026-06-12T10:00:00-07:00" }] : [],
-        insurance: { kind: d.app.product === "ground_up" ? "builders_risk" : "hazard", carrier: "Sample Mutual (FAKE)", policy: `SM-${d.loanNumber.slice(-4)}`, expiresOn: insuranceEnds, by: "Pat Processor (FAKE)", at: `${d.closingDate}T16:00:00-07:00` },
       } };
+    }
+    // Insurance on every funded loan and the two about to close: wind in the property policy, except the Miami rental,
+    // which is in flood zone AE with separate wind and flood policies. One policy ends soon and one has lapsed.
+    if (SERVICED.includes(d.status) || d.id === "d7" || d.id === "d15") {
+      const at = `${d.closingDate}T16:00:00-07:00`;
+      const coverage = Math.round((evaluate(d.app).noteAmount * 1.1) / 1000) * 1000;
+      const separate = d.id === "d10";
+      const policies: InsurancePolicy[] = [{ kind: d.app.product === "ground_up" ? "builders_risk" : "hazard", carrier: "Sample Mutual (FAKE)", policy: `SM-${d.loanNumber.slice(-4)}`, expiresOn: d.id === "d9" ? "2026-11-20" : d.id === "d13" ? "2026-10-15" : "2027-06-30", coverage, ...(separate ? {} : { windIncluded: true }), mortgagee: true, by: "Pat Processor (FAKE)", at }];
+      if (separate) policies.push({ kind: "windstorm", carrier: "Coastal Wind Pool (FAKE)", policy: `CW-${d.loanNumber.slice(-4)}`, expiresOn: "2027-05-31", mortgagee: true, by: "Pat Processor (FAKE)", at }, { kind: "flood", carrier: "Sample Flood (FAKE)", policy: `SF-${d.loanNumber.slice(-4)}`, expiresOn: "2027-03-01", coverage: 250_000, mortgagee: true, by: "Pat Processor (FAKE)", at });
+      deals[i] = { ...deals[i], insurance: { policies, flood: { sfha: separate, zone: separate ? "AE" : "X", by: "Pat Processor (FAKE)", at } } };
     }
     if (d.id === "d5") {
       const input = { ...startingTerms(d), rate: matrixOf(d.app).rate[0] - 0.5 };
@@ -282,7 +309,7 @@ export function demoBook(): Book {
     { id: "payoff-1", dealId: "d11", goodThrough: "2026-11-15", requestedAt: "2026-10-22T10:00:00-07:00", by: "Avery Mock (FAKE)", status: "requested", receivedOn: "2026-10-22", channel: "portal", requester: { kind: "borrower", name: "Avery Mock (FAKE)" }, ...quoted },
     { id: "payoff-2", dealId: "d10", goodThrough: "2026-11-20", requestedAt: "2026-10-30T14:00:00-07:00", by: "Dana Escrow (FAKE)", status: "requested", receivedOn: "2026-10-30", channel: "web_form", requester: { kind: "title", name: "Dana Escrow (FAKE)", company: "Sample Title & Escrow (FAKE)", email: "closings@sample-title.test", phone: "(954) 555-0142", fileNumber: "ST-1010-B" }, check: { status: "pending", note: "Signed authorization uploaded with the request.", fileName: "borrower-authorization.pdf" }, ...payoffFor(deals.find((d) => d.id === "d10")!, "2026-11-20") },
   ];
-  return { partnerId: DEMO_PARTNER_ID, buyerId: DEMO_BUYER_ID, brokerId: DEMO_BROKER_ID, borrowerId: BORROWER_ID, loanPrefix: DEMO_PREFIX, deals, bids: [...seedBids, { id: "bid-demo-11", dealId: "d11", partnerId: DEMO_PARTNER_ID, pct: 50, lenderRate: 9.25, lenderPoints: 0.5, conditions: "", status: "accepted", type: "bid", at: "2026-06-20T14:00:00Z" }], partners: seedPartners, buyers: loanBuyers, brokers: seedBrokers, sales: seedLoanSales, offers: seedLoanOffers, draws: seedDraws, photoRequests: seedPhotoRequests, payoffs, messages: seedMessages, sources: capitalSources, conditionLibrary: DEFAULT_LIBRARY, audit: [{ at: SEED_AT, text: "Demo data loaded (all records are FAKE)" }] };
+  return { partnerId: DEMO_PARTNER_ID, buyerId: DEMO_BUYER_ID, brokerId: DEMO_BROKER_ID, borrowerId: BORROWER_ID, loanPrefix: DEMO_PREFIX, deals, bids: [...seedBids, { id: "bid-demo-11", dealId: "d11", partnerId: DEMO_PARTNER_ID, pct: 50, lenderRate: 9.25, lenderPoints: 0.5, conditions: "", status: "accepted", type: "bid", at: "2026-06-20T14:00:00Z" }], partners: seedPartners.map((firm) => withDemoScreening(firm)), buyers: loanBuyers.map((firm) => withDemoScreening(firm)), brokers: seedBrokers, sales: seedLoanSales, offers: seedLoanOffers, draws: seedDraws, photoRequests: seedPhotoRequests, payoffs, messages: seedMessages, sources: capitalSources, conditionLibrary: DEFAULT_LIBRARY, audit: [{ at: SEED_AT, text: "Demo data loaded (all records are FAKE)" }] };
 }
 
 /** A book with no records: a new database, or an account with nothing to see yet. */
@@ -443,6 +470,8 @@ function apply(s: Book, a: BookAction): Book {
     }
     case "brokerScreened": {
       const broker = s.brokers.find((item) => item.id === a.brokerId)!;
+      // The nightly check finding the same names and hits only moves the date, so a match cleared at approval stays cleared.
+      if (broker.screening && sameResult(broker.screening, a.screening)) return { ...s, brokers: s.brokers.map((item) => (item.id === a.brokerId ? { ...item, screening: { ...broker.screening!, checkedAt: a.screening.at, list: a.screening.list } } : item)) };
       return { ...s, brokers: s.brokers.map((item) => (item.id === a.brokerId ? { ...item, screening: a.screening } : item)), audit: log(`Broker ${broker.name}: OFAC screening ${a.screening.status === "clear" ? "clear" : "found a possible match"}`) };
     }
     case "approveBroker": {
@@ -510,9 +539,27 @@ function apply(s: Book, a: BookAction): Book {
     }
     case "saveSource": return { ...s, sources: s.sources.some((x) => x.id === a.source.id) ? s.sources.map((x) => (x.id === a.source.id ? a.source : x)) : [...s.sources, a.source], audit: log(`Capital source saved: ${a.source.name}`) };
     case "removeSource": return { ...s, sources: s.sources.filter((x) => x.id !== a.id), audit: log("Capital source removed") };
+    case "firmScreened": {
+      const list = a.kind === "partner" ? s.partners : s.buyers;
+      const firm = list.find((x) => x.id === a.firmId);
+      if (!firm) return s;
+      // The same names with the same hits only moves the date it was confirmed, so a reviewed result stays decided.
+      const latest = firm.screening;
+      const screening = latest && sameResult(latest, a.screening) ? { ...latest, checkedAt: a.screening.at, list: a.screening.list } : a.screening;
+      const saved = list.map((x) => (x.id === a.firmId ? { ...x, screening } : x));
+      return { ...s, ...(a.kind === "partner" ? { partners: saved } : { buyers: saved }), ...(screening === a.screening ? { audit: log(`${firm.name}: OFAC screening ${a.screening.status === "clear" ? "clear" : "found a possible match"}`) } : {}) };
+    }
+    case "decideFirmScreening": {
+      const decide = <T extends { id: string; screening?: Screening }>(items: T[]) => items.map((x) => (x.id === a.firmId && x.screening?.id === a.screeningId && x.screening.status === "review" ? { ...x, screening: { ...x.screening, status: a.decision, decided: { by: a.by, at: now(), reason: a.reason.trim() } } } : x));
+      const name = (a.kind === "partner" ? s.partners : a.kind === "buyer" ? s.buyers : s.brokers).find((x) => x.id === a.firmId)?.name ?? a.firmId;
+      const changes = a.kind === "partner" ? { partners: decide(s.partners) } : a.kind === "buyer" ? { buyers: decide(s.buyers) } : { brokers: decide(s.brokers) };
+      return { ...s, ...changes, audit: log(`${name}: possible OFAC match ${a.decision === "cleared" ? "cleared" : "confirmed"} by ${a.by}`) };
+    }
     case "saveFirm": {
       const list = a.kind === "partner" ? s.partners : s.buyers;
-      const firm = { id: a.id, name: a.name, ndaSigned: list.find((x) => x.id === a.id)?.ndaSigned ?? false, buyBox: a.buyBox };
+      const had = list.find((x) => x.id === a.id);
+      const principals = (a.principals ?? had?.principals ?? []).map((name) => name.trim()).filter(Boolean);
+      const firm = { ...had, id: a.id, name: a.name, ndaSigned: had?.ndaSigned ?? false, buyBox: a.buyBox, ...(principals.length ? { principals } : { principals: undefined }) };
       const saved = list.some((x) => x.id === a.id) ? list.map((x) => (x.id === a.id ? firm : x)) : [...list, firm];
       return { ...s, ...(a.kind === "partner" ? { partners: saved } : { buyers: saved }), audit: log(`${a.kind === "partner" ? "Partner lender" : "Loan buyer"} saved: ${a.name}`) };
     }
@@ -678,9 +725,32 @@ function apply(s: Book, a: BookAction): Book {
     }
     case "saveInsurance": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
-      if (!a.carrier.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(a.expiresOn)) return s;
-      const insurance = { kind: a.kind, carrier: a.carrier.trim(), policy: a.policy.trim(), expiresOn: a.expiresOn, by: a.by, at: now() };
-      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, lienFile: { notices: [], ...d.lienFile, insurance } })), audit: log(`${deal.loanNumber}: ${a.kind === "builders_risk" ? "builder's risk" : "hazard"} policy on file to ${a.expiresOn}`) };
+      const input = { kind: a.kind, carrier: a.carrier.trim(), policy: a.policy.trim(), expiresOn: a.expiresOn, ...(a.coverage !== undefined ? { coverage: Math.round(a.coverage) } : {}), ...(a.windIncluded !== undefined && a.kind !== "windstorm" && a.kind !== "flood" ? { windIncluded: a.windIncluded } : {}), ...(a.mortgagee !== undefined ? { mortgagee: a.mortgagee } : {}) };
+      if (policyProblem(deal, input)) return s;
+      const policy: InsurancePolicy = { ...input, by: a.by, at: now() };
+      return { ...s, deals: upd(a.dealId, (d) => withInsurance(d, putPolicy(insuranceFileOf(d), policy))), audit: log(`${deal.loanNumber}: ${policyWord(a.kind)} policy on file to ${a.expiresOn}`) };
+    }
+    case "setFloodZone": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const flood = { sfha: a.sfha, zone: a.zone.trim().toUpperCase(), by: a.by, at: now() };
+      return { ...s, deals: upd(a.dealId, (d) => withInsurance(d, { ...insuranceFileOf(d), flood })), audit: log(`${deal.loanNumber}: flood zone recorded${flood.zone ? ` (${flood.zone})` : ""}, ${a.sfha ? "in" : "not in"} a special flood hazard area`) };
+    }
+    case "insuranceRenewal": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (renewalProblem(deal, a, serviceDay(s))) return s;
+      const renewal: InsuranceRenewal = { id: `ren${uid()}`, kind: a.kind, carrier: a.carrier.trim(), policy: a.policy.trim(), expiresOn: a.expiresOn, fileName: a.fileName, ...(a.documentId ? { documentId: a.documentId } : {}), by: a.by, at: now(), status: "submitted" };
+      return { ...s, deals: upd(a.dealId, (d) => { const file = insuranceFileOf(d); return withInsurance(d, { ...file, renewals: [...(file.renewals ?? []), renewal] }); }), audit: log(`${deal.loanNumber}: ${policyWord(a.kind)} renewal sent in, to ${a.expiresOn}`) };
+    }
+    case "decideRenewal": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const file = insuranceFileOf(deal);
+      const renewal = file.renewals?.find((item) => item.id === a.renewalId);
+      if (!renewal || renewal.status !== "submitted" || (!a.accept && !a.note.trim())) return s;
+      const decided = { ...renewal, status: a.accept ? ("accepted" as const) : ("returned" as const), decided: { by: a.by, at: now(), note: a.note.trim() } };
+      const renewals = (file.renewals ?? []).map((item) => (item.id === a.renewalId ? decided : item));
+      const policy: InsurancePolicy = { kind: renewal.kind, carrier: renewal.carrier, policy: renewal.policy, expiresOn: renewal.expiresOn, mortgagee: a.mortgagee, ...(a.coverage !== undefined ? { coverage: Math.round(a.coverage) } : {}), ...(a.windIncluded !== undefined && renewal.kind !== "windstorm" && renewal.kind !== "flood" ? { windIncluded: a.windIncluded } : {}), fileName: renewal.fileName, ...(renewal.documentId ? { documentId: renewal.documentId } : {}), by: a.by, at: now() };
+      const next = a.accept ? putPolicy({ ...file, renewals }, policy) : { ...file, renewals };
+      return { ...s, deals: upd(a.dealId, (d) => withInsurance(d, next)), audit: log(`${deal.loanNumber}: ${policyWord(renewal.kind)} renewal ${a.accept ? `accepted, on file to ${renewal.expiresOn}` : "sent back"}`) };
     }
     case "lienWaiverReceived": case "affidavitReceived": {
       const draw = s.draws.find((d) => d.id === a.drawId);
@@ -713,9 +783,11 @@ function apply(s: Book, a: BookAction): Book {
       return { ...s, draws: s.draws.map((d) => (d.id === a.drawId ? { ...d, override: { by: a.by, at: now(), reason: a.reason.trim(), holds } } : d)), audit: log(`${deal.loanNumber}: draw released past ${holds.length} lien-law hold${holds.length === 1 ? "" : "s"} by ${a.by}: ${a.reason.trim()}`) };
     }
     case "checkInsurance": {
-      const { remind, lapsed } = insuranceChecks(s.deals, a.asOf, SERVICED);
+      const { remind, lapsed } = insuranceChecks(s.deals, a.asOf);
       if (!remind.length && !lapsed.length) return s;
-      return { ...s, deals: s.deals.map((d) => (remind.includes(d.id) ? { ...d, lienFile: { ...d.lienFile!, insurance: { ...d.lienFile!.insurance!, remindedOn: a.asOf } } } : lapsed.includes(d.id) ? { ...d, lienFile: { ...d.lienFile!, insurance: { ...d.lienFile!.insurance!, lapseNoticeOn: a.asOf } } } : d)) };
+      const told = (dealId: string, policy: InsurancePolicy) => lapsed.some((item) => item.dealId === dealId && item.kind === policy.kind) ? { ...policy, lapseNoticeOn: a.asOf } : remind.some((item) => item.dealId === dealId && item.kind === policy.kind) ? { ...policy, remindedOn: a.asOf } : policy;
+      const touched = new Set([...remind, ...lapsed].map((item) => item.dealId));
+      return { ...s, deals: s.deals.map((d) => (touched.has(d.id) ? withInsurance(d, { ...insuranceFileOf(d), policies: policiesOf(d).map((policy) => told(d.id, policy)) }) : d)) };
     }
     case "markApplicationComplete": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;

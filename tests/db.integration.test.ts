@@ -717,11 +717,20 @@ describe("the nightly sanctions check", () => {
       const done = await runAction(staff, { t: "submitApp", app: demoBook().deals.find((deal) => deal.id === "d2")!.app, address: "400 List St", city: "Hollywood", zip: "33020", entityName: "Listed Holdings LLC", exitStrategy: "Sell", client: { name: "Johnny Doe" } });
       if ("error" in done) throw new Error(done.error);
       const dealId = done.after.deals[0].id;
+      // A partner lender whose only listed name is a person who signs in for it, not the firm or the owners entered.
+      await prisma.organization.create({ data: { id: "firm-x", name: "Xavier Capital LLC", type: "PARTNER_LENDER" } });
+      await prisma.user.create({ data: { email: "jd@xavier.example", name: "Jonathan Doe", passwordHash: "x", organizationId: "firm-x", roles: { create: [{ role: "PARTNER_LENDER" }] } } });
+      const box = demoBook().partners[0].buyBox;
+      const saved = await runAction(staff, { t: "saveFirm", kind: "partner", id: "firm-x", name: "Xavier Capital LLC", buyBox: box, principals: ["Xena Xavier"] });
+      if ("error" in saved) throw new Error(saved.error);
       const night = await lib.jobs.runJob("sanctions", new Date("2026-11-03T06:00:00Z"));
-      expect(night).toMatchObject({ skipped: false, summary: expect.stringMatching(/list of 6002 names \(updated\); screened \d+ loans; [1-9]\d* possible match/) });
+      expect(night).toMatchObject({ skipped: false, summary: expect.stringMatching(/list of 6002 names \(updated\); screened \d+ loans, \d+ partners and buyers and \d+ brokerages; [1-9]\d* possible match/) });
       const deal = (await readBook()).book.deals.find((item) => item.id === dealId)!;
       expect(deal.screenings?.at(-1)).toMatchObject({ status: "review", list: { names: 6002 } });
       expect(deal.screenings!.at(-1)!.subjects.find((subject) => subject.role === "borrower")!.hits[0]).toMatchObject({ uid: 90001, program: "SDGT" });
+      const firm = (await readBook()).book.partners.find((item) => item.id === "firm-x")!;
+      expect(firm.screening).toMatchObject({ status: "review", by: "Nightly sanctions check" });
+      expect(firm.screening!.subjects.map((subject) => [subject.name, subject.hits.map((hit) => hit.uid)])).toEqual([["Xavier Capital LLC", []], ["Xena Xavier", []], ["Jonathan Doe", [90001]]]);
 
       vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 503, text: async () => "" })));
       const failed = await lib.jobs.runJob("sanctions", new Date("2026-11-04T06:00:00Z"));
@@ -911,11 +920,14 @@ describe("draw protections", () => {
     const base = demoBook().deals.find((deal) => deal.id === "d12")!;
     const night = new Date("2026-11-10T06:00:00Z");
     const today = servicingDate(night);
-    const deal = { ...base, id: "insured-loan", loanNumber: "LH-6001", borrowerId: borrower.id, lienFile: { ...base.lienFile!, insurance: { ...base.lienFile!.insurance!, expiresOn: addDays(today, 12) } } };
+    // Saved before every loan had its own insurance file: the one policy sat in the lien file. The job moves it over.
+    const deal = { ...base, id: "insured-loan", loanNumber: "LH-6001", borrowerId: borrower.id, insurance: undefined, lienFile: { ...base.lienFile!, insurance: { kind: "builders_risk" as const, carrier: "Legacy Mutual", policy: "LM-1", expiresOn: addDays(today, 12), by: "Pat Processor", at: "2026-06-01T12:00:00Z" } } };
     await prisma.bookRecord.create({ data: { id: "deals:insured-loan", kind: "deals", data: JSON.parse(JSON.stringify(deal)) } });
     expect((await lib.jobs.runJob("insurance", night)).summary).toMatch(/insurance warnings/);
     expect(await prisma.notification.count({ where: { toEmail: "ida.insured@example.com", eventCode: "insurance.expiring" } })).toBe(1);
-    expect((await store.readBook()).book.deals.find((item) => item.id === "insured-loan")!.lienFile!.insurance!.remindedOn).toBe(today);
+    const moved = (await store.readBook()).book.deals.find((item) => item.id === "insured-loan")!;
+    expect(moved.insurance!.policies).toMatchObject([{ kind: "builders_risk", carrier: "Legacy Mutual", remindedOn: today }]);
+    expect(moved.lienFile!.insurance).toBeUndefined();
     await lib.jobs.runJob("insurance", new Date("2026-11-11T06:00:00Z"));
     expect(await prisma.notification.count({ where: { toEmail: "ida.insured@example.com", eventCode: "insurance.expiring" } })).toBe(1);
   });

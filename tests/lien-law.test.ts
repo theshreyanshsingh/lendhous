@@ -3,10 +3,10 @@ import { authorize, scopeBook, type Viewer } from "@/lib/book-access";
 import { parseAction } from "@/lib/book-actions";
 import { alertsFor } from "@/lib/book-alerts";
 import { demoBook, reducer, type Book, type BookAction } from "@/lib/book";
-import { defaultNocExpiry, drawHolds, insuranceChecks, insuranceProblem, isFinalDraw, nocProblems, partiesFor, unreleasedHolds, waiverCheckProblem } from "@/lib/lien-law";
+import { defaultNocExpiry, drawHolds, isFinalDraw, nocProblems, partiesFor, unreleasedHolds, waiverCheckProblem } from "@/lib/lien-law";
+import { insuranceChecks, insuranceHold, policiesOf } from "@/lib/insurance";
 import { DEMO_PARTNER_ID, type Deal, type LienFile } from "@/lib/mockData";
 import { can, type Permission } from "@/lib/permissions";
-import { SERVICED } from "@/lib/servicing";
 
 const person = (id: string, roles: Viewer["roleCodes"]): Viewer => ({ id, name: `${id} name`, roleCodes: roles });
 const check = (b: Book, viewer: Viewer, action: BookAction, trusted = false) => authorize(b, viewer, action, (permission: Permission, amountCents?: number) => can(viewer.roleCodes, permission, { amountCents, member: viewer }), trusted);
@@ -55,15 +55,15 @@ describe("the Notice of Commencement (Fla. Stat. 713.13)", () => {
 describe("insurance", () => {
   it("holds draws once a policy lapses, and warns 30 days ahead and on lapse, once each", () => {
     const b = demoBook();
-    expect(insuranceProblem(deal(b), TODAY)).toBeNull();
-    expect(insuranceProblem(deal(b, "d13"), TODAY)).toMatch(/lapsed on October 15, 2026/);
-    expect(insuranceProblem(withLien({ insurance: undefined }), TODAY)).toMatch(/No builder's risk or hazard policy/);
-    expect(insuranceChecks(b.deals, TODAY, SERVICED)).toEqual({ remind: ["d9"], lapsed: ["d13"] });
+    expect(insuranceHold(deal(b), TODAY)).toBeNull();
+    expect(insuranceHold(deal(b, "d13"), TODAY)).toMatch(/hazard \(property\) policy lapsed on October 15, 2026/);
+    expect(insuranceHold({ ...deal(b), insurance: { policies: [] } }, TODAY)).toMatch(/No builder's risk or hazard policy/);
+    expect(insuranceChecks(b.deals, TODAY)).toEqual({ remind: [{ dealId: "d9", kind: "hazard" }], lapsed: [{ dealId: "d13", kind: "hazard" }] });
     const nightly: BookAction = { t: "checkInsurance", asOf: TODAY };
     expect(check(b, owner, nightly)).toHaveProperty("error");
     const { after, action } = run(b, system, nightly, true);
-    expect(deal(after, "d9").lienFile!.insurance).toMatchObject({ remindedOn: TODAY });
-    expect(deal(after, "d13").lienFile!.insurance).toMatchObject({ lapseNoticeOn: TODAY });
+    expect(policiesOf(deal(after, "d9"))[0]).toMatchObject({ remindedOn: TODAY });
+    expect(policiesOf(deal(after, "d13"))[0]).toMatchObject({ lapseNoticeOn: TODAY });
     expect(alertsFor(b, after, action).map((alert) => [alert.to, alert.event])).toEqual([["borrower", "insurance.expiring"], ["team", "insurance.expiring"], ["borrower", "insurance.lapsed"], ["team", "insurance.lapsed"]]);
     expect(reducer(after, nightly)).toBe(after);
   });
@@ -132,7 +132,7 @@ describe("releasing a draw", () => {
     expect(alertsFor(b, after, action)).toMatchObject([{ to: "team", event: "lien.override" }]);
     expect(unreleasedHolds(deal(after), drawOf(after), TODAY)).toEqual([]);
     // A hold that appears afterwards isn't covered.
-    const lapsed = { ...after, deals: after.deals.map((d) => (d.id === "d2" ? { ...d, lienFile: { ...d.lienFile!, insurance: { ...d.lienFile!.insurance!, expiresOn: "2026-10-01" } } } : d)) };
+    const lapsed = { ...after, deals: after.deals.map((d) => (d.id === "d2" ? { ...d, insurance: { ...d.insurance!, policies: d.insurance!.policies.map((policy) => ({ ...policy, expiresOn: "2026-10-01" })) } } : d)) };
     expect(unreleasedHolds(deal(lapsed), drawOf(lapsed), TODAY)).toEqual([expect.stringMatching(/lapsed/)]);
     expect(check(lapsed, owner, { t: "releaseDraw", drawId: "draw-1" })).toHaveProperty("error");
     expect(run(after, owner, { t: "releaseDraw", drawId: "draw-1" }).after.draws.find((d) => d.id === "draw-1")!.status).toBe("funded");

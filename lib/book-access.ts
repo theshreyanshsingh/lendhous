@@ -4,7 +4,8 @@
 import type { RoleCode } from "@prisma/client";
 import { emptyBook, serviceDay, type Book, type BookAction } from "./book";
 import { verifyProblem, wireProblem, wireVerified } from "./closing";
-import { latestScreening, ofacBlocker } from "./ofac";
+import { firmHeld, firmOfacBlocker, latestScreening, ofacBlocker } from "./ofac";
+import { INSURED, openRenewals, policyProblem } from "./insurance";
 import { assignProblem } from "./loan-team";
 import { receivedProblem, sendToFor, sentProblem } from "./partner-funding";
 import { sponsorProblem, withSponsor } from "./credit";
@@ -20,7 +21,7 @@ import { evaluate } from "./engine";
 import { showcaseable } from "./showcase";
 import { exitPlanProblem } from "./exit-plans";
 import { agentProblem, OWN_DOC_ID, ownDocProblem } from "./borrower-docs";
-import type { Broker, Deal, Doc, LoanPayment, LoanSale, PayoffRequest } from "./mockData";
+import type { Broker, Deal, Doc, InvestorChecks, LoanPayment, LoanSale, PayoffRequest } from "./mockData";
 import { currentPricing, pricingPayload } from "./pricing-versions";
 import { ledger, servicingDate } from "./servicing";
 import { viewFor, type MemberAccess, type Permission } from "./permissions";
@@ -38,6 +39,11 @@ const ownFirm = (book: Book, firm: string, name: string): Broker => {
   const { screening: _screening, approved: _approved, ...rest } = broker;
   return rest;
 };
+
+/** A partner's or buyer's own firm as it sees it: not its sanctions screening or the owners the team entered. */
+const ownRecord = <T extends InvestorChecks>(firm: T): T => { const { screening: _screening, principals: _principals, ...rest } = firm; return rest as T; };
+// Said to a firm on hold without naming the sanctions list: the team explains it in person.
+const FIRM_HELD = "LendHous needs to finish a check on your firm first. Your contact at LendHous can tell you more.";
 
 const FUNDED = ["funded", "servicing_current", "servicing_delinquent", "matured", "default"];
 const BEFORE_CLOSING = ["submitted", "initial_review", "underwriting", "term_sheet_issued", "term_sheet_accepted", "conditions"];
@@ -73,7 +79,7 @@ const quietPayoff = (payoff: PayoffRequest): PayoffRequest => ({
 
 /** Removes what identifies the borrower, for a partner or buyer who hasn't closed on the loan. */
 function blind(deal: Deal): Deal {
-  return { ...deal, borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined, closure: undefined, defaults: undefined, extensions: undefined, paidOff: undefined, closing: undefined, wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, termSheets: undefined, pricingException: undefined, conditions: undefined, lienFile: undefined, completed: undefined, revenue: undefined, adverseAction: undefined, legalHold: undefined, propertyPhotos: undefined, partnerFunding: undefined, agents: undefined, ...quietPayments(deal, false) };
+  return { ...deal, insurance: undefined, borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined, closure: undefined, defaults: undefined, extensions: undefined, paidOff: undefined, closing: undefined, wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, termSheets: undefined, pricingException: undefined, conditions: undefined, lienFile: undefined, completed: undefined, revenue: undefined, adverseAction: undefined, legalHold: undefined, propertyPhotos: undefined, partnerFunding: undefined, agents: undefined, ...quietPayments(deal, false) };
 }
 
 /** The conditions that are the borrower's to meet (Spec B17), without who on the team handled them or why one was waived. */
@@ -100,9 +106,14 @@ const clientAgents = (deal: Deal): Partial<Deal> => ({
   agents: deal.agents && Object.fromEntries(Object.entries(deal.agents).map(([role, contact]) => [role, contact && { ...contact, by: "" }])),
 });
 
+/** The insurance file without who on the team entered or checked each part. */
+const clientInsurance = (deal: Deal): Partial<Deal> => ({
+  insurance: deal.insurance && { ...deal.insurance, policies: deal.insurance.policies.map((item) => ({ ...item, by: "" })), flood: deal.insurance.flood && { ...deal.insurance.flood, by: "" }, renewals: deal.insurance.renewals?.map((item) => ({ ...item, decided: item.decided && { ...item.decided, by: "" } })) },
+});
+
 /** What only the team sees on a loan it shares with a client. Wire instructions never leave the team: a client who sees them is a client who can be sent fake ones. */
 function forClient(deal: Deal): Deal {
-  return { ...deal, ...latestForClient(deal), ...clientConditions(deal), ...clientRecords(deal), ...clientAgents(deal), partnerFunding: undefined, allocations: [], teaserSentTo: [], route: undefined, capitalStatus: "not_started", contractorIsGtAffiliate: undefined, source: "", fundingApprovers: undefined, creditReview: undefined, ...quietPayments(deal, true), ...quietExits(deal), wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined };
+  return { ...deal, ...latestForClient(deal), ...clientConditions(deal), ...clientRecords(deal), ...clientAgents(deal), ...clientInsurance(deal), partnerFunding: undefined, allocations: [], teaserSentTo: [], route: undefined, capitalStatus: "not_started", contractorIsGtAffiliate: undefined, source: "", fundingApprovers: undefined, creditReview: undefined, ...quietPayments(deal, true), ...quietExits(deal), wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined };
 }
 
 /** The part of the book this account may see. Nothing else leaves the server. */
@@ -133,26 +144,26 @@ function scopeRecords(book: Book, viewer: Viewer): Book {
   if (view === "partner") {
     const me = book.partners.find((partner) => partner.id === firmOf(viewer));
     if (!me) return empty;
-    if (!me.ndaSigned) return { ...empty, partnerId: me.id, partners: [me] };
+    if (!me.ndaSigned) return { ...empty, partnerId: me.id, partners: [ownRecord(me)] };
     const mine = book.bids.filter((bid) => bid.partnerId === me.id);
     const won = new Set(mine.filter((bid) => bid.status === "accepted").map((bid) => bid.dealId));
     const deals = book.deals.filter((deal) => deal.teaserSentTo.includes(me.id));
     // Someone else's accepted bid only says the deal is gone: no firm, no price.
     const taken = book.bids.filter((bid) => bid.partnerId !== me.id && bid.status === "accepted" && deals.some((deal) => deal.id === bid.dealId)).map((bid) => ({ ...bid, partnerId: "", pct: 0, lenderRate: 0, lenderPoints: 0, conditions: "" }));
-    return { ...empty, partnerId: me.id, partners: [me], bids: [...mine, ...taken], deals: deals.map((deal) => (won.has(deal.id) ? { ...forClient(deal), teaserSentTo: [me.id], contractorIsGtAffiliate: deal.contractorIsGtAffiliate, partnerFunding: deal.partnerFunding?.partnerId === me.id ? { ...deal.partnerFunding, sendTo: sendToFor(deal) } : undefined } : { ...blind(deal), teaserSentTo: [me.id] })) };
+    return { ...empty, partnerId: me.id, partners: [ownRecord(me)], bids: [...mine, ...taken], deals: deals.map((deal) => (won.has(deal.id) ? { ...forClient(deal), teaserSentTo: [me.id], contractorIsGtAffiliate: deal.contractorIsGtAffiliate, partnerFunding: deal.partnerFunding?.partnerId === me.id ? { ...deal.partnerFunding, sendTo: sendToFor(deal) } : undefined } : { ...blind(deal), teaserSentTo: [me.id] })) };
   }
 
   if (view === "buyer") {
     const me = book.buyers.find((buyer) => buyer.id === firmOf(viewer));
     if (!me) return empty;
-    if (!me.ndaSigned) return { ...empty, buyerId: me.id, buyers: [me] };
+    if (!me.ndaSigned) return { ...empty, buyerId: me.id, buyers: [ownRecord(me)] };
     const offers = book.offers.filter((offer) => offer.buyerId === me.id);
     const offered = new Set(offers.map((offer) => offer.saleId));
     const hideBuyer = (sale: LoanSale): LoanSale => (sale.soldTo === me.id ? sale : { ...sale, soldTo: sale.soldTo ? "another buyer" : undefined, soldPct: undefined, soldAt: undefined });
     const sales = book.sales.filter((sale) => sale.status === "listed" || sale.soldTo === me.id || offered.has(sale.id));
     const owned = new Set(sales.filter((sale) => sale.soldTo === me.id).map((sale) => sale.dealId));
     const deals = book.deals.filter((deal) => sales.some((sale) => sale.dealId === deal.id));
-    return { ...empty, buyerId: me.id, buyers: [me], offers, sales: sales.map(hideBuyer), deals: deals.map((deal) => (owned.has(deal.id) ? forClient(deal) : blind(deal))) };
+    return { ...empty, buyerId: me.id, buyers: [ownRecord(me)], offers, sales: sales.map(hideBuyer), deals: deals.map((deal) => (owned.has(deal.id) ? forClient(deal) : blind(deal))) };
   }
   return empty;
 }
@@ -224,6 +235,7 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       const { repeatBorrower: _mark, ...counted } = action.app;
       if (view === "borrower") return ok({ ...action, app: counted, client: { name: viewer.name, borrowerId: viewer.id }, source: "web_quote" });
       if (view === "broker" && !canSendDeals(book.brokers.find((item) => item.id === firm))) return no("LendHous approves a brokerage before it sends deals. Sign the broker agreement on your Broker page; you'll hear when it's approved.");
+      if (view === "broker" && firmHeld(book.brokers.find((item) => item.id === firm))) return no(FIRM_HELD);
       if (view === "broker") return action.client?.name?.trim() ? ok({ ...action, app: counted, client: { name: action.client.name.trim(), brokerId: firm, brokerPoints: Math.min(5, Math.max(0, action.client.brokerPoints ?? 0)) }, source: "broker" }) : no("Enter your client's name.");
       if (staff && allowed("view_pipeline")) return action.client?.name?.trim() ? ok({ ...action, client: { name: action.client.name.trim(), borrowerId: action.client.borrowerId }, source: action.source ?? "staff" }) : no("Enter the borrower's name.");
       return no(NOT_ALLOWED);
@@ -376,6 +388,9 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
     case "partnerFundsReceived": {
       const deal = dealOf(action.dealId);
       if (!deal) return no(GONE);
+      // Money taken in from a firm is checked like money paid out: a clean screening from the last few days.
+      const screened = firmOfacBlocker(book.partners.find((item) => item.id === deal.partnerFunding?.partnerId), serviceDay(book));
+      if (screened) return no(`${screened}.`);
       const problem = receivedProblem(deal);
       return problem ? no(problem) : staffOnly("route_capital", "manage_capital");
     }
@@ -385,6 +400,15 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
     case "brokerScreened":
       if (!trusted) return no(NOT_ALLOWED);
       return book.brokers.some((item) => item.id === action.brokerId) ? ok() : no(GONE);
+    case "firmScreened":
+      if (!trusted) return no(NOT_ALLOWED);
+      return (action.kind === "partner" ? book.partners : book.buyers).some((item) => item.id === action.firmId) ? ok() : no(GONE);
+    case "decideFirmScreening": {
+      const firmRecord = (action.kind === "partner" ? book.partners : action.kind === "buyer" ? book.buyers : book.brokers).find((item) => item.id === action.firmId);
+      if (firmRecord?.screening?.id !== action.screeningId || firmRecord.screening.status !== "review") return no("That screening has no open match to review.");
+      if (!action.reason.trim()) return no("Say what you compared: dates of birth, addresses, nationality or the listing's details.");
+      return staffOnlyAllowed("clear_ofac") ? ok({ ...action, reason: action.reason.trim(), by: viewer.name }) : no(NOT_ALLOWED);
+    }
     case "approveBroker": {
       const problem = approveProblem(book.brokers.find((item) => item.id === action.brokerId), action.reason);
       return problem ? no(problem) : staffOnlyAllowed("manage_brokers") ? ok({ ...action, by: viewer.name }) : no(NOT_ALLOWED);
@@ -446,10 +470,17 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
     case "route": case "sendTeaser":
       if (!dealOf(action.dealId)) return no(GONE);
       if (FUNDED.includes(dealOf(action.dealId)!.status)) return no("This loan is already funded.");
+      if (action.t === "sendTeaser") {
+        const held = book.partners.filter((item) => action.partnerIds.includes(item.id) && firmHeld(item));
+        if (held.length) return no(`${held.map((item) => item.name).join(", ")} ${held.length === 1 ? "has" : "have"} a possible or confirmed OFAC match. Nothing goes to them until it's reviewed.`);
+      }
       return staffOnly("route_capital");
     case "acceptBid": {
       const bid = book.bids.find((item) => item.id === action.bidId);
       if (!bid || bid.status !== "submitted") return no("That bid is no longer open.");
+      // A partner's commitment is money LendHous takes, so the firm is screened first.
+      const screened = firmOfacBlocker(book.partners.find((item) => item.id === bid.partnerId));
+      if (screened) return no(`${screened}.`);
       return staffOnly("route_capital");
     }
     case "commit":
@@ -464,6 +495,7 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       const me = book.partners.find((partner) => partner.id === firm);
       const deal = dealOf(action.bid.dealId);
       if (view !== "partner" || !me?.ndaSigned || !deal?.teaserSentTo.includes(me.id)) return no(NOT_ALLOWED);
+      if (firmHeld(me)) return no(FIRM_HELD);
       if (book.bids.some((bid) => bid.dealId === deal.id && bid.partnerId === me.id)) return no("You've already responded to this deal.");
       return ok({ ...action, bid: { ...action.bid, partnerId: me.id } });
     }
@@ -487,6 +519,7 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
     case "offerLoan": {
       const me = book.buyers.find((buyer) => buyer.id === firm);
       if (view !== "buyer" || !me?.ndaSigned) return no(NOT_ALLOWED);
+      if (firmHeld(me)) return no(FIRM_HELD);
       if (book.sales.find((sale) => sale.id === action.saleId)?.status !== "listed") return no("That loan is no longer for sale.");
       if (book.offers.some((offer) => offer.saleId === action.saleId && offer.buyerId === me.id && offer.status === "submitted")) return no("You already have an offer on this loan.");
       return ok({ ...action, buyerId: me.id });
@@ -495,6 +528,9 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       const offer = book.offers.find((item) => item.id === action.offerId);
       if (!offer || offer.status !== "submitted") return no("That offer is no longer open.");
       if (book.sales.find((sale) => sale.id === offer.saleId)?.status !== "listed") return no("That loan is no longer for sale.");
+      // Selling a loan takes the buyer's money: a clean screening from the last few days.
+      const screened = action.accept ? firmOfacBlocker(book.buyers.find((item) => item.id === offer.buyerId), serviceDay(book)) : null;
+      if (screened) return no(`${screened}.`);
       return staffOnly("route_capital", "manage_capital");
     }
 
@@ -636,7 +672,23 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       const holds = action.t === "releaseDraw" ? unreleasedHolds(dealOf(draw.dealId)!, draw, serviceDay(book)) : [];
       return holds.length ? no(holds[0]) : staffOnly("approve_draw");
     }
-    case "saveLienFile": case "addNoticeToOwner": case "saveInsurance": {
+    case "saveInsurance": case "setFloodZone": case "decideRenewal": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      if (!staffOnlyAllowed("manage_conditions", "service_loans", "approve_draw", "assign_inspection")) return no(NOT_ALLOWED);
+      if (!INSURED.includes(deal.status)) return no("The insurance file is kept from an accepted term sheet until the loan is paid off.");
+      if (action.t === "saveInsurance") { const refused = policyProblem(deal, action); if (refused) return no(refused); }
+      if (action.t === "decideRenewal") {
+        if (!openRenewals(deal).some((item) => item.id === action.renewalId)) return no("That renewal has already been looked at.");
+        if (!action.accept && !action.note.trim()) return no("Say what's wrong with it, so the borrower knows what to send.");
+      }
+      return ok({ ...action, by: viewer.name });
+    }
+    case "insuranceRenewal":
+      // The upload route sends this once the file is stored, after checking the uploader is the borrower or the team.
+      if (!trusted) return no("Upload the policy itself to send it.");
+      return dealOf(action.dealId) ? ok() : no(GONE);
+    case "saveLienFile": case "addNoticeToOwner": {
       const deal = dealOf(action.dealId);
       if (!deal) return no(GONE);
       if (!staffOnlyAllowed("approve_draw", "assign_inspection", "manage_conditions")) return no(NOT_ALLOWED);
@@ -644,7 +696,6 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       const today = serviceDay(book);
       if (action.t === "saveLienFile") { const refused = lienFileProblem(action, today); if (refused) return no(refused); }
       if (action.t === "addNoticeToOwner" && (!action.lienor.trim() || !/^\d{4}-\d{2}-\d{2}$/.test(action.servedOn) || action.servedOn > today)) return no("Add who served it and the day it was served, today or earlier.");
-      if (action.t === "saveInsurance" && !action.carrier.trim()) return no("Add the insurance company.");
       return ok({ ...action, by: viewer.name });
     }
     case "lienWaiverReceived": case "affidavitReceived": case "checkInsurance":

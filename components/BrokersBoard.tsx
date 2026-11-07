@@ -1,5 +1,6 @@
 "use client";
 import { EmptyState } from "@/components/EmptyState";
+import { FirmMatchReview } from "@/components/FirmScreening";
 import { useEffect, useState } from "react";
 import { brokerTaxForms, screenBroker } from "@/actions/brokers";
 import { Badge, Section, usd } from "@/components/ui";
@@ -56,6 +57,8 @@ export function BrokersBoard() {
                   )}{!local && <button type="button" className="ml-2 text-link underline underline-offset-2" data-testid="broker-rescreen" onClick={() => void rescreen(broker.id)}>screen again</button>}</dd>
                 </dl>
               ) : <p className="text-muted-foreground">Hasn&apos;t signed the broker agreement yet.</p>}
+              {/* A possible match found after approval, by the nightly check: the brokerage can't send deals until it's reviewed. */}
+              {broker.status === "approved" && broker.screening?.status === "review" && <FirmMatchReview kind="broker" firmId={broker.id} screening={broker.screening} />}
               {broker.status === "approved" && broker.referralCode && <p className="text-xs text-muted-foreground">Referral link: <span className="font-mono">{referralPath(broker.referralCode)}</span>{broker.approved ? ` · approved by ${broker.approved.by} on ${shortDay(broker.approved.at)}` : ""}</p>}
               {broker.status === "suspended" && <p className="text-xs text-bad">Suspended by {broker.suspended?.by} on {broker.suspended ? shortDay(broker.suspended.at) : ""}: {broker.suspended?.reason}</p>}
               {fees.length > 0 && (

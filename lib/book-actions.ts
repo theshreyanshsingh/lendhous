@@ -10,6 +10,7 @@ const optionalMoney = money.optional();
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const product = z.enum(["fix_flip", "bridge", "ground_up", "dscr"]);
 const method = z.enum(["wire", "ach", "check", "other"]);
+const policyKind = z.enum(["hazard", "windstorm", "flood", "builders_risk"]);
 
 const application = z.object({
   product,
@@ -86,7 +87,8 @@ const schema = z.discriminatedUnion("t", [
   z.object({ t: z.literal("addDocRequest"), dealId: id, name: text(200).min(1), category: text(60).min(1) }),
   z.object({ t: z.literal("saveSource"), source: z.object({ id, name: text(120).min(1), type: z.enum(["gt_balance_sheet", "gt_credit_line", "partner_lender"]), commitment: money, baseDeployed: money, baseUnfunded: money, lineUndrawn: optionalMoney }) }),
   z.object({ t: z.literal("removeSource"), id }),
-  z.object({ t: z.literal("saveFirm"), kind: z.enum(["partner", "buyer"]), id, name: text(120).min(1), buyBox }),
+  z.object({ t: z.literal("saveFirm"), kind: z.enum(["partner", "buyer"]), id, name: text(120).min(1), buyBox, principals: z.array(text(160)).max(20).optional() }),
+  z.object({ t: z.literal("decideFirmScreening"), kind: z.enum(["partner", "buyer", "broker"]), firmId: id, screeningId: id, decision: z.enum(["cleared", "match"]), reason: text(1000).min(1), by: z.string().max(120) }),
   z.object({ t: z.literal("docStatus"), dealId: id, docId: id, status: z.enum(["requested", "uploaded", "in_review", "accepted", "rejected", "waived"]), note: text(300).optional() }),
   z.object({ t: z.literal("addOwnDoc"), dealId: id, docId: id, name: text(120), by: z.string().max(120) }),
   z.object({ t: z.literal("setAgent"), dealId: id, role: z.enum(["title", "insurance"]), by: z.string().max(120), contact: z.object({ name: text(160), company: text(160), email: text(160), phone: text(160) }) }),
@@ -126,7 +128,9 @@ const schema = z.discriminatedUnion("t", [
   z.object({ t: z.literal("releaseDraw"), drawId: id }),
   z.object({ t: z.literal("saveLienFile"), dealId: id, contractor: text(160), mortgageRecordedOn: date.optional(), by: z.string().max(120), noc: z.object({ recordedOn: date, reference: text(200), expiresOn: date, commencedOn: date.optional(), lenderNamed: z.boolean(), mortgageFirst: z.boolean().optional() }).optional() }),
   z.object({ t: z.literal("addNoticeToOwner"), dealId: id, lienor: text(160).min(1), role: z.enum(["subcontractor", "supplier", "sub_subcontractor", "other"]), servedOn: date, by: z.string().max(120) }),
-  z.object({ t: z.literal("saveInsurance"), dealId: id, kind: z.enum(["builders_risk", "hazard"]), carrier: text(160).min(1), policy: text(120), expiresOn: date, by: z.string().max(120) }),
+  z.object({ t: z.literal("saveInsurance"), dealId: id, kind: policyKind, carrier: text(160).min(1), policy: text(120), expiresOn: date, coverage: optionalMoney, windIncluded: z.boolean().optional(), mortgagee: z.boolean().optional(), by: z.string().max(120) }),
+  z.object({ t: z.literal("setFloodZone"), dealId: id, sfha: z.boolean(), zone: text(12), by: z.string().max(120) }),
+  z.object({ t: z.literal("decideRenewal"), dealId: id, renewalId: id, accept: z.boolean(), mortgagee: z.boolean(), windIncluded: z.boolean().optional(), coverage: optionalMoney, note: text(1000), by: z.string().max(120) }),
   z.object({ t: z.literal("checkLienWaiver"), drawId: id, waiverId: id, amount: z.number().positive().max(100_000_000), throughOn: date.optional(), conditional: z.boolean(), by: z.string().max(120) }),
   z.object({ t: z.literal("rejectLienWaiver"), drawId: id, waiverId: id, reason: text(500).min(1), by: z.string().max(120) }),
   z.object({ t: z.literal("checkAffidavit"), drawId: id, unpaidLienors: z.boolean(), by: z.string().max(120) }),
@@ -163,7 +167,7 @@ const schema = z.discriminatedUnion("t", [
 
 /**
  * The action if it is well formed, or null. assignLoanTeam, brokerApplied, referLoan, uploadDoc, conditionFile, addPropertyPhotos, lienWaiverReceived, affidavitReceived, recordAdverseNotice, linkBorrower,
- * settleLoans, checkTermSheets, checkInsurance, submitPayoffRequest and payoffLetterDelivered aren't here: only the server
+ * settleLoans, checkTermSheets, checkInsurance, insuranceRenewal, firmScreened, submitPayoffRequest and payoffLetterDelivered aren't here: only the server
  * starts those.
  */
 export function parseAction(raw: unknown): BookAction | null {

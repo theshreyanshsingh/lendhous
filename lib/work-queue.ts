@@ -5,7 +5,8 @@ import { activeWire, wireVerified } from "./closing";
 import { lienReleaseOpen, openExtension, PRE_FUNDING } from "./loan-exits";
 import { isMine, needsOfficer } from "./loan-team";
 import type { Deal } from "./mockData";
-import { latestScreening } from "./ofac";
+import { firmHeld, latestScreening } from "./ofac";
+import { insuranceLapsed, openRenewals } from "./insurance";
 import { dueOf, staleLetter } from "./payoffs";
 import { noticeOwed } from "./adverse-action";
 import { needsExitAnswer } from "./exit-plans";
@@ -47,6 +48,9 @@ export function workQueue(book: Book, viewer: { id: string; email?: string }, no
     if (activeWire(deal) && !wireVerified(deal) && PRE_FUNDING.includes(deal.status)) add({ key: `wire:${deal.id}`, label: "Verify the wire instructions by phone", href: tab(deal, "Closing"), deal, priority: 3 });
     if (deal.status === "closing" && (deal.fundingApprovers?.length ?? 0) < 2) add({ key: `funding:${deal.id}`, label: "Approve the funding", href: tab(deal), deal, priority: 4 });
     if (deal.paymentsLate) add({ key: `late:${deal.id}`, label: "Payment past due", href: tab(deal, "Servicing"), deal, priority: 5 });
+    if (insuranceLapsed(deal, today)) add({ key: `insurance:${deal.id}`, label: "Insurance lapsed: get the renewal", href: tab(deal, "Servicing"), deal, priority: 5 });
+    const renewals = openRenewals(deal);
+    if (renewals.length) add({ key: `renewal:${deal.id}`, label: `Check ${renewals.length === 1 ? "an insurance renewal" : `${renewals.length} insurance renewals`}`, href: tab(deal, "Servicing"), deal, since: oldest(renewals.map((item) => item.at)), priority: 12 });
     if (deal.status === "matured") add({ key: `matured:${deal.id}`, label: "Past maturity", href: tab(deal, "Servicing"), deal, priority: 6 });
     else if (needsExitAnswer(deal)) add({ key: `exit:${deal.id}`, label: "Call about the exit plan: no answer yet", href: tab(deal, "Servicing"), deal, priority: 6 });
     if (openExtension(deal)) add({ key: `extension:${deal.id}`, label: "Decide the extension request", href: tab(deal, "Servicing"), deal, priority: 7 });
@@ -81,6 +85,10 @@ export function workQueue(book: Book, viewer: { id: string; email?: string }, no
     if (!deal || draw.status === "funded" || draw.status === "rejected") continue;
     const deciding = draw.status !== "approved";
     add({ key: `draw:${draw.id}`, label: deciding ? "Decide the draw request" : "Release the approved draw", href: "/admin/draws", deal, since: draw.requestedAt, clock: deciding ? clockOf(draw.requestedAt, now, targets.drawDecision) : undefined, priority: 11 });
+  }
+  // Partner lenders, loan buyers and brokerages with a possible sanctions match: nothing moves with them until it's reviewed.
+  for (const [kind, firms, href] of [["partner", book.partners, "/admin/partners"], ["buyer", book.buyers, "/admin/partners"], ["broker", book.brokers, "/admin/brokers"]] as const) {
+    for (const firm of firms) if (firmHeld(firm)) items.push({ key: `ofac-${kind}:${firm.id}`, label: `Review a possible sanctions match: ${firm.name}`, href, mine: false, priority: 2 });
   }
   if (newLeads) items.push({ key: "leads", label: `Answer ${newLeads} quote request${newLeads === 1 ? "" : "s"}`, href: "/admin/leads", mine: false, priority: 17 });
   const offers = book.offers.filter((offer) => offer.status === "submitted").length;

@@ -4,6 +4,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { dispatchBook, refreshBook, uploadLoanFile } from "@/actions/book";
 import { demoBook, emptyBook, reducer, type Book, type BookAction } from "./book";
 import { adoptPricing, type PricingPayload } from "./pricing-versions";
+import type { PolicyKind } from "./mockData";
 
 // Demo seats share one demo book in the browser, so a bid placed as the partner seat shows up for the staff seats.
 const KEY = "lendhous-demo-v4";
@@ -19,6 +20,8 @@ type Store = {
   uploadCondition: (dealId: string, conditionId: string, file: File) => Promise<boolean>;
   uploadLienFile: (dealId: string, drawId: string, party: { key: string; kind: "progress" | "final" } | "affidavit", file: File) => Promise<boolean>;
   uploadPropertyPhoto: (dealId: string, file: File) => Promise<boolean>;
+  /** A renewed insurance policy for the team to check. Demo seats keep the name only. */
+  uploadRenewal: (dealId: string, renewal: { kind: PolicyKind; carrier: string; policy: string; expiresOn: string }, file: File) => Promise<boolean>;
   /** Stores one draw photo and gives back its id. Demo and sample data keep no file, so they get null. */
   uploadPhoto: (dealId: string, file: File) => Promise<string | null>;
   /** Takes in a reply from a server action that changed the book some other way, like starting a loan. */
@@ -145,6 +148,13 @@ export function StoreProvider({ demo, accountId, viewerName, viewerEmail = "", i
     return !(await send(form)).error;
   }, [isLocal, send, viewerName]);
 
+  const uploadRenewal = useCallback(async (dealId: string, renewal: { kind: PolicyKind; carrier: string; policy: string; expiresOn: string }, file: File) => {
+    if (isLocal) { local({ t: "insuranceRenewal", dealId, ...renewal, fileName: file.name, by: viewerName }); return true; }
+    const form = new FormData();
+    form.set("dealId", dealId); form.set("renewal", "1"); form.set("kind", renewal.kind); form.set("carrier", renewal.carrier); form.set("policy", renewal.policy); form.set("expiresOn", renewal.expiresOn); form.set("file", file);
+    return !(await send(form)).error;
+  }, [isLocal, send, viewerName]);
+
   const uploadPhoto = useCallback(async (dealId: string, file: File) => {
     if (isLocal) return null;
     const form = new FormData();
@@ -158,7 +168,7 @@ export function StoreProvider({ demo, accountId, viewerName, viewerEmail = "", i
   }, []);
 
   const viewer = useMemo(() => ({ id: accountId, email: viewerEmail }), [accountId, viewerEmail]);
-  const value = useMemo(() => ({ s, dispatch, uploadDoc, uploadCondition, uploadLienFile, uploadPropertyPhoto, uploadPhoto, applyReply, newLeads, local: isLocal, demo, streetView: streetView && !isLocal, targets, paymentInstructions, viewerName, viewer, error, clearError: () => setError("") }), [s, dispatch, uploadDoc, uploadCondition, uploadLienFile, uploadPropertyPhoto, uploadPhoto, applyReply, newLeads, isLocal, demo, streetView, targets, paymentInstructions, viewerName, viewer, error]);
+  const value = useMemo(() => ({ s, dispatch, uploadDoc, uploadCondition, uploadLienFile, uploadPropertyPhoto, uploadRenewal, uploadPhoto, applyReply, newLeads, local: isLocal, demo, streetView: streetView && !isLocal, targets, paymentInstructions, viewerName, viewer, error, clearError: () => setError("") }), [s, dispatch, uploadDoc, uploadCondition, uploadLienFile, uploadPropertyPhoto, uploadRenewal, uploadPhoto, applyReply, newLeads, isLocal, demo, streetView, targets, paymentInstructions, viewerName, viewer, error]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 export function useStore() { const c = useContext(Ctx); if (!c) throw new Error("no store"); return c; }

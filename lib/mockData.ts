@@ -67,8 +67,10 @@ export interface Deal {
   termSheets?: TermSheet[];
   /** What has to happen before the loan documents, before funding, and after closing (Spec A10, B17). */
   conditions?: LoanCondition[];
-  /** Florida construction lien protections for draws (Fla. Stat. ch. 713): the contractor, the Notice of Commencement, notices to owner, insurance. */
+  /** Florida construction lien protections for draws (Fla. Stat. ch. 713): the contractor, the Notice of Commencement, notices to owner. */
   lienFile?: LienFile;
+  /** The property's insurance on every loan, the flood zone that decides whether flood cover is needed, and renewals sent in (lib/insurance.ts). */
+  insurance?: InsuranceFile;
   /** When the application became complete, which starts Reg B's 30 days (12 CFR 1002.9(a)(1)). */
   completed?: { at: string; on: string; by: string };
   /** The borrowing business's gross revenue in its last fiscal year, which decides which notice rule applies (1002.9(a)(3)). */
@@ -221,7 +223,36 @@ export interface LienFile {
   /** When the mortgage was recorded, if the title company's link didn't record it. */
   mortgageRecordedOn?: string;
   notices: NoticeToOwner[];
+  /** Where the one policy lived before every loan had its own insurance file. Read by policiesOf, moved out on the next save or nightly check. */
   insurance?: { kind: "builders_risk" | "hazard"; carrier: string; policy: string; expiresOn: string; by: string; at: string; remindedOn?: string; lapseNoticeOn?: string };
+}
+export type PolicyKind = "hazard" | "windstorm" | "flood" | "builders_risk";
+/** One policy on the property, the newest of its kind. */
+export interface InsurancePolicy {
+  kind: PolicyKind; carrier: string; policy: string; expiresOn: string;
+  /** Dwelling (or building) coverage in dollars, if it was entered. */
+  coverage?: number;
+  /** A hazard or builder's risk policy that covers windstorm too, so no separate wind policy is needed. */
+  windIncluded?: boolean;
+  /** LendHous is named as mortgagee and loss payee (ISAOA/ATIMA). Undefined on policies saved before this was asked. */
+  mortgagee?: boolean;
+  fileName?: string; documentId?: string;
+  by: string; at: string;
+  /** When the borrower and the team were told it ends soon, and that it lapsed. */
+  remindedOn?: string; lapseNoticeOn?: string;
+}
+/** A renewed or replacement policy the borrower sent in, for the team to check before it counts. */
+export interface InsuranceRenewal {
+  id: string; kind: PolicyKind; carrier: string; policy: string; expiresOn: string;
+  fileName: string; documentId?: string; by: string; at: string;
+  status: "submitted" | "accepted" | "returned";
+  decided?: { by: string; at: string; note: string };
+}
+export interface InsuranceFile {
+  policies: InsurancePolicy[];
+  /** Whether the property is in a special flood hazard area (FEMA zones A and V), which makes flood insurance required. */
+  flood?: { sfha: boolean; zone: string; by: string; at: string };
+  renewals?: InsuranceRenewal[];
 }
 /** A notice to owner from a lienor not hired by the borrower directly (713.06(2)). Each one needs a waiver for every draw after it. */
 export interface NoticeToOwner { id: string; lienor: string; role: "subcontractor" | "supplier" | "sub_subcontractor" | "other"; servedOn: string; by: string; at: string }
@@ -324,10 +355,15 @@ export interface Broker {
   docs?: { kind: "articles" | "good_standing"; documentId: string; fileName: string; at: string }[];
 }
 export interface CapitalSource { id: string; name: string; type: "gt_balance_sheet" | "gt_credit_line" | "partner_lender"; commitment: number; baseDeployed: number; baseUnfunded: number; lineUndrawn?: number; orgId?: string }
-export interface Partner { id: string; name: string; ndaSigned: boolean; buyBox: BuyBox }
+/** A firm whose money LendHous takes: its owners and officers as the team entered them, and its sanctions screening (lib/ofac.ts). */
+export interface InvestorChecks {
+  principals?: string[];
+  screening?: Screening;
+}
+export interface Partner extends InvestorChecks { id: string; name: string; ndaSigned: boolean; buyBox: BuyBox }
 export interface Bid { id: string; dealId: string; partnerId: string; pct: number; lenderRate: number; lenderPoints: number; conditions: string; status: "submitted" | "accepted" | "declined" | "withdrawn"; type: "bid" | "accept_as_offered"; at: string }
 /** A firm that buys funded loans from LendHous. Partner lenders fund deals before closing; these buy them after. */
-export interface LoanBuyer { id: string; name: string; ndaSigned: boolean; buyBox: BuyBox }
+export interface LoanBuyer extends InvestorChecks { id: string; name: string; ndaSigned: boolean; buyBox: BuyBox }
 /** A funded loan LendHous has put up for sale. Prices are a percent of the unpaid balance (100 = par). */
 export interface LoanSale { id: string; dealId: string; askPct: number; listedAt: string; status: "listed" | "sold" | "withdrawn"; soldTo?: string; soldPct?: number; soldAt?: string }
 export interface LoanOffer { id: string; saleId: string; buyerId: string; pricePct: number; note: string; atAsk: boolean; status: "submitted" | "accepted" | "declined"; at: string }
