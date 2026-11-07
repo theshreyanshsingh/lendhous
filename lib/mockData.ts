@@ -123,6 +123,10 @@ export interface Deal {
   brokerFeePaid?: { amount: number; on: string; reference: string; by: string; at: string };
   /** The broker whose referral link brought this borrower, and when (lib/brokers.ts). */
   referredBy?: { brokerId: string; on: string };
+  /** Where the property is on the map, from the Census Bureau's geocoder (lib/geocode.ts), for checking photos' locations. */
+  geo?: { lat: number; lng: number; at: string };
+  /** The property's last recorded sale, entered by the processor, for the price-jump check (lib/risk.ts). */
+  lastSale?: { price: number; on: string; by: string; at: string };
   /** The team's updates on the loan for the partners and buyers who hold it, and a workout it declared (lib/investor-updates.ts). */
   investorUpdates?: { id: string; text: string; by: string; at: string }[];
   workout?: { since: string; note: string; by: string; at: string };
@@ -237,6 +241,8 @@ export interface DrawRequest {
   override?: { by: string; at: string; reason: string; holds: string[] };
   /** When it was approved or turned down, which stops its clock (lib/sla.ts). */
   decidedAt?: string;
+  /** Who recorded the inspection, and how: the team, or a third-party inspector through their link (lib/photo-checks.ts). */
+  inspection?: { by: string; at: string; requestId?: string; notes: string };
   /** The contractor's sign-off through their photo link that the work on these lines is done as the photos show. */
   contractorSigned?: { name: string; at: string; requestId: string };
 }
@@ -287,7 +293,7 @@ export interface LienWaiver {
 }
 export interface FinalAffidavit { fileName: string; documentId?: string; sentBy: string; sentAt: string; checked?: { by: string; at: string; unpaidLienors: boolean } }
 export interface RequestPhoto { id: string; scopeId: string; shot: string; name: string; at: string; takenAt?: string; lat?: number; lng?: number }
-export interface PhotoRequest { id: string; dealId: string; drawId?: string; to: string; email?: string; who: "contractor" | "borrower"; scopeIds: string[]; sentBy: string; byTeam?: boolean; sentAt: string; expiresAt: string; status: "open" | "received" | "off"; finishedAt?: string; finishedBy?: string; note?: string; photos: RequestPhoto[] }
+export interface PhotoRequest { id: string; dealId: string; drawId?: string; to: string; email?: string; who: "contractor" | "borrower" | "inspector"; scopeIds: string[]; sentBy: string; byTeam?: boolean; sentAt: string; expiresAt: string; status: "open" | "received" | "off"; finishedAt?: string; finishedBy?: string; note?: string; photos: RequestPhoto[] }
 export type ConditionCategory = "prior_to_docs" | "prior_to_funding" | "post_closing";
 export type ConditionOwner = "borrower" | "processor" | "underwriter" | "title";
 /** A standard condition in the library (Spec A23). Loans get the ones for their product when they start clearing conditions. */
@@ -508,9 +514,10 @@ export const brokers: Broker[] = [{
 // What a finished photo link looks like. The demo keeps no files, so these show as placeholders.
 export const seedPhotoRequests: PhotoRequest[] = [
   { id: "photos-1", dealId: "d2", drawId: "draw-1", to: "Mo Mock Builders (FAKE)", who: "contractor", scopeIds: ["kitchen", "flooring"], sentBy: "Olivia Owner at LendHous", byTeam: true, sentAt: "2026-10-20T10:00:00-07:00", expiresAt: "2030-01-01T10:00:00-07:00", status: "received", finishedAt: "2026-10-20T15:40:00-07:00", finishedBy: "Mo Mock (FAKE)", note: "Appliances arrive next week.", photos: [
-    { id: "demo-front", scopeId: "property", shot: "front", name: "front.jpg", at: "2026-10-20T15:31:00-07:00" },
-    { id: "demo-kitchen", scopeId: "kitchen", shot: "room", name: "kitchen.jpg", at: "2026-10-20T15:34:00-07:00" },
-    { id: "demo-cabinets", scopeId: "kitchen", shot: "cabinets", name: "cabinets.jpg", at: "2026-10-20T15:35:00-07:00" },
+    { id: "demo-front", scopeId: "property", shot: "front", name: "front.jpg", at: "2026-10-20T15:31:00-07:00", lat: 26.12251, lng: -80.13742 },
+    { id: "demo-kitchen", scopeId: "kitchen", shot: "room", name: "kitchen.jpg", at: "2026-10-20T15:34:00-07:00", lat: 26.12244, lng: -80.13735 },
+    // Sent from the contractor's shop across town, and taken days before.
+    { id: "demo-cabinets", scopeId: "kitchen", shot: "cabinets", name: "cabinets.jpg", at: "2026-10-20T15:35:00-07:00", takenAt: "2026-10-16T09:00:00-07:00", lat: 26.14102, lng: -80.15311 },
     { id: "demo-floors", scopeId: "flooring", shot: "rooms", name: "floors.jpg", at: "2026-10-20T15:38:00-07:00" },
   ] },
 ];

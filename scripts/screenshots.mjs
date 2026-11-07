@@ -420,6 +420,10 @@ ok("they show capital and the portfolio as of today", (await page.getByTestId("k
 ok("the reports say what the quote funnel shows on a real account", await seen(page.getByTestId("quote-funnel-demo")));
 ok("the reports show how loans are ending", await seen(page.getByTestId("exits-report")));
 ok("and what borrowers say after closing, as a net promoter score", (await seen(page.getByTestId("survey-report"))) && (await page.getByTestId("survey-report").innerText()).includes("Net promoter score"));
+ok("and the funded book's concentration by borrower, county, loan type and flood zone", (await seen(page.getByTestId("concentration-report"))) && (await page.getByTestId("concentration-row").count()) >= 4);
+await page.goto(BASE + "/admin/deals/d16?tab=Score%20%26%20Flags");
+ok("a loan bought far above its last sale is flagged as a possible related-party flip", (await seen(page.getByTestId("risk-checks"))) && (await page.getByTestId("price-jump").innerText()).includes("Possible flip between related parties"));
+await page.goto(BASE + "/admin/reports");
 await page.getByTestId("journal-month").selectOption("2026-10");
 ok("the accounting journal for a month is ready for QuickBooks", (await page.getByTestId("journal-summary").innerText()).match(/^\d+ journal entries for October 2026/) !== null && (await page.getByTestId("journal-download").isEnabled()));
 ok("and how fast the team worked against its targets", (await seen(page.getByTestId("speed-measures"))) && (await page.getByTestId("speed-firstLook").innerText()).includes("New application looked at"));
@@ -859,6 +863,7 @@ await page.goto(BASE + "/admin/draws");
 const draw = page.getByTestId("draw-card").filter({ hasText: "Cabinets are in" });
 await seen(draw);
 ok("a draw says whether the contractor has signed off the work", await seen(draw.getByTestId("draw-contractor-unsigned")));
+ok("and where and when its photos were taken, against the property", (await draw.getByTestId("photo-checks").first().innerText()).includes("taken at the property") && (await draw.getByTestId("photo-checks").first().innerText()).includes("away"));
 await shot(page, "18-admin-draws.png");
 // Asking for photos by link. A demo seat sends nothing, and its link opens a preview.
 const seededDraw = page.getByTestId("draw-card").filter({ hasText: "Cabinets are in and the flooring is down." });
@@ -891,6 +896,9 @@ await preview.getByTestId("photo-send").click();
 ok("the preview ends the way the real page does", await preview.getByTestId("photo-done").isVisible());
 await preview.close();
 await draw.getByTestId("send-inspector").click();
+await draw.getByTestId("ask-photos").click();
+ok("with an inspection ordered, the team can send the inspector a link", await seen(draw.getByTestId("photo-who-inspector")));
+await draw.getByTestId("ask-photos-form").getByRole("button", { name: "Cancel" }).click().catch(() => {});
 await draw.getByTestId("observed-kitchen").fill("100");
 ok("an inspection needs every line filled in", await draw.getByTestId("record-inspection").isDisabled());
 await draw.getByTestId("observed-flooring").fill("100");

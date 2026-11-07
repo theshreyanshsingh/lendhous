@@ -320,6 +320,8 @@ model PlatformSettings {
   referralBonusCents            Int      @default(0)
   // Where a borrower who'd recommend LendHous is asked to leave a review (Google, Trustpilot): https only. Blank asks nothing.
   reviewUrl                     String   @default("")
+  // Whether late fees go to partners and buyers pro rata (true) or stay with LendHous as servicer (unset or false).
+  lateFeesToInvestors           Boolean?
   // Lets visitors book a call on /book. Unset counts as on.
   allowCallBooking              Boolean?
   updatedAt                     DateTime @updatedAt

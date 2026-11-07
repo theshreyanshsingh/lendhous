@@ -207,7 +207,7 @@ Ranked by money and risk to LendHous, against the effort.
 
 ### 1.9 The capital side
 
-**Partly built 2026-11-07** (`lib/investor-updates.ts`): plain statuses, workouts and team updates on partners' and buyers' portfolios. Still to come: the fee split in Settings, rollover choices, partner substitution and pro-rata draws.
+**Partly built 2026-11-07** (`lib/investor-updates.ts`): plain statuses, workouts and team updates on partners' and buyers' portfolios, and the late-fee split in Settings. Still to come: rollover choices, partner substitution and pro-rata draws.
 
 - **Today:**
   - Partners bid loan by loan and wire their share at closing.

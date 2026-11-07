@@ -110,6 +110,7 @@ const schema = z.discriminatedUnion("t", [
   z.object({ t: z.literal("suspendBroker"), brokerId: id, reason: text(1000), by: z.string().max(120) }),
   z.object({ t: z.literal("setBrokerPoints"), dealId: id, points: z.number().finite().min(0).max(5) }),
   z.object({ t: z.literal("brokerFeePaid"), dealId: id, amount: money, on: date, reference: text(160), by: z.string().max(120) }),
+  z.object({ t: z.literal("saveLastSale"), dealId: id, price: money, on: date, by: z.string().max(120) }),
   z.object({ t: z.literal("postInvestorUpdate"), dealId: id, updateId: id, text: text(2000), by: z.string().max(120) }),
   z.object({ t: z.literal("setWorkout"), dealId: id, on: z.boolean(), note: text(1000), by: z.string().max(120) }),
   z.object({ t: z.literal("answerSurvey"), dealId: id, stage: z.enum(["funded", "paid_off"]), score: z.number().int().min(0).max(10), comment: text(1000) }),

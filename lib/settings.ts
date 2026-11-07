@@ -16,6 +16,7 @@ const DEFAULTS: Omit<PlatformSettings, "updatedAt"> = {
   referralBonusCents: 0,
   reviewUrl: "",
   allowCallBooking: true,
+  lateFeesToInvestors: false,
 };
 
 let cached: { at: number; value: Omit<PlatformSettings, "updatedAt"> } | null = null;

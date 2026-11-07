@@ -3,7 +3,8 @@ import { getCurrentUser, hasPermission } from "@/lib/auth";
 import { demoBook, serviceDay } from "@/lib/book";
 import { firmOf } from "@/lib/book-access";
 import { toCsv } from "@/lib/csv";
-import { previousMonth, statementFor, statementRows, type Statement } from "@/lib/investor-statements";
+import { previousMonth, setInvestorFees, statementFor, statementRows, type Statement } from "@/lib/investor-statements";
+import { freshSettings } from "@/lib/settings";
 import { viewFor } from "@/lib/permissions";
 import { statementPdf } from "@/lib/statement-pdf";
 import { openStatement } from "@/lib/statement-store";
@@ -23,6 +24,8 @@ const send = async (statement: Statement, format: string, sample: boolean) => {
  * "demo" is a sample from the demo book (?type=partner or buyer), with no real figures.
  */
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  // The PDF's note on late fees follows the split in Settings.
+  setInvestorFees({ lateFees: (await freshSettings()).lateFeesToInvestors === true });
   const { id } = await params;
   const query = new URL(request.url).searchParams;
   const format = query.get("format") ?? "pdf";

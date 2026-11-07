@@ -5,6 +5,7 @@ import { Badge, shortDate } from "@/components/ui";
 import type { Deal, DrawRequest, PhotoRequest, RequestPhoto } from "@/lib/mockData";
 import { guideSteps, looksOld, missingShots, PHOTO_LINK_DAYS, photoRequestState, requestLines, type LinkState } from "@/lib/photo-requests";
 import { useStore } from "@/lib/store";
+import { photosSummary } from "@/lib/photo-checks";
 import { phonePill } from "@/lib/ui-classes";
 
 const STATE: Record<LinkState, { label: string; tone: "blue" | "amber" | "slate" }> = {
@@ -97,7 +98,7 @@ export function PhotoRequests({ deal, draw, asBorrower = false }: { deal: Deal; 
         <div className="mt-3 space-y-3 rounded-[2px] border border-border p-3" data-testid="ask-photos-form">
           {!asBorrower && (
             <div className="flex gap-2" role="group" aria-label="Who is this for">
-              {(["contractor", "borrower"] as const).map((option) => <button key={option} type="button" aria-pressed={who === option} data-testid={`photo-who-${option}`} className={`${who === option ? "btn-primary" : "btn-ghost"} flex-1 capitalize`} onClick={() => choose(option)}>{option}</button>)}
+              {(draw?.status === "inspecting" && !asBorrower ? (["contractor", "borrower", "inspector"] as const) : (["contractor", "borrower"] as const)).map((option) => <button key={option} type="button" aria-pressed={who === option} data-testid={`photo-who-${option}`} className={`${who === option ? "btn-primary" : "btn-ghost"} flex-1 capitalize`} onClick={() => choose(option)}>{option}</button>)}
             </div>
           )}
           <div className="grid gap-3 sm:grid-cols-2">
@@ -122,7 +123,7 @@ export function PhotoRequests({ deal, draw, asBorrower = false }: { deal: Deal; 
 
       {requests.length > 0 && (
         <ul className="mt-3 space-y-3">
-          {requests.map((request) => <RequestRow key={request.id} request={request} deal={deal} draw={s.draws.find((item) => item.id === request.drawId)} local={local} busy={busy} canChange={!asBorrower || !request.byTeam} onRenew={() => void renew(request)} onTurnOff={() => void turnOff(request)} />)}
+          {requests.map((request) => <RequestRow key={request.id} request={request} deal={deal} draw={s.draws.find((item) => item.id === request.drawId)} local={local} busy={busy} asBorrowerView={asBorrower} canChange={!asBorrower || !request.byTeam} onRenew={() => void renew(request)} onTurnOff={() => void turnOff(request)} />)}
         </ul>
       )}
     </div>
@@ -146,7 +147,7 @@ function IssuedLink({ issued, demo, onClose }: { issued: Issued; demo: boolean; 
   );
 }
 
-function RequestRow({ request, deal, draw, local, busy, canChange, onRenew, onTurnOff }: { request: PhotoRequest; deal: Deal; draw?: DrawRequest; local: boolean; busy: boolean; canChange: boolean; onRenew: () => void; onTurnOff: () => void }) {
+function RequestRow({ request, deal, draw, local, busy, canChange, asBorrowerView = false, onRenew, onTurnOff }: { request: PhotoRequest; deal: Deal; draw?: DrawRequest; local: boolean; busy: boolean; canChange: boolean; asBorrowerView?: boolean; onRenew: () => void; onTurnOff: () => void }) {
   const state = photoRequestState(request, deal, draw);
   const steps = guideSteps(requestLines(request, deal));
   const missing = missingShots(steps, request.photos);
@@ -166,6 +167,8 @@ function RequestRow({ request, deal, draw, local, busy, canChange, onRenew, onTu
           </ul>
         </div>
       ))}
+      {(() => { const summary = !asBorrowerView ? photosSummary(request.photos, deal.geo) : null; return summary ? <p className={`mt-2 text-xs ${summary.flagged ? "text-warn" : "text-muted-foreground"}`} data-testid="photo-checks">Where and when: {summary.text}.</p> : null; })()}
+      {request.who === "inspector" && draw?.inspection?.requestId === request.id && <p className="mt-2 text-xs text-good" data-testid="inspector-recorded">{draw.inspection.by} recorded the inspection{draw.inspection.notes ? `: ${draw.inspection.notes}` : "."}</p>}
       {received && missing.length > 0 && <p className="mt-2 text-xs text-warn" data-testid="photo-missing">Not sent: {missing.map((item) => `${item.step}, ${item.shot.toLowerCase()}`).join("; ")}</p>}
       {state !== "closed" && canChange && (
         <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">

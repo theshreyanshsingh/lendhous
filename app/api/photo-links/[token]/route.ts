@@ -82,7 +82,7 @@ export async function DELETE(request: Request, { params }: Context) {
   return NextResponse.json({ ok: true });
 }
 
-const finish = z.object({ name: z.string().trim().min(1).max(120), note: z.string().trim().max(2000), confirmed: z.literal(true), signDraw: z.boolean().optional() });
+const finish = z.object({ name: z.string().trim().min(1).max(120), note: z.string().trim().max(2000), confirmed: z.literal(true), signDraw: z.boolean().optional(), observed: z.record(z.string().max(120), z.number().min(0).max(100)).optional() });
 
 /** "I'm done": tells the team. The link keeps working until its date, in case something was missed. */
 export async function PATCH(request: Request, { params }: Context) {
@@ -93,8 +93,13 @@ export async function PATCH(request: Request, { params }: Context) {
   const parsed = finish.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return refuse("Add your name and confirm the photos.", 400);
   if (!link.request.photos.length) return refuse("Add at least one photo first.", 400);
-  // Only a contractor's link for a draw can sign it off; the reducer checks the same.
-  const action = { t: "finishPhotoRequest" as const, requestId: link.request.id, by: parsed.data.name, note: parsed.data.note, signDraw: Boolean(parsed.data.signDraw && link.request.who === "contractor" && link.request.drawId) };
+  // Only a contractor's link for a draw can sign it off, and only an inspector's records the inspection, with a percent
+  // for every line on the draw. The reducer checks the same.
+  const inspector = link.request.who === "inspector";
+  if (inspector && (!parsed.data.observed || link.draw?.lines.some((line) => parsed.data.observed![line.scopeId] === undefined))) return refuse("Enter how far along each line is, from 0 to 100%.", 400);
+  if (inspector && link.draw?.status !== "inspecting") return refuse("This draw's inspection has already been recorded.", 409);
+  const observed = inspector && parsed.data.observed ? Object.fromEntries(Object.entries(parsed.data.observed).map(([key, value]) => [key, value / 100])) : undefined;
+  const action = { t: "finishPhotoRequest" as const, requestId: link.request.id, by: parsed.data.name, note: parsed.data.note, signDraw: Boolean(parsed.data.signDraw && link.request.who === "contractor" && link.request.drawId), ...(observed ? { observed } : {}) };
   const saved = await runAction(linkActor(link.request), action, { trusted: true });
   if ("error" in saved) return refuse(saved.error, 409);
   await audit({ actorId: null, action: "photos.confirmed", entityType: "LoanBook", entityId: link.deal.id, after: { photoRequest: link.request.id, photos: link.request.photos.length } });

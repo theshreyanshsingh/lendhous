@@ -20,6 +20,7 @@ export async function saveSettings(formData: FormData) {
     offerSampleData: formData.get("offerSampleData") === "on",
     allowSignup: formData.get("allowSignup") === "on",
     allowCallBooking: formData.get("allowCallBooking") === "on",
+    lateFeesToInvestors: formData.get("lateFeesToInvestors") === "on",
     staffIdleMinutes: clamp(formData.get("staffIdleMinutes"), 5, 480, before.staffIdleMinutes),
     retentionYears: clamp(formData.get("retentionYears"), 1, 30, before.retentionYears),
     lenderAddress: String(formData.get("lenderAddress") ?? before.lenderAddress).trim().slice(0, 300),
@@ -34,7 +35,7 @@ export async function saveSettings(formData: FormData) {
   };
   await prisma.platformSettings.upsert({ where: { id: "default" }, create: { id: "default", ...data }, update: data });
   resetSettingsCache();
-  await audit({ actorId: actor.id, action: "settings.updated", entityType: "PlatformSettings", entityId: "default", before: { offerSampleData: before.offerSampleData, allowSignup: before.allowSignup, staffIdleMinutes: before.staffIdleMinutes, retentionYears: before.retentionYears, lenderAddress: before.lenderAddress, lenderPhone: before.lenderPhone, slaTargets: before.slaTargets, paymentInstructions: before.paymentInstructions, referralBonusCents: before.referralBonusCents, reviewUrl: before.reviewUrl, allowCallBooking: before.allowCallBooking }, after: data });
+  await audit({ actorId: actor.id, action: "settings.updated", entityType: "PlatformSettings", entityId: "default", before: { offerSampleData: before.offerSampleData, allowSignup: before.allowSignup, staffIdleMinutes: before.staffIdleMinutes, retentionYears: before.retentionYears, lenderAddress: before.lenderAddress, lenderPhone: before.lenderPhone, slaTargets: before.slaTargets, paymentInstructions: before.paymentInstructions, referralBonusCents: before.referralBonusCents, reviewUrl: before.reviewUrl, allowCallBooking: before.allowCallBooking, lateFeesToInvestors: before.lateFeesToInvestors }, after: data });
   revalidatePath("/admin", "layout");
   redirect("/admin/settings?notice=settings_saved");
 }

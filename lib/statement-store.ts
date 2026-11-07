@@ -5,7 +5,8 @@ import { Prisma } from "@prisma/client";
 import { readBook } from "@/lib/book-store";
 import { openJson, sealJson } from "@/lib/crypto";
 import { notify } from "@/lib/email";
-import { monthName, statementFor, type Investor, type Statement } from "@/lib/investor-statements";
+import { monthName, setInvestorFees, statementFor, type Investor, type Statement } from "@/lib/investor-statements";
+import { freshSettings } from "@/lib/settings";
 import { notDeleted, prisma } from "@/lib/prisma";
 
 const context = (id: string) => `InvestorStatement:${id}`;
@@ -15,6 +16,8 @@ const dollars = (amount: number) => `$${amount.toLocaleString("en-US", { minimum
 
 /** Makes and emails the month's statement for every partner and buyer that held a loan in it. Returns how many were new. */
 export async function makeStatements(month: string) {
+  // Statements follow the fee split an owner chose in Settings.
+  setInvestorFees({ lateFees: (await freshSettings()).lateFeesToInvestors === true });
   const { book } = await readBook();
   const investors: Investor[] = [...book.partners.map((partner) => ({ type: "partner" as const, id: partner.id })), ...book.buyers.map((buyer) => ({ type: "buyer" as const, id: buyer.id }))];
   let made = 0;

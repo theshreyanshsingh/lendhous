@@ -28,6 +28,7 @@ import { LienProtection } from "@/components/loan/LienProtection";
 import { InsurancePanel } from "@/components/loan/InsurancePanel";
 import { BudgetControls } from "@/components/loan/BudgetControls";
 import { InvestorUpdates } from "@/components/loan/InvestorUpdates";
+import { RiskChecks } from "@/components/loan/RiskChecks";
 import { INSURED } from "@/lib/insurance";
 import { PropertyPhotos } from "@/components/loan/PropertyPhotos";
 import { LoanTeam } from "@/components/loan/LoanTeam";
@@ -235,6 +236,7 @@ export default function DealWorkspace() {
           <Section title="Automated flags & hard stops">
             {e.hardStops.length + e.flags.length === 0 ? <p className="text-sm text-good">No flags.</p> : <ul className="space-y-1 text-sm">{e.hardStops.map((h) => <li key={h} className="rounded-md bg-bad/10 px-2 py-1 text-bad">⛔ {h}</li>)}{e.flags.map((f) => <li key={f} className="rounded-md bg-warn/12 px-2 py-1 text-warn">⚠ {f}</li>)}</ul>}
           </Section>
+          <div className="md:col-span-2"><RiskChecks deal={d} /></div>
         </div>
       )}
 

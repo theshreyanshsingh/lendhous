@@ -26,7 +26,7 @@ export default async function PhotoLinkPage({ params }: { params: Promise<{ toke
   }
   // Only what the guide needs reaches the browser: no loan number, no amounts, no borrower details.
   const shown = link
-    ? { to: link.request.to, sentBy: link.request.sentBy, address: `${link.deal.address}, ${link.deal.city}`, steps: guideSteps(requestLines(link.request, link.deal)), photos: link.request.photos.map(({ id, scopeId, shot, name }) => ({ id, scopeId, shot, name })), finished: link.request.status === "received", signsDraw: link.request.who === "contractor" && Boolean(link.request.drawId), finishedBy: link.request.finishedBy ?? "", note: link.request.note ?? "", expiresAt: link.request.expiresAt }
+    ? { to: link.request.to, sentBy: link.request.sentBy, address: `${link.deal.address}, ${link.deal.city}`, steps: guideSteps(requestLines(link.request, link.deal)), photos: link.request.photos.map(({ id, scopeId, shot, name }) => ({ id, scopeId, shot, name })), finished: link.request.status === "received", signsDraw: link.request.who === "contractor" && Boolean(link.request.drawId), inspects: link.request.who === "inspector" && link.draw?.status === "inspecting", finishedBy: link.request.finishedBy ?? "", note: link.request.note ?? "", expiresAt: link.request.expiresAt }
     : DEMO;
   return <PhotoGuide token={link ? token : null} {...shown} />;
 }

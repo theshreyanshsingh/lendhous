@@ -10,6 +10,7 @@ import { useServiceDay } from "./use-service-day";
 import { shortDay } from "@/lib/format";
 import { usuryCheck, usuryWarning } from "@/lib/usury";
 import { buyDownOptions } from "@/lib/buy-down";
+import { concentrationWarnings } from "@/lib/risk";
 import { ratePercent } from "@/lib/format";
 
 const small = "h-9! px-3! text-xs!";
@@ -45,7 +46,7 @@ function ExceptionPanel({ deal }: { deal: Deal }) {
  * approves an exception, and sends each term sheet as a numbered version that expires. Every version stays listed.
  */
 export function TermSheetBuilder({ deal }: { deal: Deal }) {
-  const { dispatch, viewerName, local } = useStore();
+  const { s, dispatch, viewerName, local } = useStore();
   const today = useServiceDay();
   const [draft, setDraft] = useState<TermsInput>(() => startingTerms(deal));
   const [text, setText] = useState({ rate: String(draft.rate), points: String(draft.points), termMonths: String(draft.termMonths) });
@@ -95,6 +96,7 @@ export function TermSheetBuilder({ deal }: { deal: Deal }) {
             )}
             {broker && e && <p className="text-xs text-muted-foreground" data-testid="sheet-broker-fee">The broker&apos;s fee of {deal.brokerPoints} points ({usd((e.noteAmount * (deal.brokerPoints ?? 0)) / 100)}) is shown on the term sheet as a cost the borrower pays.</p>}
             {usury && <p className="rounded-md bg-warn/10 p-3 text-xs text-warn" role="alert" data-testid="sheet-usury">{usury}</p>}
+            {concentrationWarnings(s.deals, deal).map((item) => <p key={item} className="rounded-md bg-warn/10 p-3 text-xs text-warn" data-testid="sheet-concentration">{item}. Check with an owner before it goes out.</p>)}
             {choices.length > 1 && <p className="text-xs text-muted-foreground" data-testid="sheet-choices">The borrower can also accept at {choices.length - 1} other rate-and-points choice{choices.length === 2 ? "" : "s"} inside the matrix and the usury cap: {pct(choices[0].rate)} with {choices[0].points} points to {pct(choices[choices.length - 1].rate)} with {choices[choices.length - 1].points}.</p>}
             {reasons.length > 0 && (
               <div className={`rounded-md p-3 text-xs ${covered ? "bg-good/10 text-good" : "bg-warn/10"}`} data-testid="sheet-exception">

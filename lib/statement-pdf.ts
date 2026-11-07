@@ -1,7 +1,7 @@
 // An investor's monthly statement as a PDF, made the same way as the payoff letters (lib/payoff-pdf.ts): pdfkit's
 // built-in Times and Helvetica, and only characters those fonts cover.
 import PDFDocument from "pdfkit";
-import { LATE_FEES_TO_INVESTORS, monthName, type Statement } from "./investor-statements";
+import { lateFeesToInvestors, monthName, type Statement } from "./investor-statements";
 
 const INK = "#202B28";
 const SAGE = "#677D67";
@@ -55,7 +55,7 @@ export function statementPdf(statement: Statement, lender: string, sample = fals
     doc.moveDown(1);
     doc.font("Helvetica").fontSize(8.5).fillColor(MUTED).text([
       "Interest is your share of what borrowers paid this month at the loan's rate. The servicing fee is what LendHous keeps as servicer: the difference between the loan's rate and yours.",
-      `Late fees collected this month: ${money(t.lateFees)}${LATE_FEES_TO_INVESTORS ? ", included in the net above." : ", kept by LendHous as servicer under your agreement."}`,
+      `Late fees collected this month: ${money(t.lateFees)}${lateFeesToInvestors() ? ", included in the net above." : ", kept by LendHous as servicer under your agreement."}`,
       "Balance is your share of the unpaid principal at the end of the month. Days late counts from the oldest unpaid payment. Questions: reply to the email this came with or call your LendHous contact.",
     ].join("\n"), left, doc.y, { width });
     doc.end();

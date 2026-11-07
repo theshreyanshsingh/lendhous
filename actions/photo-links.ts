@@ -11,6 +11,7 @@ import { isDemoEmail } from "@/lib/deploy";
 import { sendPhotoLinkMail } from "@/lib/email";
 import type { Deal, PhotoRequest } from "@/lib/mockData";
 import { viewFor } from "@/lib/permissions";
+import { geocode } from "@/lib/geocode";
 import { createPhotoLink } from "@/lib/photo-links";
 import { PHOTO_LINK_DAYS } from "@/lib/photo-requests";
 import { prisma } from "@/lib/prisma";
@@ -24,7 +25,7 @@ const longDate = (at: string) => new Date(at).toLocaleDateString("en-US", { mont
 const input = z.object({
   dealId: z.string().min(1).max(120),
   drawId: z.string().min(1).max(120).optional(),
-  who: z.enum(["contractor", "borrower"]),
+  who: z.enum(["contractor", "borrower", "inspector"]),
   to: z.string().trim().min(1).max(120),
   email: z.string().trim().toLowerCase().max(200).refine((value) => value === "" || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)),
   scopeIds: z.array(z.string().min(1).max(120)).min(1).max(60),
@@ -67,7 +68,14 @@ export async function askForPhotos(raw: unknown): Promise<PhotoLinkReply> {
   const link = await createPhotoLink(requestId, expiresAt);
   const mail = await mailLink({ to: parsed.data.to, sentBy, email, expiresAt }, deal, link);
   await audit({ actorId: viewer.id, action: "photos.requested", entityType: "LoanBook", entityId: deal.id, after: { photoRequest: requestId, who: parsed.data.who, mail } });
-  return { book: scopeBook(result.after, viewer), link, mail, requestId, sentTo: email };
+  // The first time photos are asked for, the property is put on the map, so their locations can be checked when they come.
+  let after = result.after;
+  if (!deal.geo) {
+    const place = await geocode(deal);
+    const placed = place ? await runAction(viewer, { t: "placeProperty", dealId: deal.id, ...place }, { trusted: true }) : null;
+    if (placed && !("error" in placed)) after = placed.after;
+  }
+  return { book: scopeBook(after, viewer), link, mail, requestId, sentTo: email };
 }
 
 /**

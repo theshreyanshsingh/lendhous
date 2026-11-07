@@ -85,7 +85,7 @@ const quietPayoff = (payoff: PayoffRequest): PayoffRequest => ({
 
 /** Removes what identifies the borrower, for a partner or buyer who hasn't closed on the loan. */
 function blind(deal: Deal): Deal {
-  return { ...deal, insurance: undefined, friendReferral: undefined, surveys: undefined, investorUpdates: undefined, workout: undefined, borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined, closure: undefined, defaults: undefined, extensions: undefined, paidOff: undefined, closing: undefined, wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, termSheets: undefined, pricingException: undefined, conditions: undefined, lienFile: undefined, completed: undefined, revenue: undefined, adverseAction: undefined, legalHold: undefined, propertyPhotos: undefined, partnerFunding: undefined, agents: undefined, ...quietPayments(deal, false) };
+  return { ...deal, insurance: undefined, friendReferral: undefined, surveys: undefined, investorUpdates: undefined, workout: undefined, lastSale: undefined, geo: undefined, borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined, closure: undefined, defaults: undefined, extensions: undefined, paidOff: undefined, closing: undefined, wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, termSheets: undefined, pricingException: undefined, conditions: undefined, lienFile: undefined, completed: undefined, revenue: undefined, adverseAction: undefined, legalHold: undefined, propertyPhotos: undefined, partnerFunding: undefined, agents: undefined, ...quietPayments(deal, false) };
 }
 
 /** The conditions that are the borrower's to meet (Spec B17), without who on the team handled them or why one was waived. */
@@ -119,7 +119,7 @@ const clientInsurance = (deal: Deal): Partial<Deal> => ({
 
 /** What only the team sees on a loan it shares with a client. Wire instructions never leave the team: a client who sees them is a client who can be sent fake ones. */
 function forClient(deal: Deal): Deal {
-  return { ...deal, ...latestForClient(deal), ...clientConditions(deal), ...clientRecords(deal), ...clientAgents(deal), ...clientInsurance(deal), partnerFunding: undefined, allocations: [], teaserSentTo: [], route: undefined, capitalStatus: "not_started", contractorIsGtAffiliate: undefined, source: "", fundingApprovers: undefined, creditReview: undefined, ...quietPayments(deal, true), ...quietExits(deal), wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, friendReferral: undefined, surveys: undefined, investorUpdates: undefined, workout: undefined };
+  return { ...deal, ...latestForClient(deal), ...clientConditions(deal), ...clientRecords(deal), ...clientAgents(deal), ...clientInsurance(deal), partnerFunding: undefined, allocations: [], teaserSentTo: [], route: undefined, capitalStatus: "not_started", contractorIsGtAffiliate: undefined, source: "", fundingApprovers: undefined, creditReview: undefined, ...quietPayments(deal, true), ...quietExits(deal), wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, friendReferral: undefined, surveys: undefined, investorUpdates: undefined, workout: undefined, lastSale: undefined };
 }
 
 /** What a partner or buyer that holds a loan also sees: the team's updates for its investors and any workout. */
@@ -454,6 +454,17 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       const problem = referralProblem(book.deals, action.dealId, action.referrerId);
       return problem ? no(problem) : ok();
     }
+    case "placeProperty":
+      // Only the server places a property, from the geocoder.
+      if (!trusted) return no(NOT_ALLOWED);
+      return dealOf(action.dealId) ? ok() : no(GONE);
+    case "saveLastSale": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      if (!(action.price > 0)) return no("Enter the price it last sold for.");
+      if (action.on > serviceDay(book)) return no("The sale date can't be in the future.");
+      return staffOnlyAllowed("review_documents", "manage_conditions", "issue_term_sheet") ? ok({ ...action, by: viewer.name }) : no(NOT_ALLOWED);
+    }
     case "postInvestorUpdate": {
       const problem = updateProblem(dealOf(action.dealId), action.text);
       return problem ? no(problem) : staffOnlyAllowed("manage_capital", "service_loans") ? ok({ ...action, text: action.text.trim(), by: viewer.name }) : no(NOT_ALLOWED);
@@ -501,6 +512,8 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       if (!trusted) return no(NOT_ALLOWED);
       const deal = dealOf(action.dealId);
       if (!deal || (action.drawId && !book.draws.some((draw) => draw.id === action.drawId && draw.dealId === deal.id))) return no(GONE);
+      // An inspector's link is for one draw the team has ordered an inspection on.
+      if (action.who === "inspector" && (!action.byTeam || book.draws.find((draw) => draw.id === action.drawId)?.status !== "inspecting")) return no("An inspector's link is for a draw with an inspection ordered.");
       return photosClosed(deal, book.draws.find((draw) => draw.id === action.drawId)) ? no(PHOTOS_CLOSED) : ok();
     }
     case "renewPhotoRequest": case "turnOffPhotoRequest": case "addRequestPhoto": case "removeRequestPhoto": case "finishPhotoRequest": {

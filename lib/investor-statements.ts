@@ -11,8 +11,14 @@ export type Investor = { type: "partner" | "buyer"; id: string };
 /** A loan an investor holds: its share of the loan, the rate it earns, and the day it started holding it. */
 export type Holding = { deal: Deal; share: number; investorRate: number; noteRate: number; since?: string };
 
-/** PLACEHOLDER until the participation and sale agreements say otherwise: late fees stay with LendHous as servicer. */
-export const LATE_FEES_TO_INVESTORS = false;
+/**
+ * Who keeps the late fees: LendHous as servicer (the PLACEHOLDER default, until the participation and sale agreements say
+ * otherwise), or the investors pro rata. An owner sets it in Settings; the server sets it before making statements and the
+ * browser from the page, the way pricing is adopted.
+ */
+let feeRules = { lateFees: false };
+export const lateFeesToInvestors = () => feeRules.lateFees;
+export const setInvestorFees = (rules: { lateFees: boolean }) => { feeRules = { lateFees: Boolean(rules.lateFees) }; };
 
 const round2 = (amount: number) => Math.round(amount * 100) / 100;
 const HELD = [...SERVICED, "paid_off"];
@@ -65,7 +71,7 @@ export function splitOf(holding: Holding, counts: (day: string) => boolean): Spl
   }
   const gross = share * interest;
   const servicingFee = holding.noteRate > 0 ? gross * (1 - holding.investorRate / holding.noteRate) : 0;
-  const fees = LATE_FEES_TO_INVESTORS ? share * lateFees : 0;
+  const fees = feeRules.lateFees ? share * lateFees : 0;
   return { interest: round2(gross), principal: round2(share * principal), servicingFee: round2(servicingFee), lateFees: round2(share * lateFees), net: round2(gross - servicingFee + share * principal + fees), payments };
 }
 

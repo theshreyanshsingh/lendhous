@@ -76,6 +76,10 @@ export type BookAction =
   | { t: "referralBonusPaid"; dealId: string; amount: number; on: string; reference: string; by: string }
   /** The borrower's 0 to 10 on how likely they are to recommend LendHous, at closing or payoff (lib/surveys.ts). */
   /** An update on a funded loan for its investors, and a workout declared or lifted (lib/investor-updates.ts). */
+  /** The property's last recorded sale, for the price-jump check (lib/risk.ts). */
+  /** The property's place on the map, found by the server (lib/geocode.ts). */
+  | { t: "placeProperty"; dealId: string; lat: number; lng: number }
+  | { t: "saveLastSale"; dealId: string; price: number; on: string; by: string }
   | { t: "postInvestorUpdate"; dealId: string; updateId: string; text: string; by: string }
   | { t: "setWorkout"; dealId: string; on: boolean; note: string; by: string }
   | { t: "answerSurvey"; dealId: string; stage: "funded" | "paid_off"; score: number; comment: string }
@@ -115,7 +119,7 @@ export type BookAction =
   | { t: "addRequestPhoto"; requestId: string; photo: RequestPhoto }
   | { t: "removeRequestPhoto"; requestId: string; photoId: string }
   /** signDraw: the contractor also signs off that the work on the draw's lines is done as the photos show. */
-  | { t: "finishPhotoRequest"; requestId: string; by: string; note: string; signDraw?: boolean }
+  | { t: "finishPhotoRequest"; requestId: string; by: string; note: string; signDraw?: boolean; observed?: Record<string, number> }
   | { t: "sendInspector"; drawId: string }
   | { t: "recordInspection"; drawId: string; observed: Record<string, number> }
   | { t: "approveDrawRequest"; drawId: string; by: string }
@@ -324,12 +328,16 @@ export function demoBook(): Book {
       if (separate) policies.push({ kind: "windstorm", carrier: "Coastal Wind Pool (FAKE)", policy: `CW-${d.loanNumber.slice(-4)}`, expiresOn: "2027-05-31", mortgagee: true, by: "Pat Processor (FAKE)", at }, { kind: "flood", carrier: "Sample Flood (FAKE)", policy: `SF-${d.loanNumber.slice(-4)}`, expiresOn: "2027-03-01", coverage: 250_000, mortgagee: true, by: "Pat Processor (FAKE)", at });
       deals[i] = { ...deals[i], insurance: { policies, flood: { sfha: separate, zone: separate ? "AE" : "X", by: "Pat Processor (FAKE)", at } } };
     }
+    // The newest application bought from a seller who paid far less five months ago: the price-jump check flags it.
+    if (d.id === "d16") deals[i] = { ...deals[i], lastSale: { price: Math.round(d.app.purchasePrice / 1.45 / 1000) * 1000, on: "2026-06-02", by: "Pat Processor (FAKE)", at: "2026-10-31T15:00:00Z" } };
     // The loans the demo partner and buyer hold have an update from the team.
     if (d.id === "d11") deals[i] = { ...deals[i], investorUpdates: [{ id: "iu-demo-11", text: "Paying on time. The borrower expects to refinance into a rental loan in the spring (FAKE).", by: "Cam Capital (FAKE)", at: "2026-10-15T14:00:00Z" }] };
     if (d.id === "d14") deals[i] = { ...deals[i], investorUpdates: [{ id: "iu-demo-14", text: "Cabinets are back-ordered; the borrower asked for a 3-month extension, under review (FAKE).", by: "Sam Servicer (FAKE)", at: "2026-10-28T18:00:00Z" }] };
     // Three borrowers answered the closing survey; the demo borrower's own flip still has the question waiting.
     const answer = DEMO_SURVEYS[d.id];
     if (answer) deals[i] = { ...deals[i], surveys: [{ stage: "funded", comment: "", ...answer }] };
+    // The demo borrower's flip is on the map, so its contractor's photos are checked against it.
+    if (d.id === "d2") deals[i] = { ...deals[i], geo: { lat: 26.1224, lng: -80.1374, at: "2026-10-20T10:00:00Z" } };
     // The demo borrower's flip has a change order waiting: the kitchen grew and the floors came in under budget.
     if (d.id === "d2") deals[i] = { ...deals[i], changeOrders: [{ id: "co-demo-1", from: "flooring", to: "kitchen", amount: 3_000, reason: "Added an island to the kitchen; the flooring came in under its budget (FAKE)", by: "Alex Sample (FAKE)", byTeam: false, at: "2026-10-29T11:00:00-07:00", status: "requested" }] };
     // Three friends the demo borrower referred: one whose bonus was paid, one funded and owed, one still applying.
@@ -543,6 +551,11 @@ function apply(s: Book, a: BookAction): Book {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
       const referrerName = s.deals.find((item) => item.borrowerId === a.referrerId)?.borrowerName ?? "A borrower";
       return { ...s, deals: upd(a.dealId, (d) => ({ ...d, friendReferral: { referrerId: a.referrerId, referrerName, on: a.on, bonus: round2(Math.max(0, a.bonus)) } })), audit: log(`${deal.loanNumber}: referred by ${referrerName}, a LendHous borrower`) };
+    }
+    case "placeProperty": return { ...s, deals: upd(a.dealId, (d) => ({ ...d, geo: { lat: a.lat, lng: a.lng, at: now() } })) };
+    case "saveLastSale": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, lastSale: { price: Math.round(a.price), on: a.on, by: a.by, at: now() } })), audit: log(`${deal.loanNumber}: last recorded sale entered by ${a.by}`) };
     }
     case "postInvestorUpdate": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
@@ -769,13 +782,19 @@ function apply(s: Book, a: BookAction): Book {
     case "finishPhotoRequest": {
       const request = requestOf(a.requestId); const deal = s.deals.find((d) => d.id === request.dealId)!;
       const signs = Boolean(a.signDraw && request.who === "contractor" && request.drawId);
+      // An inspector's link records the inspection itself: percent complete on each of the draw's lines.
+      const inspects = Boolean(a.observed && request.who === "inspector" && s.draws.some((draw) => draw.id === request.drawId && draw.status === "inspecting"));
       const at = now();
       return { ...s, photoRequests: photos(a.requestId, (r) => ({ ...r, status: "received", finishedAt: at, finishedBy: a.by, note: a.note })),
-        draws: signs ? s.draws.map((draw) => (draw.id === request.drawId ? { ...draw, contractorSigned: { name: a.by.trim(), at, requestId: request.id } } : draw)) : s.draws,
-        audit: log(`${deal.loanNumber}: ${request.photos.length} photos received from ${a.by}${signs ? ", who signed off the draw's work" : ""}`) };
+        draws: s.draws.map((draw) => {
+          if (draw.id !== request.drawId) return draw;
+          const signed = signs ? { ...draw, contractorSigned: { name: a.by.trim(), at, requestId: request.id } } : draw;
+          return inspects ? { ...signed, status: "inspected" as const, lines: signed.lines.map((line) => ({ ...line, observedPct: Math.min(1, Math.max(0, a.observed![line.scopeId] ?? 0)) })), inspection: { by: a.by.trim(), at, requestId: request.id, notes: a.note.trim() } } : signed;
+        }),
+        audit: log(`${deal.loanNumber}: ${request.photos.length} photos received from ${a.by}${signs ? ", who signed off the draw's work" : ""}${inspects ? ", who recorded the inspection" : ""}`) };
     }
     case "sendInspector": return { ...s, draws: s.draws.map((d) => (d.id === a.drawId && d.status === "submitted" ? { ...d, status: "inspecting" } : d)), audit: log("Draw inspection ordered") };
-    case "recordInspection": return { ...s, draws: s.draws.map((d) => (d.id === a.drawId && d.status === "inspecting" ? { ...d, status: "inspected", lines: d.lines.map((line) => ({ ...line, observedPct: a.observed[line.scopeId] ?? 0 })) } : d)), audit: log("Draw inspection recorded") };
+    case "recordInspection": return { ...s, draws: s.draws.map((d) => (d.id === a.drawId && d.status === "inspecting" ? { ...d, status: "inspected", lines: d.lines.map((line) => ({ ...line, observedPct: a.observed[line.scopeId] ?? 0 })), inspection: { by: "The team", at: now(), notes: "" } } : d)), audit: log("Draw inspection recorded") };
     case "approveDrawRequest": {
       const draw = s.draws.find((d) => d.id === a.drawId)!; const deal = s.deals.find((d) => d.id === draw.dealId)!;
       if (approvalError(deal, draw, a.by)) return s;
