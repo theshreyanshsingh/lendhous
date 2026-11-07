@@ -136,7 +136,7 @@ Ranked by money and risk to LendHous, against the effort.
   - There's no contingency line, no reallocation, and no change-of-scope request.
   - The contractor never signs a draw.
   - The borrower can't see how much interest reserve is left.
-  - N already covers phone photos and the inspector link.
+  - N already covers phone photos and the inspector link (built 2026-11-08: the borrower's draw goes line by line with a located photo and a claimed percent, the inspector sees both, and every draw shows "We'll decide by").
 - **Competitors:**
   - Borrower change-of-scope requests with the effect on ARV and on remaining funds explained: RFG and Kiavi. C, rehabfinancial.com/how-it-works/changing-scope-of-work-mid-project.
   - Mortgage Automator: C, mortgageautomator.com/construction-draw-management.
@@ -343,6 +343,7 @@ These extend the vendor list in `docs/next-features-prompt.md`.
 - **Spanish.** No Florida lender page in Spanish was found. In Miami that's a differentiator, not catch-up, so it should move up the list.
 - **Partner money goes straight to the verified title escrow.** No wallet holds investor cash; investor wallets froze at Upright (Synapse) and at PeerStreet ("Pocket") (R).
 - **Terms before contact details, plus an embeddable widget.** Kiavi's embeddable estimator is the only match.
+- **Storm mode and flood zones from FEMA's map (built 2026-11-08).** No lender checked watches its own Florida book against the hurricane center's forecast cones, or asks borrowers for photos once a storm passes. Flood zones come from FEMA's map on every address, with a flood insurance condition in zones A and V.
 
 ## The numbers to beat
 

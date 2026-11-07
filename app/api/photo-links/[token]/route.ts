@@ -6,7 +6,7 @@ import { sendAlerts } from "@/lib/book-alerts";
 import { runAction } from "@/lib/book-store";
 import { encryptField } from "@/lib/crypto";
 import { linkActor, openPhotoLink } from "@/lib/photo-links";
-import { guideSteps, MAX_PHOTOS_PER_LINK, requestLines } from "@/lib/photo-requests";
+import { MAX_PHOTOS_PER_LINK, requestSteps } from "@/lib/photo-requests";
 import { prisma } from "@/lib/prisma";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import { extensionOf, mimeFor, putBytes, safeBasename } from "@/lib/storage";
@@ -46,7 +46,7 @@ export async function POST(request: Request, { params }: Context) {
   if (link.request.photos.length >= MAX_PHOTOS_PER_LINK) return refuse(`This link is full at ${MAX_PHOTOS_PER_LINK} photos. Remove one or ask for a new link.`, 409);
   const scopeId = String(form.get("scopeId") || "");
   const shot = String(form.get("shot") || "");
-  const step = guideSteps(requestLines(link.request, link.deal)).find((item) => item.id === scopeId);
+  const step = requestSteps(link.request, link.deal).find((item) => item.id === scopeId);
   if (!step?.shots.some((item) => item.id === shot)) return refuse("That part of the guide is no longer on this request.", 400);
   const bytes = Buffer.from(await file.arrayBuffer());
   const problem = photoProblem(file.name, file.size, bytes);

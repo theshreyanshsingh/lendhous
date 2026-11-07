@@ -1,13 +1,16 @@
 "use client";
 import { EmptyState } from "@/components/EmptyState";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { DRAW_STATUS, drawTotal } from "@/components/loan/DrawPanel";
 import { DrawLienChecklist } from "@/components/loan/DrawLienChecklist";
 import { PhotoRequests } from "@/components/loan/PhotoRequests";
 import { PageIntro } from "@/components/page-intro";
 import { Badge, Section, Stat, k, shortDate, usd } from "@/components/ui";
-import { approvalError, approversNeeded, reviewDraw } from "@/lib/draws";
+import { approvalError, approversNeeded, freshInspectionNeeded, reviewDraw } from "@/lib/draws";
+import { awaitingDecision, claimGap, decideBy } from "@/lib/draw-walk";
+import { photosSummary } from "@/lib/photo-checks";
+import { clockOf, floridaTime } from "@/lib/sla";
 import type { Deal, DrawRequest } from "@/lib/mockData";
 import { unreleasedHolds } from "@/lib/lien-law";
 import { ofacBlocker } from "@/lib/ofac";
@@ -41,8 +44,17 @@ export default function Draws() {
   );
 }
 
+const CLOCK_TONE = { ok: "text-muted-foreground", amber: "text-warn", red: "text-bad" } as const;
+
 function DrawCard({ draw, deal }: { draw: DrawRequest; deal: Deal }) {
-  const { dispatch, viewerName } = useStore();
+  const { dispatch, viewerName, targets } = useStore();
+  // The clock runs on the browser's time, set after the first render so the server's page matches.
+  const [now, setNow] = useState<Date | null>(null);
+  useEffect(() => { setNow(new Date()); }, []);
+  const clock = now && awaitingDecision(draw) ? clockOf(draw.requestedAt, now, targets.drawDecision) : null;
+  const linePhotos = draw.linePhotos ?? [];
+  const checks = photosSummary(linePhotos, deal.geo);
+  const fresh = freshInspectionNeeded(deal, draw);
   const [observed, setObserved] = useState<Record<string, number>>({});
   const [reason, setReason] = useState("");
   const review = reviewDraw(deal, draw);
@@ -63,6 +75,8 @@ function DrawCard({ draw, deal }: { draw: DrawRequest; deal: Deal }) {
         <div className="min-w-0"><Link href={`/admin/deals/${deal.id}`} className="font-medium text-link hover:underline">{deal.loanNumber}</Link> <span className="text-sm">· {deal.borrowerName}</span><div className="text-xs text-muted-foreground">{deal.address}, {deal.city} · requested {shortDate(draw.requestedAt)}</div></div>
         <Badge tone={DRAW_STATUS[draw.status].tone}>{DRAW_STATUS[draw.status].label}</Badge>
       </div>
+      {clock && <p className={`mt-1 text-xs ${CLOCK_TONE[clock.state]}`} data-testid="draw-clock">Decide by {floridaTime(decideBy(draw, targets.drawDecision))} · {clock.text}</p>}
+      {fresh && <p className="mt-2 rounded-md bg-warn/12 p-2 text-xs text-warn" data-testid="storm-hold">{fresh}</p>}
       {deal.contractorIsGtAffiliate && <p className="mt-2 rounded-md bg-bad/10 p-2 text-xs text-bad">Affiliated contractor: this needs an independent inspector and two approvers.</p>}
       {deal.paymentsLate ? <p className="mt-2 rounded-md bg-bad/10 p-2 text-xs text-bad">This loan has {deal.paymentsLate} payments past due. Nothing can be released until it&apos;s current.</p> : null}
       {draw.note && <p className="mt-2 text-sm">{draw.note}</p>}
@@ -74,10 +88,22 @@ function DrawCard({ draw, deal }: { draw: DrawRequest; deal: Deal }) {
         <span>{details ? "Hide the lines, photos and lien waivers" : "Lines, photos and lien waivers"}</span><span aria-hidden="true">{details ? "−" : "+"}</span>
       </button>
       <div className={details ? "" : "max-sm:hidden"}>
-      <p className="mt-1 text-xs text-muted-foreground">Inspection contact: {draw.contact || "none given"}{draw.photos.length && !draw.photoIds?.length ? ` · ${draw.photos.length} photo${draw.photos.length > 1 ? "s" : ""}: ${draw.photos.join(", ")}` : ""}</p>
-      {draw.photoIds?.length ? <ul className="mt-1 flex flex-wrap gap-x-3 text-xs" data-testid="draw-photos">{draw.photoIds.map((id, index) => <li key={id}><a className="text-link underline underline-offset-2" href={`/api/documents/${id}`}>{draw.photos[index] ?? `Photo ${index + 1}`}</a></li>)}</ul> : null}
+      <p className="mt-1 text-xs text-muted-foreground">Inspection contact: {draw.contact || "none given"}{draw.photos.length && !draw.photoIds?.length && !linePhotos.length ? ` · ${draw.photos.length} photo${draw.photos.length > 1 ? "s" : ""}: ${draw.photos.join(", ")}` : ""}</p>
+      {draw.photoIds?.length && !linePhotos.length ? <ul className="mt-1 flex flex-wrap gap-x-3 text-xs" data-testid="draw-photos">{draw.photoIds.map((id, index) => <li key={id}><a className="text-link underline underline-offset-2" href={`/api/documents/${id}`}>{draw.photos[index] ?? `Photo ${index + 1}`}</a></li>)}</ul> : null}
+      {linePhotos.length > 0 && (
+        <div className="mt-2 text-xs" data-testid="draw-line-photos">
+          {checks && <p className={checks.flagged ? "text-warn" : "text-muted-foreground"} data-testid="draw-photo-checks">The borrower&apos;s photos: {checks.text}</p>}
+          <ul className="mt-1 space-y-0.5" data-testid="draw-photos">
+            {draw.lines.filter((line) => linePhotos.some((photo) => photo.scopeId === line.scopeId)).map((line) => (
+              <li key={line.scopeId} className="flex flex-wrap gap-x-2"><span className="text-muted-foreground">{deal.scope?.find((item) => item.id === line.scopeId)?.division ?? line.scopeId}:</span>
+                {linePhotos.filter((photo) => photo.scopeId === line.scopeId).map((photo) => (photo.documentId ? <a key={photo.id} className="text-link underline underline-offset-2" href={`/api/documents/${photo.documentId}`}>{photo.name}</a> : <span key={photo.id}>{photo.name}</span>))}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <table className="stack-table mt-3 w-full">
-        <thead><tr className="border-b border-rule"><th>Budget line</th><th className="text-right">Budget</th><th className="text-right">Released</th><th className="text-right">Requested</th><th className="text-right">Work finished</th><th className="text-right">Supported</th></tr></thead>
+        <thead><tr className="border-b border-rule"><th>Budget line</th><th className="text-right">Budget</th><th className="text-right">Released</th><th className="text-right">Requested</th><th className="text-right">Borrower says</th><th className="text-right">Work finished</th><th className="text-right">Supported</th></tr></thead>
         <tbody>
           {draw.lines.map((line, index) => {
             const item = deal.scope?.find((scope) => scope.id === line.scopeId);
@@ -87,6 +113,7 @@ function DrawCard({ draw, deal }: { draw: DrawRequest; deal: Deal }) {
                 <td data-label="Budget" className="text-right">{usd(item?.budget ?? 0)}</td>
                 <td data-label="Released" className="text-right">{usd(item?.released ?? 0)}</td>
                 <td data-label="Requested" className="text-right">{usd(line.requested)}</td>
+                <td data-label="Borrower says" className={`text-right ${claimGap(line) ? "text-warn" : ""}`} data-testid="draw-claimed">{line.claimedPct === undefined ? "—" : `${Math.round(line.claimedPct * 100)}%`}{claimGap(line) ? " (more than found)" : ""}</td>
                 <td data-label="Work finished" className="text-right">
                   {draw.status === "inspecting" ? (
                     <input aria-label={`Percent finished for ${item?.division}`} data-testid={`observed-${line.scopeId}`} className="desk-input ml-auto w-24!" type="number" inputMode="numeric" min={0} max={100} placeholder="%" value={observed[line.scopeId] ?? ""} onChange={(event) => setObserved({ ...observed, [line.scopeId]: Number(event.target.value) })} />
@@ -106,7 +133,7 @@ function DrawCard({ draw, deal }: { draw: DrawRequest; deal: Deal }) {
       )}
       {draw.status === "approved" && <p className="mt-3 text-sm" data-testid="draw-approved"><b>{usd(draw.approved ?? 0)}</b> approved by {draw.approvers.join(" and ")}.</p>}
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        {draw.status === "submitted" && <button className="btn-primary" data-testid="send-inspector" onClick={() => dispatch({ t: "sendInspector", drawId: draw.id })}>Order inspection</button>}
+        {(draw.status === "submitted" || (draw.status === "inspected" && fresh)) && <button className="btn-primary" data-testid="send-inspector" onClick={() => dispatch({ t: "sendInspector", drawId: draw.id })}>{draw.status === "inspected" ? "Order a fresh inspection" : "Order inspection"}</button>}
         {draw.status === "inspecting" && <button className="btn-primary" data-testid="record-inspection" disabled={draw.lines.some((line) => observed[line.scopeId] === undefined)} onClick={() => dispatch({ t: "recordInspection", drawId: draw.id, observed: Object.fromEntries(Object.entries(observed).map(([id, percent]) => [id, Math.min(100, Math.max(0, percent)) / 100])) })}>Record inspection</button>}
         {draw.status === "inspected" && <button className="btn-primary" data-testid="approve-draw" disabled={Boolean(refusal)} onClick={() => dispatch({ t: "approveDrawRequest", drawId: draw.id, by: viewerName })}>Approve</button>}
         {draw.status === "approved" && <button className="btn-primary" data-testid="release-draw" disabled={Boolean(sanctions) || holds.length > 0} onClick={() => dispatch({ t: "releaseDraw", drawId: draw.id })}>Release funds</button>}

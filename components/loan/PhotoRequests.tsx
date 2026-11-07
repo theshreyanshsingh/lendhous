@@ -3,7 +3,7 @@ import { useState } from "react";
 import { askForPhotos, renewPhotoLink, turnOffPhotoLink, type PhotoLinkReply } from "@/actions/photo-links";
 import { Badge, shortDate } from "@/components/ui";
 import type { Deal, DrawRequest, PhotoRequest, RequestPhoto } from "@/lib/mockData";
-import { guideSteps, looksOld, missingShots, PHOTO_LINK_DAYS, photoRequestState, requestLines, type LinkState } from "@/lib/photo-requests";
+import { looksOld, missingShots, PHOTO_LINK_DAYS, photoRequestState, requestSteps, type LinkState } from "@/lib/photo-requests";
 import { useStore } from "@/lib/store";
 import { photosSummary } from "@/lib/photo-checks";
 import { phonePill } from "@/lib/ui-classes";
@@ -23,7 +23,8 @@ type Issued = { requestId: string; link: string; mail: PhotoLinkReply["mail"]; t
 /** Ask a contractor or borrower for photos by link, and see what came back, by budget line. */
 export function PhotoRequests({ deal, draw, asBorrower = false }: { deal: Deal; draw?: DrawRequest; asBorrower?: boolean }) {
   const { s, local, dispatch, applyReply, viewerName } = useStore();
-  const requests = s.photoRequests.filter((request) => request.dealId === deal.id && (!draw || !request.drawId || request.drawId === draw.id));
+  // Photos of the property after a storm are the storm desk's (Storms page), not a draw's or the borrower's to manage.
+  const requests = s.photoRequests.filter((request) => request.dealId === deal.id && (!draw || !request.drawId || request.drawId === draw.id) && (!request.stormId || (!draw && !asBorrower)));
   const lastContractor = s.photoRequests.find((request) => request.dealId === deal.id && request.who === "contractor");
   const lines = deal.scope ?? [];
   const startLines = () => (draw ? draw.lines.map((line) => line.scopeId) : lines.filter((line) => line.budget > line.released).map((line) => line.id));
@@ -35,7 +36,7 @@ export function PhotoRequests({ deal, draw, asBorrower = false }: { deal: Deal; 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [issued, setIssued] = useState<Issued | null>(null);
-  if (!lines.length) return null;
+  if (!lines.length && !requests.length) return null;
 
   const choose = (next: PhotoRequest["who"]) => {
     setWho(next);
@@ -91,7 +92,7 @@ export function PhotoRequests({ deal, draw, asBorrower = false }: { deal: Deal; 
           {!draw && !asBorrower && <h3 className="sr-only">Photos from the contractor or borrower</h3>}
           <p className="text-xs text-muted-foreground">{asBorrower ? "Send your contractor a link." : "Send the contractor or borrower a link."} They don&apos;t need an account, and the page walks them through what to photograph.</p>
         </div>
-        {!open && <button className="btn-ghost" data-testid="ask-photos" onClick={() => { setOpen(true); setIssued(null); setPicked(startLines()); }}>Ask for photos</button>}
+        {!open && lines.length > 0 && <button className="btn-ghost" data-testid="ask-photos" onClick={() => { setOpen(true); setIssued(null); setPicked(startLines()); }}>Ask for photos</button>}
       </div>
 
       {open && (
@@ -149,13 +150,13 @@ function IssuedLink({ issued, demo, onClose }: { issued: Issued; demo: boolean; 
 
 function RequestRow({ request, deal, draw, local, busy, canChange, asBorrowerView = false, onRenew, onTurnOff }: { request: PhotoRequest; deal: Deal; draw?: DrawRequest; local: boolean; busy: boolean; canChange: boolean; asBorrowerView?: boolean; onRenew: () => void; onTurnOff: () => void }) {
   const state = photoRequestState(request, deal, draw);
-  const steps = guideSteps(requestLines(request, deal));
+  const steps = requestSteps(request, deal);
   const missing = missingShots(steps, request.photos);
   const received = Boolean(request.finishedAt);
   return (
     <li className="rounded-[2px] border border-border p-3" data-testid="photo-request">
       <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0 text-sm"><b className="font-medium">{request.to}</b> <span className="text-xs text-muted-foreground capitalize">· {request.who}</span><div className="text-xs text-muted-foreground">Sent {shortDate(request.sentAt)} by {request.sentBy}{state === "open" ? ` · works until ${shortDate(request.expiresAt)}` : ""}</div></div>
+        <div className="min-w-0 text-sm"><b className="font-medium">{request.to}</b> <span className="text-xs text-muted-foreground capitalize">· {request.who}{request.stormId ? ", after the storm" : ""}</span><div className="text-xs text-muted-foreground">Sent {shortDate(request.sentAt)} by {request.sentBy}{state === "open" ? ` · works until ${shortDate(request.expiresAt)}` : ""}</div></div>
         {received ? <Badge tone="green">{request.photos.length} photo{request.photos.length === 1 ? "" : "s"} received{state === "off" || state === "expired" ? ` · ${STATE[state].label.toLowerCase()}` : ""}</Badge> : <Badge tone={STATE[state].tone}>{request.photos.length ? `${request.photos.length} so far · ` : ""}{STATE[state].label}</Badge>}
       </div>
       {request.note && <p className="mt-2 text-sm" data-testid="photo-request-note">&ldquo;{request.note}&rdquo;{request.finishedBy ? <span className="text-xs text-muted-foreground"> {request.finishedBy}</span> : null}</p>}

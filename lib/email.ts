@@ -88,7 +88,8 @@ export function sendPasswordLink(toEmail: string, link: string, reason: { invite
 }
 
 /** A photo link is a live key to one upload page, so like a password link it stays out of the notifications table. */
-export function sendPhotoLinkMail(toEmail: string, details: { to: string; sentBy: string; address: string; link: string; expires: string }) {
+export function sendPhotoLinkMail(toEmail: string, details: { to: string; sentBy: string; address: string; link: string; expires: string; storm?: string }) {
+  if (details.storm) return sendSecret(toEmail, `Photos after ${details.storm}: ${details.address}`, `Hi ${details.to},\n\n${details.storm} has passed. We hope you and everyone at ${details.address} are safe. When it's safe to go, please send LendHous photos of the property: each side, the roof, and any damage. If there's damage, also call your insurance company.\n\nOpen this link on your phone and it will walk you through it. You don't need an account:\n${details.link}\n\nThe link works until ${details.expires}. Please don't forward it.`);
   return sendSecret(toEmail, `Photos needed: ${details.address}`, `Hi ${details.to},\n\n${details.sentBy} asked for photos of the finished work at ${details.address}. They go to LendHous.\n\nOpen this link on your phone and it will walk you through what to photograph. You don't need an account:\n${details.link}\n\nThe link works until ${details.expires}. Please don't forward it. If you weren't expecting this, ignore it.`);
 }
 

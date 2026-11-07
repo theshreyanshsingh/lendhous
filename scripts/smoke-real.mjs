@@ -710,16 +710,23 @@ try {
   // Draws with a real photo
   await go(borrower, `/admin/borrower/${dealId}`);
   await borrower.getByTestId("request-draw").click();
+  await borrower.getByTestId("draw-pick-kitchen").check();
+  await borrower.getByTestId("draw-next").click();
   await borrower.getByTestId("draw-kitchen").fill("6000");
+  await borrower.getByTestId("draw-pct-kitchen").fill("70");
+  await borrower.getByTestId("draw-photo-kitchen").setInputFiles({ name: "cabinets.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]) });
+  await borrower.getByTestId("draw-shots").waitFor();
+  await borrower.getByTestId("draw-next").click();
   await borrower.getByTestId("draw-note").fill("Cabinets are in.");
   await borrower.getByTestId("draw-contact").fill("Bonnie, (555) 010-0200");
-  await borrower.getByTestId("draw-photos").setInputFiles({ name: "cabinets.jpg", mimeType: "image/jpeg", buffer: Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]) });
   await borrower.getByTestId("draw-certify").check();
   await borrower.getByTestId("submit-draw").click();
-  ok("the borrower requests a draw with a photo", await seen(borrower.getByTestId("my-draw")));
+  ok("the borrower requests a draw line by line, with a photo of the line", await seen(borrower.getByTestId("my-draw")));
+  ok("and is told when the team will decide it", (await borrower.getByTestId("draw-decide-by").first().innerText()).startsWith("We'll decide by"));
   await go(owner, "/admin/draws");
   const card = owner.getByTestId("draw-card").filter({ hasText: "Cabinets are in." });
   ok("the draw reaches the team", await seen(card));
+  ok("the team sees how far along the borrower says the line is", (await card.getByTestId("draw-claimed").first().innerText()) === "70%");
   const photo = await card.getByTestId("draw-photos").getByRole("link").first().getAttribute("href");
   ok("the team can open the photo", (await owner.request.get(BASE + photo)).status() === 200);
   ok("another borrower can't open the photo", (await other.request.get(BASE + photo)).status() === 404);

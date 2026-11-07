@@ -2,9 +2,10 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { BarChart3, Bell, Briefcase, ChevronDown, ChevronsUpDown, FileCheck, FileText, TriangleAlert, Percent, Building2, ClipboardList, FilePlus, Hammer, Inbox, Landmark, LayoutDashboard, ListChecks, BookOpen, Lock, LogOut, Menu, MessageSquare, ReceiptText, RotateCcw, ScrollText, Settings, Store, Tag, Upload, UserRound, Users, type LucideIcon } from "lucide-react";
+import { BarChart3, Bell, Briefcase, ChevronDown, ChevronsUpDown, CloudLightning, FileCheck, FileText, TriangleAlert, Percent, Building2, ClipboardList, FilePlus, Hammer, Inbox, Landmark, LayoutDashboard, ListChecks, BookOpen, Lock, LogOut, Menu, MessageSquare, ReceiptText, RotateCcw, ScrollText, Settings, Store, Tag, Upload, UserRound, Users, type LucideIcon } from "lucide-react";
 import { logout } from "@/actions/auth";
 import { attentionCounts } from "@/lib/attention";
+import { activeWatches } from "@/lib/storms";
 import { useStore } from "@/lib/store";
 import { VIEW_HOME, type View } from "@/lib/permissions";
 import { Logo } from "@/components/logo";
@@ -61,9 +62,12 @@ export default function Shell({ children, account, view }: { children: React.Rea
     window.addEventListener(OPEN_UPLOAD, show);
     return () => window.removeEventListener(OPEN_UPLOAD, show);
   }, [view]);
-  const counted: Record<string, number> = view === "admin" ? { "/admin/leads": waiting.leads, "/admin/draws": waiting.draws, "/admin/loan-sales": waiting.offers, "/admin/servicing": waiting.servicing } : {};
+  const watches = view === "admin" ? activeWatches(s.storms) : [];
+  const counted: Record<string, number> = view === "admin" ? { "/admin/leads": waiting.leads, "/admin/draws": waiting.draws, "/admin/loan-sales": waiting.offers, "/admin/servicing": waiting.servicing, "/admin/storms": watches.length } : {};
   const items: NavItem[] = [
     ...(view ? nav[view] : []).map((item) => ({ ...item, count: counted[item.href] })),
+    // Storms join the menu once one has covered a loan; until then the page is a link from Loan servicing, so the menu fits a laptop.
+    ...(view === "admin" && (s.storms ?? []).length ? [{ href: "/admin/storms", label: "Storms", icon: CloudLightning, section: "Servicing", count: watches.length || undefined }] : []),
     ...(account.canViewReports && view === "admin" ? [{ href: "/admin/reports", label: "Reports", icon: BarChart3 }] : []),
     ...(account.canIssueLetters && view === "admin" ? [{ href: "/admin/letters", label: "Letters", icon: FileCheck }] : []),
     ...(account.canManageFirms ? [{ href: "/admin/partners", label: "Partners & buyers", icon: Building2, section: "Money" }] : []),
@@ -101,7 +105,7 @@ export default function Shell({ children, account, view }: { children: React.Rea
             </SheetContent>
           </Sheet>
         </div>
-        <main id="desk" className={cn("mx-auto min-w-0 max-w-7xl px-4 pt-5 md:px-[22px] md:pt-7 md:pb-12", tabBar ? "pb-28" : "pb-10")}>{offline && <div role="status" className="mb-4 rounded-[2px] border border-warn/40 bg-warn/12 px-4 py-2.5 text-sm text-warn" data-testid="offline">You&apos;re offline. Saves and uploads won&apos;t go through until you&apos;re back online.</div>}{account.staleJobs.length > 0 && <div role="alert" className="mb-4 rounded-[2px] border border-bad/40 bg-bad/10 px-4 py-3 text-sm text-bad" data-testid="stale-jobs">The nightly {account.staleJobs.join(" and the ")} {account.staleJobs.length === 1 ? "hasn't" : "haven't"} run in over two days. Check that the jobs process is running on the server (<code>pm2 ls</code> shows <code>lendhous-jobs</code>), or run <code>npm run jobs</code>.</div>}{error && <div role="alert" className="mb-4 flex items-start justify-between gap-3 rounded-[2px] border border-bad/40 bg-bad/10 px-4 py-3 text-sm text-bad" data-testid="book-error"><span className="min-w-0">{error}</span><button type="button" className="shrink-0 underline" onClick={clearError}>Dismiss</button></div>}<SampleDataBar path={path} demo={account.demo} offer={account.offerSample} />{view && path === VIEW_HOME[view] && <InstallHint />}{children}</main>
+        <main id="desk" className={cn("mx-auto min-w-0 max-w-7xl px-4 pt-5 md:px-[22px] md:pt-7 md:pb-12", tabBar ? "pb-28" : "pb-10")}>{offline && <div role="status" className="mb-4 rounded-[2px] border border-warn/40 bg-warn/12 px-4 py-2.5 text-sm text-warn" data-testid="offline">You&apos;re offline. Saves and uploads won&apos;t go through until you&apos;re back online.</div>}{account.staleJobs.length > 0 && <div role="alert" className="mb-4 rounded-[2px] border border-bad/40 bg-bad/10 px-4 py-3 text-sm text-bad" data-testid="stale-jobs">The nightly {account.staleJobs.join(" and the ")} {account.staleJobs.length === 1 ? "hasn't" : "haven't"} run in over two days. Check that the jobs process is running on the server (<code>pm2 ls</code> shows <code>lendhous-jobs</code>), or run <code>npm run jobs</code>.</div>}{watches.length > 0 && path !== "/admin/storms" && <div role="status" className="mb-4 rounded-[2px] border border-bad/40 bg-bad/10 px-4 py-3 text-sm text-bad" data-testid="storm-banner">Storm watch: {watches.map((storm) => `${storm.label}'s forecast cone covers ${storm.nowIn.length} funded loan${storm.nowIn.length === 1 ? "" : "s"}`).join("; ")}. <Link className="font-medium underline" href="/admin/storms">See which</Link></div>}{error && <div role="alert" className="mb-4 flex items-start justify-between gap-3 rounded-[2px] border border-bad/40 bg-bad/10 px-4 py-3 text-sm text-bad" data-testid="book-error"><span className="min-w-0">{error}</span><button type="button" className="shrink-0 underline" onClick={clearError}>Dismiss</button></div>}<SampleDataBar path={path} demo={account.demo} offer={account.offerSample} />{view && path === VIEW_HOME[view] && <InstallHint />}{children}</main>
       </div>
       {tabBar && view === "borrower" && <BorrowerTabs path={path} onAccount={() => setOpen(true)} onUpload={() => setUploading(true)} />}
       {view === "borrower" && <UploadSheet open={uploading} onOpenChange={setUploading} />}

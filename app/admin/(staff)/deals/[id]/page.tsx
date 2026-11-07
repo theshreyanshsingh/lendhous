@@ -183,7 +183,7 @@ export default function DealWorkspace() {
                   {num("strAnnualIncome", uwApp.strIncomeSource === "projection" ? "Projected income / yr" : "Payouts, last 12 months")}
                   <p className="text-[11px] text-faint" data-testid="uw-str-rent">Counted at {Math.round(shortTermFactor(uwApp, pricingConfig) * 100)}%: {usd(qualifyingRent(uwApp, pricingConfig))} a month for the DSCR.</p>
                 </> : num("monthlyRent", "Qualifying rent / mo")}
-                {num("taxesAnnual", "Taxes / yr")}{num("insuranceAnnual", "Insurance / yr")}
+                {num("taxesAnnual", "Taxes / yr")}{num("insuranceAnnual", "Insurance / yr")}{num("floodAnnual", "Flood insurance / yr")}
               </>}
               {num("fico", "FICO (pulled)")}{num("verifiedDeals", "Verified deals (36 mo)")}{num("liquidity", "Verified liquidity")}
               <p className="text-[11px] text-faint">{locked ? "Edits are a live what-if. These numbers are locked once a loan clears to close." : "Edits are a live what-if until you save them."}</p>
@@ -312,7 +312,7 @@ export default function DealWorkspace() {
         <PropertyPhotos deal={d} side="team" />
         <TermSheetCard deal={d} canSign={false} />
         <ScopeOfWork deal={d} editable={false} />
-        {(d.scope?.length ?? 0) > 0 && <Section title="Site photos"><PhotoRequests deal={d} /></Section>}
+        {((d.scope?.length ?? 0) > 0 || s.photoRequests.some((request) => request.dealId === d.id && request.stormId)) && <Section title="Site photos"><PhotoRequests deal={d} /></Section>}
         <Section title="Documents">
           <ul className="divide-y divide-border">{d.docs.map((x) => (
             <li key={x.id} className="flex flex-wrap items-center justify-between gap-2 py-2"><div className="min-w-0"><div className="text-sm font-medium">{x.name}{x.addedBy === "borrower" && <span className="ml-2 text-xs font-normal text-link">added by the borrower</span>}</div>{x.status === "rejected" && x.teamNote && <div className="text-xs text-bad">Sent back: {x.teamNote}</div>}<div className="text-xs text-muted-foreground">{x.category}{x.fileName && !x.documentId && ` · ${x.fileName}`}{x.documentId && <> · <a className="text-link underline underline-offset-2" href={`/api/documents/${x.documentId}`} data-testid="doc-file">{x.fileName}</a></>}{x.carriedFrom && <> · <span className="text-good" data-testid="doc-carried">carried over from {x.carriedFrom}</span> <button type="button" className="text-link underline underline-offset-2" data-testid="doc-ask-again" onClick={() => dispatch({ t: "docStatus", dealId: d.id, docId: x.id, status: "requested" })}>ask again</button></>}</div></div>

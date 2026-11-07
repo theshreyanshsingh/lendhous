@@ -4,6 +4,9 @@ import { budgetBalance, isContingency } from "./budget";
 import { approveDraw, evaluate, fundedBalances, type Product } from "./engine";
 import type { Deal, DrawRequest, DrawRequestLine, ScopeLine } from "./mockData";
 import { currentPricing, pricingFor } from "./pricing-versions";
+import { freshInspectionNeeded } from "./storms";
+
+export { freshInspectionNeeded };
 
 const REHAB: [string, string, number][] = [
   ["demolition", "Demolition", 0.06],
@@ -87,6 +90,8 @@ export const approversNeeded = (deal: Deal, amount: number) => (amount > current
 export function approvalError(deal: Deal, draw: DrawRequest, approver: string) {
   if (draw.status !== "inspected") return "This draw isn't waiting for approval.";
   if (draw.approvers.includes(approver)) return "A second, different approver is required.";
+  const storm = freshInspectionNeeded(deal, draw);
+  if (storm) return storm;
   const review = reviewDraw(deal, draw);
   if (review.blocked === "Loan out of balance") return `The loan is out of balance by $${budgetBalance(deal).shortfall.toLocaleString("en-US")}: the work left costs more than what's left to draw. Nothing can be released until the borrower covers the overrun.`;
   if (review.blocked) return `${review.blocked}, so nothing can be released.`;

@@ -423,6 +423,33 @@ ok("and what borrowers say after closing, as a net promoter score", (await seen(
 ok("and the funded book's concentration by borrower, county, loan type and flood zone", (await seen(page.getByTestId("concentration-report"))) && (await page.getByTestId("concentration-row").count()) >= 4);
 await page.goto(BASE + "/admin/deals/d16?tab=Score%20%26%20Flags");
 ok("a loan bought far above its last sale is flagged as a possible related-party flip", (await seen(page.getByTestId("risk-checks"))) && (await page.getByTestId("price-jump").innerText()).includes("Possible flip between related parties"));
+ok("FEMA's map not having the address is said to be not mapped, not no risk", (await page.getByTestId("flood-map").innerText()).includes("isn't mapped, not that there's no risk"));
+// Flood zones from FEMA's map: a demo seat gets a sample answer, zone AE in a coastal county.
+await page.goto(BASE + "/admin/deals/d1?tab=Score%20%26%20Flags");
+ok("a loan not yet looked up on FEMA's map says so", (await page.getByTestId("flood-map").innerText()).includes("Not looked up"));
+await page.getByTestId("check-flood-map").click();
+ok("checking FEMA's map on a coastal address finds a special flood hazard area", await seen(page.getByTestId("flood-map").getByText("Zone AE: a special flood hazard area, so flood insurance is required.")));
+await page.getByTestId("tab-Conditions").click();
+ok("and adds a flood insurance condition before funding", await seen(page.getByText("Flood insurance naming LendHous").first()));
+// Storm mode: the demo's sample hurricane over South Florida, then gone. Until a storm is on record the page is a link
+// from Loan servicing, so the menu still fits a laptop.
+await page.goto(BASE + "/admin/servicing");
+ok("the storm page isn't in the menu until a storm covers a loan", (await page.getByTestId("side-nav").first().getByRole("link", { name: "Storms" }).count()) === 0);
+await page.getByTestId("storm-link").getByRole("link", { name: "Storm watch" }).click();
+await page.waitForURL("**/admin/storms");
+ok("the storm page says when no cone covers a property", await seen(page.getByText("No storm's forecast cone covers a LendHous property.")));
+await page.getByTestId("check-storms").click();
+ok("a storm check finds the funded loans inside the forecast cone", (await seen(page.getByTestId("storm-active"))) && (await page.getByTestId("storm-loan").count()) === 5);
+ok("with what's out on each, what's left to draw and whether wind is covered", (await page.getByTestId("storm-wind").count()) === 5 && (await page.getByTestId("storm-total").innerText()).includes("Left to draw"));
+await shot(page, "19s-admin-storms.png");
+await page.goto(BASE + "/admin");
+ok("and every staff page carries the storm banner", (await page.getByTestId("storm-banner").innerText()).includes("Hurricane Sample (FAKE)'s forecast cone covers 5 funded loans"));
+ok("and the menu lists the storm page, counting the storm on watch", (await page.getByTestId("side-nav").first().getByRole("link", { name: /Storms/ }).innerText()).includes("1"));
+await page.goto(BASE + "/admin/storms");
+await page.getByTestId("check-storms").click();
+ok("once it has passed, each borrower is asked for photos of the property", (await seen(page.getByTestId("storm-passed"))) && (await page.getByTestId("storm-followup").innerText()).includes("5 borrowers asked for photos of the property"));
+await page.goto(BASE + "/admin");
+ok("and the banner comes down", (await page.getByTestId("storm-banner").count()) === 0);
 await page.goto(BASE + "/admin/reports");
 await page.getByTestId("journal-month").selectOption("2026-10");
 ok("the accounting journal for a month is ready for QuickBooks", (await page.getByTestId("journal-summary").innerText()).match(/^\d+ journal entries for October 2026/) !== null && (await page.getByTestId("journal-download").isEnabled()));
@@ -791,15 +818,33 @@ ok("the rental-loan application starts from the loan, on the same property", (aw
 await page.goto(BASE + "/admin/borrower/d2");
 ok("the borrower sees the draw in progress", (await page.getByTestId("my-draw").count()) === 1);
 await page.getByTestId("request-draw").click();
+// The draw walks the chosen budget lines one at a time, each with a photo and how far along it is.
+await page.getByTestId("draw-pick-kitchen").check();
+await page.getByTestId("draw-pick-plumbing").check();
+await page.getByTestId("draw-next").click();
+ok("a draw walks one budget line at a time, in the budget's order", (await page.getByTestId("draw-line").innerText()).includes("Line 1 of 2") && (await page.getByTestId("draw-line").innerText()).includes("Plumbing"));
 await page.getByTestId("draw-plumbing").fill("3000");
+await page.getByTestId("draw-pct-plumbing").fill("60");
+ok("each line needs a photo before moving on", (await page.getByTestId("draw-next").isDisabled()) && (await page.getByTestId("draw-line-problem").innerText()).includes("photo"));
+await page.getByTestId("draw-photo-plumbing").setInputFiles({ name: "rough-plumbing.jpg", mimeType: "image/jpeg", buffer: Buffer.from("fake") });
+await page.getByTestId("draw-shots").waitFor();
+await page.getByTestId("draw-next").click();
+ok("and shows last draw's photo of the same line beside the new one", (await page.getByTestId("draw-last-photo").innerText()).includes("kitchen-cabinets.jpg") && (await page.getByTestId("draw-last-photo").innerText()).includes("same spot"));
+await page.getByTestId("draw-kitchen").fill("2000");
+await page.getByTestId("draw-pct-kitchen").fill("90");
+await page.getByTestId("draw-photo-kitchen").setInputFiles({ name: "island.jpg", mimeType: "image/jpeg", buffer: Buffer.from("fake") });
+await page.getByTestId("draw-shots").waitFor();
+await shot(page, "17a-borrower-draw-line.png");
+await page.getByTestId("draw-next").click();
 ok("a draw needs a contact and a certification", await page.getByTestId("submit-draw").isDisabled());
+ok("and sums up each line before it's sent", (await page.getByTestId("draw-summary-lines").innerText()).includes("60% done") && (await page.getByTestId("draw-summary-lines").innerText()).includes("90% done"));
 await page.getByTestId("draw-note").fill("Rough plumbing is finished.");
 await page.getByTestId("draw-contact").fill("Alex Sample, (555) 010-0100");
-await page.getByTestId("draw-photos").setInputFiles({ name: "rough-plumbing.jpg", mimeType: "image/jpeg", buffer: Buffer.from("fake") });
 await page.getByTestId("draw-certify").check();
 await shot(page, "17-borrower-request-draw.png");
 await page.getByTestId("submit-draw").click();
 ok("the borrower requests a draw against the budget", await page.getByTestId("my-draw").nth(1).waitFor({ timeout: 5000 }).then(() => true, () => false));
+ok("and is told when the team will decide it", (await page.getByTestId("draw-decide-by").first().innerText()).startsWith("We'll decide by"));
 ok("the borrower sees which lien waivers a draw needs", (await page.getByTestId("draw-lien").count()) >= 1 && (await page.getByTestId("draw-lien").first().innerText()).includes("statutory form"));
 await page.getByTestId("payoff-date").fill("2026-11-15");
 ok("the borrower sees a payoff figure", (await page.getByTestId("payoff-total").innerText()).startsWith("$"));
@@ -864,6 +909,8 @@ const draw = page.getByTestId("draw-card").filter({ hasText: "Cabinets are in" }
 await seen(draw);
 ok("a draw says whether the contractor has signed off the work", await seen(draw.getByTestId("draw-contractor-unsigned")));
 ok("and where and when its photos were taken, against the property", (await draw.getByTestId("photo-checks").first().innerText()).includes("taken at the property") && (await draw.getByTestId("photo-checks").first().innerText()).includes("away"));
+ok("a draw shows when it's to be decided by, against the target", (await draw.getByTestId("draw-clock").innerText()).startsWith("Decide by"));
+ok("and how far along the borrower says each line is, with their own photos checked against the property", (await draw.getByTestId("draw-claimed").first().innerText()) === "80%" && (await draw.getByTestId("draw-photo-checks").innerText()).includes("2 taken at the property"));
 await shot(page, "18-admin-draws.png");
 // Asking for photos by link. A demo seat sends nothing, and its link opens a preview.
 const seededDraw = page.getByTestId("draw-card").filter({ hasText: "Cabinets are in and the flooring is down." });
@@ -1565,7 +1612,7 @@ await visitorPhone.close();
 
 // cold load of every route in a fresh browser, as the seat that owns it: catches hydration mismatches that
 // client-side navigation hides
-const routes = [["/", null], ["/calculators", null], ["/start", null], ["/resources", null], ["/admin/apply", SEATS.borrower], ["/admin/borrower", SEATS.borrower], ["/admin/borrower/d2", SEATS.borrower], ["/admin", SEATS.staff], ["/admin/deals/d1", SEATS.staff], ["/admin/reports", SEATS.staff], ["/admin/errors", SEATS.staff], ["/admin/letters", SEATS.staff], ["/admin/brokers", SEATS.staff], ["/admin/tax", SEATS.staff], ["/verify/demo", null], ["/login/forgot", null], ["/login/signup", null], ["/admin/capital", SEATS.staff], ["/admin/loan-sales", SEATS.staff], ["/admin/draws", SEATS.staff], ["/admin/servicing", SEATS.staff], ["/admin/audit", SEATS.staff], ["/admin/account/notifications", SEATS.staff], ["/admin/borrower/d18", SEATS.borrower], ["/admin/broker", SEATS.broker], ["/admin/broker/new", SEATS.broker], ["/admin/broker/deals/d3", SEATS.broker], ["/admin/members", SEATS.staff], ["/admin/buyer", SEATS.buyer], ["/admin/buyer/loans/s-d10", SEATS.buyer], ["/admin/buyer/portfolio", SEATS.buyer], ["/admin/partner", SEATS.partner], ["/admin/partner/teasers/d3", SEATS.partner]];
+const routes = [["/", null], ["/calculators", null], ["/start", null], ["/resources", null], ["/admin/apply", SEATS.borrower], ["/admin/borrower", SEATS.borrower], ["/admin/borrower/d2", SEATS.borrower], ["/admin", SEATS.staff], ["/admin/deals/d1", SEATS.staff], ["/admin/reports", SEATS.staff], ["/admin/errors", SEATS.staff], ["/admin/letters", SEATS.staff], ["/admin/brokers", SEATS.staff], ["/admin/tax", SEATS.staff], ["/verify/demo", null], ["/login/forgot", null], ["/login/signup", null], ["/admin/capital", SEATS.staff], ["/admin/loan-sales", SEATS.staff], ["/admin/draws", SEATS.staff], ["/admin/servicing", SEATS.staff], ["/admin/storms", SEATS.staff], ["/admin/audit", SEATS.staff], ["/admin/account/notifications", SEATS.staff], ["/admin/borrower/d18", SEATS.borrower], ["/admin/broker", SEATS.broker], ["/admin/broker/new", SEATS.broker], ["/admin/broker/deals/d3", SEATS.broker], ["/admin/members", SEATS.staff], ["/admin/buyer", SEATS.buyer], ["/admin/buyer/loans/s-d10", SEATS.buyer], ["/admin/buyer/portfolio", SEATS.buyer], ["/admin/partner", SEATS.partner], ["/admin/partner/teasers/d3", SEATS.partner]];
 for (const [r, seat] of routes) {
   const c = await browser.newContext(); if (seat) await c.addCookies(sessions[seat]); const p = await c.newPage(); const errs = [];
   p.on("pageerror", (e) => errs.push(e.message)); p.on("console", (msg) => { if (msg.type() === "error") errs.push(msg.text()); });

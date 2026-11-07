@@ -1,4 +1,5 @@
 "use client";
+import { FloodMapLine } from "./FloodMapLine";
 import Link from "next/link";
 import { useState } from "react";
 import { Section, statusLabel, usd } from "@/components/ui";
@@ -37,6 +38,8 @@ export function RiskChecks({ deal }: { deal: Deal }) {
           </div>
         )}
         {warnings.length > 0 && <ul className="space-y-1 border-t border-border pt-3 text-warn" data-testid="risk-concentration">{warnings.map((item) => <li key={item}>{item}</li>)}</ul>}
+        {/* The flood zone is a risk on every Florida loan, long before the insurance is sorted out on the Closing tab. */}
+        <div className="border-t border-border pt-3"><p className="font-medium">Flood zone</p><FloodMapLine deal={deal} /></div>
       </div>
     </Section>
   );

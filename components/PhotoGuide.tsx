@@ -16,7 +16,10 @@ const TIPS = [
 ];
 
 /** The page a contractor or borrower opens from a link: one budget line at a time, saying exactly what to photograph. */
-export function PhotoGuide({ token, to, sentBy, address, steps, photos, finished, finishedBy, note: sentNote, expiresAt, signsDraw = false, inspects = false }: { token: string | null; to: string; sentBy: string; address: string; steps: GuideStep[]; photos: Sent[]; finished: boolean; finishedBy: string; note: string; expiresAt: string; signsDraw?: boolean; inspects?: boolean }) {
+/** What the borrower said about each line when they asked for the draw, for the inspector to check against. */
+export type Claims = Record<string, { pct?: number; photos: { id: string; name: string }[] }>;
+
+export function PhotoGuide({ token, to, sentBy, address, steps, photos, finished, finishedBy, note: sentNote, expiresAt, signsDraw = false, inspects = false, afterStorm = false, claims = {} }: { token: string | null; to: string; sentBy: string; address: string; steps: GuideStep[]; photos: Sent[]; finished: boolean; finishedBy: string; note: string; expiresAt: string; signsDraw?: boolean; inspects?: boolean; afterStorm?: boolean; claims?: Claims }) {
   const [tiles, setTiles] = useState<Tile[]>(() => photos.map((photo) => ({ key: photo.id, scopeId: photo.scopeId, shot: photo.shot, state: "sent", photoId: photo.id, url: `/api/photo-links/${token}/${photo.id}` })));
   // 0 is the welcome, then one page per guide step, then the review.
   const [page, setPage] = useState(0);
@@ -132,8 +135,8 @@ export function PhotoGuide({ token, to, sentBy, address, steps, photos, finished
         ) : page === 0 ? (
           <div>
             <p className="eyebrow">Photos for LendHous</p>
-            <h1 className="mt-2 text-3xl font-normal text-foreground">Hi {first}. We need photos of the finished work.</h1>
-            <p className="mt-3 text-sm text-muted-foreground">{sentBy} asked for photos of <b className="font-medium text-foreground">{address}</b>. It takes a few minutes on your phone, and you don&apos;t need an account.</p>
+            <h1 className="mt-2 text-3xl font-normal text-foreground">Hi {first}. {afterStorm ? "We need photos of the property after the storm." : "We need photos of the finished work."}</h1>
+            <p className="mt-3 text-sm text-muted-foreground">{afterStorm ? <>We hope everyone is safe. Only go once it&apos;s safe to. </> : null}{sentBy} asked for photos of <b className="font-medium text-foreground">{address}</b>. It takes a few minutes on your phone, and you don&apos;t need an account.</p>
             <div className="glass mt-5 p-4">
               <h2 className="eyebrow">What makes a good photo</h2>
               <ul className="mt-3 space-y-2 text-sm">{TIPS.map((tip) => <li key={tip} className="flex gap-2"><Check size={16} className="mt-0.5 shrink-0 text-good" aria-hidden="true" /><span>{tip}</span></li>)}</ul>
@@ -175,7 +178,22 @@ export function PhotoGuide({ token, to, sentBy, address, steps, photos, finished
             {inspects && (
               <fieldset className="mt-4 space-y-2" data-testid="inspector-lines">
                 <legend className="label">How far along is each line? (percent complete)</legend>
-                {workLines.map((step) => <label key={step.id} className="flex items-center justify-between gap-3 text-sm"><span className="min-w-0">{step.title}</span><input className="desk-input w-24!" type="number" inputMode="numeric" min={0} max={100} data-testid={`inspector-pct-${step.id}`} value={observed[step.id] ?? ""} onChange={(event) => setObserved({ ...observed, [step.id]: event.target.value })} /></label>)}
+                {workLines.map((step) => {
+                  const claim = claims[step.id];
+                  return (
+                    <div key={step.id} className="border-b border-border pb-2 last:border-0" data-testid="inspector-line">
+                      <label className="flex items-center justify-between gap-3 text-sm"><span className="min-w-0">{step.title}{claim?.pct !== undefined && <small className="block text-xs text-muted-foreground" data-testid="inspector-claim">The borrower says {Math.round(claim.pct * 100)}%</small>}</span><input className="desk-input w-24!" type="number" inputMode="numeric" min={0} max={100} data-testid={`inspector-pct-${step.id}`} value={observed[step.id] ?? ""} onChange={(event) => setObserved({ ...observed, [step.id]: event.target.value })} /></label>
+                      {claim?.photos.length ? (
+                        <ul className="mt-1 flex gap-1.5 overflow-x-auto" aria-label={`The borrower's photos of ${step.title}`}>
+                          {claim.photos.map((photo) => <li key={photo.id} className="size-14 shrink-0 overflow-hidden rounded-[2px] border border-border bg-accent">{token
+                            // eslint-disable-next-line @next/next/no-img-element
+                            ? <img src={`/api/photo-links/${token}/${photo.id}`} alt={photo.name} className="size-full object-cover" loading="lazy" />
+                            : <span className="flex size-full items-center justify-center p-0.5 text-center text-[9px] break-all text-muted-foreground">{photo.name}</span>}</li>)}
+                        </ul>
+                      ) : null}
+                    </div>
+                  );
+                })}
               </fieldset>
             )}
             {signsDraw && <label className="mt-2 flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" data-testid="photo-sign-draw" checked={signed} onChange={(event) => setSigned(event.target.checked)} />I&apos;m the contractor, and the work on these lines is done as these photos show. My name below is my signature.</label>}

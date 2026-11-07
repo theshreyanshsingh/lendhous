@@ -242,6 +242,8 @@ export interface Application {
   landValue?: number; hardCosts?: number; softCosts?: number; groundUpBuilds?: number;
   // dscr
   monthlyRent?: number; taxesAnnual?: number; insuranceAnnual?: number; hoaMonthly?: number;
+  /** Flood insurance a year, on a property in a special flood hazard area. Counted in the DSCR's monthly costs. */
+  floodAnnual?: number;
   /**
    * How the rental is let: on a lease (the default), or by the night on Airbnb or VRBO. A short-term rental is sized on its
    * yearly income at a factor (qualifyingRent): the last 12 months of payouts, or a projection where there's no history yet.
@@ -397,7 +399,7 @@ export function evaluate(app: Application, cfg: PricingConfig = pricingFor(app.p
         const cellRate = pick(d.baseRate, pp) + cell.rateAdd + rateAdd + smallLoanAdd(loan);
         const r = app.termRate ?? cellRate;
         const pay = d.qualifyOn === "io" ? ioPayment(loan, r) : amortizingPayment(loan, r, d.amortizationMonths);
-        const x = dscr({ monthlyRent: rent, payment: pay, taxesAnnual: app.taxesAnnual ?? 0, insuranceAnnual: app.insuranceAnnual ?? 0, hoaMonthly: app.hoaMonthly }).dscr;
+        const x = dscr({ monthlyRent: rent, payment: pay, taxesAnnual: app.taxesAnnual ?? 0, insuranceAnnual: app.insuranceAnnual ?? 0, hoaMonthly: app.hoaMonthly, floodAnnual: app.floodAnnual }).dscr;
         if (x >= d.dscrBands[col] - 1e-9) { chosen = { col, loan, rate: r, matrixRate: cellRate, dscr: x, maxLTV: maxL }; break; }
       }
     }

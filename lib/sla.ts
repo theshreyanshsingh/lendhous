@@ -87,3 +87,23 @@ export function clockOf(since: string, now: Date, target: Target): Clock {
   const text = state === "red" ? `${span(elapsed - target.hours, target.business)} past the target` : `${span(target.hours - elapsed, target.business)} left`;
   return { elapsed, target, state, text };
 }
+
+/**
+ * When a wait reaches its target: plain hours added on, or working hours counted forward through Florida's business days.
+ * To the minute, which is all a "we'll decide by" time needs.
+ */
+export function dueAt(since: string, target: Target): Date {
+  const start = new Date(since);
+  if (!target.business) return new Date(start.getTime() + target.hours * 3_600_000);
+  // Working hours only grow with time, so search the minutes after it for the first that has counted enough of them.
+  let low = Math.ceil(start.getTime() / 60_000);
+  let high = low + 60 * 24 * 60;
+  while (low < high) {
+    const mid = Math.floor((low + high) / 2);
+    if (businessHoursBetween(start, new Date(mid * 60_000)) >= target.hours - 1e-9) high = mid; else low = mid + 1;
+  }
+  return new Date(low * 60_000);
+}
+
+/** An instant as people in Florida say it: "Tuesday, November 10 at 3:15 PM". */
+export const floridaTime = (at: Date) => `${at.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", timeZone: ZONE })} at ${at.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: ZONE })}`;

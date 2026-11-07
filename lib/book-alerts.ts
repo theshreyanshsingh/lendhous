@@ -11,6 +11,8 @@ import { latestSheet } from "@/lib/term-sheets";
 import { policiesOf, policyWord } from "@/lib/insurance";
 import { bonusOf, PAY_WITHIN_BUSINESS_DAYS } from "@/lib/referrals";
 import { budgetBalance } from "@/lib/budget";
+import { FLOOD_CONDITION } from "@/lib/flood-zones";
+import { afterCheck, exposureLines } from "@/lib/storms";
 import { dueOf, fromThirdParty, letterChanges, receivedOf, requesterLine, staleLetter } from "@/lib/payoffs";
 import { prisma } from "@/lib/prisma";
 import { defaultInterestFrom, defaultRateOf, ledger, maturityOf, servicingTermsOf } from "@/lib/servicing";
@@ -266,6 +268,34 @@ function actionAlerts(before: Book, after: Book, action: BookAction): Alert[] {
       return action.status === "rejected" ? [{ to: "borrower", dealId: action.dealId, subject: `A document needs another look: ${number(action.dealId)}`, body: "One of your documents wasn't accepted. Sign in to see which one and upload a new copy.", event: "doc.rejected" }] : [];
     case "addDocRequest":
       return [{ to: "borrower", dealId: action.dealId, subject: `We need a document: ${number(action.dealId)}`, body: `Please upload: ${action.name}.`, event: "doc.requested" }];
+    case "recordFloodMap": {
+      const was = before.deals.find((item) => item.id === action.dealId);
+      const deal = after.deals.find((item) => item.id === action.dealId);
+      if (!was || !deal) return [];
+      const flagged = (item: typeof deal) => (item.conditions ?? []).some((condition) => condition.templateId === FLOOD_CONDITION);
+      const alerts: Alert[] = [];
+      if (flagged(deal) && !flagged(was)) {
+        const body = `FEMA's flood map puts ${deal.address}, ${deal.city} in flood zone ${action.map.zone}, a special flood hazard area. The loan needs flood insurance naming LendHous as mortgagee before it funds. Ask your insurance agent for a quote now: it can take a while, and it adds to the monthly cost.`;
+        const premium = deal.app.floodAnnual !== undefined && was.app.floodAnnual === undefined;
+        alerts.push({ to: "borrower", dealId: deal.id, subject: `Flood insurance needed: ${deal.loanNumber}`, body, event: "flood.required" }, { to: "broker", dealId: deal.id, subject: `Flood insurance needed for your client: ${deal.loanNumber}`, body, event: "flood.required" },
+          { to: "team", subject: `Flood zone ${action.map.zone}: ${deal.loanNumber}`, body: `FEMA's map puts ${deal.borrowerName}'s property at ${deal.address}, ${deal.city} in zone ${action.map.zone}, a special flood hazard area. A flood insurance condition was added before funding${premium ? `, and the DSCR now counts ${dollars(deal.app.floodAnnual!)} a year for flood until the real quote is in` : ""}.`, event: "flood.required" });
+      }
+      if (!action.map.mapped && !was.floodMap) alerts.push({ to: "team", subject: `Flood zone not mapped: ${deal.loanNumber}`, body: `FEMA's flood map has no digital flood zone at ${deal.address}, ${deal.city}. That isn't the same as no risk: order a flood zone determination and record the zone on the loan's Closing tab.`, event: "flood.not_mapped" });
+      return alerts;
+    }
+    case "recordStormCheck": {
+      const today = serviceDay(after);
+      const { added, passed, newlyIn } = afterCheck(before.storms ?? [], action.storms, action.at);
+      const page = `See them on the Storms page: ${origin()}/admin/storms`;
+      const covers = (count: number) => `${count} LendHous loan${count === 1 ? "" : "s"}`;
+      const alerts: Alert[] = added.map((storm) => ({ to: "team", subject: `Storm watch: ${storm.label}'s cone covers ${covers(storm.nowIn.length)}`, body: `NHC's five-day forecast cone for ${storm.label} (advisory ${storm.advisory}) covers these funded loans:\n\n${exposureLines(after.deals, storm.nowIn, today).join("\n")}\n\nCheck that wind and flood cover is in force, and that nothing is about to be released on them. ${page}`, event: "storm.watch" }));
+      for (const storm of [...new Set(newlyIn.map((item) => item.storm))]) {
+        const ids = newlyIn.filter((item) => item.storm === storm).map((item) => item.dealId);
+        alerts.push({ to: "team", subject: `Storm watch: ${storm.label} now covers ${covers(ids.length)} more`, body: `NHC's latest cone for ${storm.label} (advisory ${storm.advisory}) now also covers:\n\n${exposureLines(after.deals, ids, today).join("\n")}\n\n${page}`, event: "storm.watch" });
+      }
+      for (const storm of passed) alerts.push({ to: "team", subject: `${storm.label} has passed`, body: `${storm.label} is no longer on NHC's list of active storms. Each of the ${covers(storm.dealIds.length)} it covered is asked for photos of the property, and draws on them need an inspection from after the storm before they're approved or released. ${page}`, event: "storm.passed" });
+      return alerts;
+    }
     case "requestDraw":
       return [{ to: "team", subject: `Draw requested: ${number(action.dealId)}`, body: `${action.by} requested a draw of $${action.lines.reduce((sum, line) => sum + line.requested, 0).toLocaleString("en-US")}.`, event: "draw.requested" }];
     case "finishPhotoRequest": {

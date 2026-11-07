@@ -5,6 +5,7 @@
 // from the contractor and every one of them (713.20), and the last one final waivers and the contractor's final payment
 // affidavit (713.06(3)(d)). No policy on the building, or any lapsed policy (lib/insurance.ts), stops draws too. An owner can release past these
 // holds with a reason. The reducer, the access rules and the screens all ask these, so they can't disagree.
+import { freshInspectionNeeded } from "./storms";
 import { insuranceHold } from "./insurance";
 import type { Deal, DrawRequest, LienFile, LienWaiver } from "./mockData";
 import { addDays } from "./servicing";
@@ -55,6 +56,9 @@ export const waiverFrom = (draw: DrawRequest, key: string, kind: LienWaiver["kin
 /** Everything that holds a draw's release under the lien law and insurance. Empty when it can go. */
 export function drawHolds(deal: Deal, draw: DrawRequest, today: string) {
   const holds = [...nocProblems(deal, today)];
+  // A storm over the property since the inspection: the work is looked at again before the money goes (lib/storms.ts).
+  const storm = freshInspectionNeeded(deal, draw);
+  if (storm) holds.push(storm);
   const insurance = insuranceHold(deal, today);
   if (insurance) holds.push(insurance);
   if (!deal.lienFile?.contractor) holds.push("The contractor isn't on file, so its lien waiver can't be checked.");

@@ -38,6 +38,16 @@ export const guideSteps = (lines: { id: string; division: string }[]): GuideStep
 /** The budget lines this request covers, as they stand on the loan now. */
 export const requestLines = (request: Pick<PhotoRequest, "scopeIds">, deal: Pick<Deal, "scope">) => (deal.scope ?? []).filter((line) => request.scopeIds.includes(line.id));
 
+/** After a storm (lib/storms.ts): the property itself, all round, rather than finished work. */
+export const STORM_STEP: GuideStep = { id: "storm", title: "After the storm", shots: [
+  shot("sides", "Each side of the building", "Front, back and both sides, so the roof line and the windows show."),
+  shot("roof", "The roof", "From the ground is fine. Show any missing shingles or tiles."),
+  shot("damage", "Any damage, close up", "Water inside, broken windows, fallen trees or fences. Skip it if there's none."),
+] };
+
+/** The guide a request's link walks through: the property, then the budget lines asked for, or the storm's checks. */
+export const requestSteps = (request: Pick<PhotoRequest, "scopeIds" | "stormId">, deal: Pick<Deal, "scope">): GuideStep[] => (request.stormId ? [PROPERTY_STEP, STORM_STEP] : guideSteps(requestLines(request, deal)));
+
 export type LinkState = "open" | "expired" | "off" | "closed";
 
 /**

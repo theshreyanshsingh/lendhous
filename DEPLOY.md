@@ -62,6 +62,7 @@ SynergyFund holds port 3007 and UPB holds 3009 on the shared server, so pick ano
 npm ci && npm run db:indexes && LENDHOUS_RELEASE=1 npm run build
 pm2 start node_modules/.bin/next --name lendhous -- start -p <port> -H 0.0.0.0
 pm2 start node_modules/.bin/tsx --name lendhous-jobs --cron-restart "0 6 * * *" --no-autorestart -- --env-file=.env scripts/jobs.ts
+pm2 start node_modules/.bin/tsx --name lendhous-storms --cron-restart "15 */6 * * *" --no-autorestart -- --env-file=.env scripts/jobs.ts storms
 pm2 save
 ```
 
@@ -72,6 +73,8 @@ git pull && LENDHOUS_RELEASE=1 npm run build && pm2 restart lendhous && npm run 
 ```
 
 Check `pm2 ls` shows `lendhous-jobs`. It runs the daily jobs at 06:00 UTC, including the servicing check that marks missed payments late, charges late fees and sends late and maturity notices, the term sheet check that reminds borrowers two days before a term sheet expires and expires it after its last day, the insurance check that warns 30 days before any policy on a funded loan ends (hazard, windstorm, flood or builder's risk) and again when it lapses, and, last, the owners' daily email with yesterday's numbers (sent to every owner-admin and `TEAM_EMAIL`, and linking to `NEXT_PUBLIC_APP_URL/admin/reports`). Without it nothing goes late, and the servicing page warns that the check has stopped. `npm run jobs` runs any job that hasn't run today, straight away.
+
+**Flood zones and storm mode reach three free public services, with no keys.** The server needs outbound HTTPS to `geocoding.geo.census.gov` (placing properties on the map), `hazards.fema.gov` (FEMA's flood map) and `www.nhc.noaa.gov` (the hurricane center's active storms and forecast cones). FEMA's servers reset connections from some networks, including the machine this was built on, so check from the production server before relying on it: `curl -s "https://hazards.fema.gov/arcgis/rest/services/public/NFHL/MapServer?f=json" | head -c 200` should print JSON. If it can't, flood zones are simply never filled in (the team records them from the flood determination as before) and the Errors page stays quiet; nothing else stops. After the deploy that adds them, add the `lendhous-storms` process above (NHC writes a new advisory every six hours; the storm job runs once in each six-hour window, and the daily run at 06:00 includes it), then run `npm run jobs` once: the `properties` job places up to 25 loans a night and looks up their flood zones, so the book fills in over a few nights. Re-record the FEMA test answers in `tests/fixtures/fema` from the server once it can reach FEMA.
 
 **After the deploy that adds OFAC screening, run `npm run jobs` once.** The sanctions job downloads Treasury's list from `treasury.gov` (the server needs outbound HTTPS to it) and screens every open application and loan, and every partner lender, loan buyer and brokerage. Until it has run, nothing can be screened, applications can't go to underwriting, and loans can't fund or release draws.
 

@@ -1423,3 +1423,74 @@ describe("borrower statements", () => {
     vi.restoreAllMocks();
   });
 });
+
+describe("storm watch and flood maps", () => {
+  it("records which funded loans a cone covers, emails the owners, and asks for photos once it passes", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const { readFileSync } = await import("node:fs");
+    const { demoBook } = await import("@/lib/book");
+    const { readBook } = await import("@/lib/book-store");
+    const { checkStorms } = await import("@/lib/storm-watch");
+    await prisma.user.create({ data: { email: "stella.storm@example.com", name: "Stella Storm", passwordHash: "x", accountStatus: "APPROVED", roles: { create: [{ role: "ADMIN_OWNER" }] } } });
+    const borrower = await prisma.user.create({ data: { email: "wade.wind@example.com", name: "Wade Wind", passwordHash: "x", accountStatus: "APPROVED", roles: { create: [{ role: "BORROWER" }] } } });
+    const d2 = demoBook().deals.find((deal) => deal.id === "d2")!;
+    // A funded flip in Fort Lauderdale, on the map, and one in Delray Beach, north of the cone.
+    await prisma.bookRecord.create({ data: { id: "deals:storm-in", kind: "deals", data: JSON.parse(JSON.stringify({ ...d2, id: "storm-in", loanNumber: "LH-8801", borrowerId: borrower.id, borrowerName: "Wade Wind" })) } });
+    await prisma.bookRecord.create({ data: { id: "deals:storm-out", kind: "deals", data: JSON.parse(JSON.stringify({ ...d2, id: "storm-out", loanNumber: "LH-8802", geo: { lat: 26.4615, lng: -80.0728, at: "2026-09-01T00:00:00Z" } })) } });
+    const storms = readFileSync("tests/fixtures/nhc/TEST_ATLANTIC_STORM.json");
+    const kmz = readFileSync("tests/fixtures/nhc/TEST_SOUTH_FLORIDA_CONE.kmz");
+    let active = true;
+    const fetcher = (async (url: string) => (url.endsWith("CurrentStorms.json") ? new Response(active ? storms : JSON.stringify({ activeStorms: [] })) : url.endsWith("_CONE.kmz") ? new Response(kmz) : new Response("", { status: 404 }))) as unknown as typeof fetch;
+
+    expect(await checkStorms(new Date("2026-09-10T18:00:00Z"), fetcher)).toMatchObject({ summary: expect.stringMatching(/^1 active Atlantic storm, Hurricane Testcase covering \d+ loans?$/) });
+    const watch = (await readBook()).book.storms.find((storm) => storm.id === "al992026")!;
+    expect(watch).toMatchObject({ status: "active", advisory: "012" });
+    expect(watch.nowIn).toContain("storm-in");
+    expect(watch.nowIn).not.toContain("storm-out");
+    expect(await prisma.bookRecord.count({ where: { id: "storms:al992026" } })).toBe(1);
+    expect(await prisma.notification.count({ where: { toEmail: "stella.storm@example.com", eventCode: "storm.watch" } })).toBe(1);
+    // A cone that won't download keeps what the last one covered, and NHC not answering at all changes nothing.
+    const broken = (async (url: string) => (url.endsWith("CurrentStorms.json") ? new Response(storms) : new Response("", { status: 503 }))) as unknown as typeof fetch;
+    expect(await checkStorms(new Date("2026-09-10T23:00:00Z"), broken)).toMatchObject({ summary: expect.stringMatching(/1 cone couldn't be read/) });
+    expect(await checkStorms(new Date("2026-09-11T05:00:00Z"), (async () => { throw new Error("down"); }) as unknown as typeof fetch)).toEqual({ error: expect.stringMatching(/didn't answer/) });
+    expect((await readBook()).book.storms.find((storm) => storm.id === "al992026")).toMatchObject({ status: "active" });
+    expect(await prisma.notification.count({ where: { toEmail: "stella.storm@example.com", eventCode: "storm.watch" } })).toBe(1);
+
+    // Gone from NHC's list: it has passed. The borrower gets a link for photos, once, and draws need a fresh inspection.
+    active = false;
+    expect(await checkStorms(new Date("2026-09-12T18:00:00Z"), fetcher)).toMatchObject({ summary: expect.stringMatching(/asked for photos after a storm/) });
+    const book = (await readBook()).book;
+    expect(book.storms.find((storm) => storm.id === "al992026")).toMatchObject({ status: "passed", passedAt: "2026-09-12T18:00:00.000Z" });
+    expect(book.deals.find((deal) => deal.id === "storm-in")!.stormHold).toMatchObject({ stormId: "al992026", name: "Hurricane Testcase" });
+    const request = book.photoRequests.find((item) => item.stormId === "al992026" && item.dealId === "storm-in")!;
+    expect(request).toMatchObject({ who: "borrower", email: "wade.wind@example.com", scopeIds: [], byTeam: true });
+    expect(await prisma.photoLink.count({ where: { requestId: request.id } })).toBe(1);
+    expect(await prisma.notification.count({ where: { toEmail: "stella.storm@example.com", eventCode: "storm.passed" } })).toBe(1);
+    await checkStorms(new Date("2026-09-12T23:00:00Z"), fetcher);
+    expect((await readBook()).book.photoRequests.filter((item) => item.stormId === "al992026" && item.dealId === "storm-in")).toHaveLength(1);
+    // NHC writes a new advisory every six hours, so the job runs in each six-hour window; the rest run daily.
+    expect(lib.jobs.runKeyFor("storms", new Date("2026-09-12T07:30:00Z"))).toBe("storms:2026-09-12T06");
+    expect(lib.jobs.runKeyFor("servicing", new Date("2026-09-12T07:30:00Z"))).toBe("servicing:2026-09-12");
+    vi.restoreAllMocks();
+  });
+
+  it("places a property, looks up its flood zone, and adds the flood insurance condition", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { demoBook } = await import("@/lib/book");
+    const { readBook } = await import("@/lib/book-store");
+    const { mapProperty } = await import("@/lib/property-facts");
+    const d1 = demoBook().deals.find((deal) => deal.id === "d1")!;
+    await prisma.bookRecord.create({ data: { id: "deals:flood-loan", kind: "deals", data: JSON.parse(JSON.stringify({ ...d1, id: "flood-loan", loanNumber: "LH-8901", geo: undefined, floodMap: undefined, conditions: [] })) } });
+    const fema = (name: string) => Response.json(JSON.parse(readFileSync(`tests/fixtures/fema/${name}.json`, "utf8")));
+    const fetcher = (async (url: string) => (url.includes("geocoding.geo.census.gov") ? Response.json({ result: { addressMatches: [{ coordinates: { x: -80.1495, y: 26.0112 } }] } }) : url.includes("/query?") ? fema("zone-ae") : url.endsWith("MapServer?f=json") ? fema("directory") : new Response("", { status: 404 }))) as unknown as typeof fetch;
+    expect(await mapProperty("flood-loan", { fetcher })).toMatchObject({ placed: true, flood: { mapped: true, zone: "AE", sfha: true } });
+    const deal = (await readBook()).book.deals.find((item) => item.id === "flood-loan")!;
+    expect(deal).toMatchObject({ geo: { lat: 26.0112, lng: -80.1495 }, floodMap: { mapped: true, zone: "AE", sfha: true }, insurance: { flood: { zone: "AE", source: "fema" } } });
+    expect(deal.conditions?.filter((item) => item.templateId === "auto-flood")).toHaveLength(1);
+    // Already looked up: left alone unless asked again. FEMA failing records nothing.
+    expect(await mapProperty("flood-loan", { fetcher })).toMatchObject({ placed: false, flood: null });
+    const failing = (async (url: string) => (url.includes("/query?") ? new Response("", { status: 502 }) : fetcher(url))) as unknown as typeof fetch;
+    expect(await mapProperty("flood-loan", { again: true, fetcher: failing })).toMatchObject({ error: expect.stringMatching(/answered with an error \(502\)/) });
+    expect((await readBook()).book.deals.find((item) => item.id === "flood-loan")!.floodMap?.at).toBe(deal.floodMap!.at);
+  });
+});

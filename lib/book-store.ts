@@ -10,7 +10,7 @@ import { prisma } from "@/lib/prisma";
 import { loadPricing } from "@/lib/pricing-store";
 import { BASE_VERSION } from "@/lib/pricing-versions";
 
-const LISTS = ["deals", "bids", "partners", "buyers", "brokers", "sales", "offers", "draws", "payoffs", "messages", "sources", "photoRequests", "conditionLibrary"] as const;
+const LISTS = ["deals", "bids", "partners", "buyers", "brokers", "sales", "offers", "draws", "payoffs", "messages", "sources", "photoRequests", "conditionLibrary", "storms"] as const;
 const AUDIT_ID = "activity:feed";
 const VERSION_ID = "main";
 const ATTEMPTS = 6;
@@ -19,7 +19,7 @@ const rowId = (kind: string, id: string) => `${kind}:${id}`;
 /** What each record is bound to when it's encrypted, so a row copied over another won't open. */
 export const rowContext = (id: string) => `BookRecord:${id}`;
 // Newest first, as the reducer builds these lists. Messages read oldest first.
-const NEWEST_FIRST = new Set<string>(["deals", "bids", "sales", "offers", "draws", "payoffs", "photoRequests"]);
+const NEWEST_FIRST = new Set<string>(["deals", "bids", "sales", "offers", "draws", "payoffs", "photoRequests", "storms"]);
 
 export async function readBook() {
   const [rows, versionRow] = await Promise.all([prisma.bookRecord.findMany({ orderBy: { createdAt: "asc" } }), prisma.bookVersion.findUnique({ where: { id: VERSION_ID } })]);

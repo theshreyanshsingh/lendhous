@@ -127,6 +127,10 @@ export interface Deal {
   geo?: { lat: number; lng: number; at: string };
   /** The property's last recorded sale, entered by the processor, for the price-jump check (lib/risk.ts). */
   lastSale?: { price: number; on: string; by: string; at: string };
+  /** What FEMA's flood map says at the property's point (lib/flood-zones.ts). Not mapped isn't the same as no risk. */
+  floodMap?: FloodMap;
+  /** A storm whose forecast cone covered the property passed then: draws need an inspection from after it (lib/storms.ts). */
+  stormHold?: { stormId: string; name: string; passedAt: string };
   /** The team's updates on the loan for the partners and buyers who hold it, and a workout it declared (lib/investor-updates.ts). */
   investorUpdates?: { id: string; text: string; by: string; at: string }[];
   workout?: { since: string; note: string; by: string; at: string };
@@ -229,10 +233,15 @@ export interface ChangeOrder {
 }
 /** Work costing more than its line's budget, found at an inspection. Until it's covered the loan is out of balance. */
 export interface Overrun { id: string; amount: number; scopeId?: string; note: string; by: string; at: string; covered?: { by: string; at: string; how: string } }
-export interface DrawRequestLine { scopeId: string; requested: number; observedPct?: number }
+/** observedPct is the inspection's; claimedPct is how far along the borrower says the line is when they ask (0 to 1). */
+export interface DrawRequestLine { scopeId: string; requested: number; observedPct?: number; claimedPct?: number }
+/** A photo the borrower took for one budget line from their phone, with where and when (lib/photo-checks.ts). */
+export interface DrawPhoto { id: string; scopeId: string; name: string; at: string; takenAt?: string; lat?: number; lng?: number; documentId?: string }
 export interface DrawRequest {
   id: string; dealId: string; requestedAt: string; by: string; note: string; contact: string; photos: string[]; lines: DrawRequestLine[];
   status: "submitted" | "inspecting" | "inspected" | "approved" | "funded" | "rejected"; approved?: number; approvers: string[]; reason?: string; fundedAt?: string; photoIds?: string[];
+  /** The borrower's photos by budget line, from the line-by-line request on their phone. */
+  linePhotos?: DrawPhoto[];
   /** Lien waivers sent for this draw (Fla. Stat. 713.20), and for the last draw the contractor's final payment affidavit (713.06(3)(d)). */
   waivers?: LienWaiver[]; affidavit?: FinalAffidavit;
   /** Marked as the last draw, which takes final waivers and the affidavit. A draw that uses up the holdback is the last anyway. */
@@ -255,6 +264,7 @@ export interface LienFile {
   /** Where the one policy lived before every loan had its own insurance file. Read by policiesOf, moved out on the next save or nightly check. */
   insurance?: { kind: "builders_risk" | "hazard"; carrier: string; policy: string; expiresOn: string; by: string; at: string; remindedOn?: string; lapseNoticeOn?: string };
 }
+export interface FloodMap { mapped: boolean; zone: string; sfha: boolean; subtype?: string; at: string }
 export type PolicyKind = "hazard" | "windstorm" | "flood" | "builders_risk";
 /** One policy on the property, the newest of its kind. */
 export interface InsurancePolicy {
@@ -280,7 +290,7 @@ export interface InsuranceRenewal {
 export interface InsuranceFile {
   policies: InsurancePolicy[];
   /** Whether the property is in a special flood hazard area (FEMA zones A and V), which makes flood insurance required. */
-  flood?: { sfha: boolean; zone: string; by: string; at: string };
+  flood?: { sfha: boolean; zone: string; by: string; at: string; source?: "fema" };
   renewals?: InsuranceRenewal[];
 }
 /** A notice to owner from a lienor not hired by the borrower directly (713.06(2)). Each one needs a waiver for every draw after it. */
@@ -293,7 +303,8 @@ export interface LienWaiver {
 }
 export interface FinalAffidavit { fileName: string; documentId?: string; sentBy: string; sentAt: string; checked?: { by: string; at: string; unpaidLienors: boolean } }
 export interface RequestPhoto { id: string; scopeId: string; shot: string; name: string; at: string; takenAt?: string; lat?: number; lng?: number }
-export interface PhotoRequest { id: string; dealId: string; drawId?: string; to: string; email?: string; who: "contractor" | "borrower" | "inspector"; scopeIds: string[]; sentBy: string; byTeam?: boolean; sentAt: string; expiresAt: string; status: "open" | "received" | "off"; finishedAt?: string; finishedBy?: string; note?: string; photos: RequestPhoto[] }
+/** stormId: the property's condition after a storm passed (lib/storms.ts), not finished work. */
+export interface PhotoRequest { id: string; dealId: string; drawId?: string; stormId?: string; to: string; email?: string; who: "contractor" | "borrower" | "inspector"; scopeIds: string[]; sentBy: string; byTeam?: boolean; sentAt: string; expiresAt: string; status: "open" | "received" | "off"; finishedAt?: string; finishedBy?: string; note?: string; photos: RequestPhoto[] }
 export type ConditionCategory = "prior_to_docs" | "prior_to_funding" | "post_closing";
 export type ConditionOwner = "borrower" | "processor" | "underwriter" | "title";
 /** A standard condition in the library (Spec A23). Loans get the ones for their product when they start clearing conditions. */
@@ -523,7 +534,8 @@ export const seedPhotoRequests: PhotoRequest[] = [
 ];
 
 export const seedDraws: DrawRequest[] = [
-  { id: "draw-1", dealId: "d2", requestedAt: "2026-10-20T09:15:00-07:00", by: "Alex Sample (FAKE)", note: "Cabinets are in and the flooring is down.", contact: "Alex Sample, (555) 010-0100", photos: ["kitchen-cabinets.jpg", "new-flooring.jpg"], lines: [{ scopeId: "kitchen", requested: 12_000 }, { scopeId: "flooring", requested: 8_000 }], status: "submitted", approvers: [] },
+  { id: "draw-1", dealId: "d2", requestedAt: "2026-10-20T09:15:00-07:00", by: "Alex Sample (FAKE)", note: "Cabinets are in and the flooring is down.", contact: "Alex Sample, (555) 010-0100", photos: ["kitchen-cabinets.jpg", "new-flooring.jpg"], lines: [{ scopeId: "kitchen", requested: 12_000, claimedPct: 0.8 }, { scopeId: "flooring", requested: 8_000, claimedPct: 1 }], status: "submitted", approvers: [],
+    linePhotos: [{ id: "dp-1", scopeId: "kitchen", name: "kitchen-cabinets.jpg", at: "2026-10-20T16:15:00Z", takenAt: "2026-10-20T15:58:00Z", lat: 26.12236, lng: -80.13748 }, { id: "dp-2", scopeId: "flooring", name: "new-flooring.jpg", at: "2026-10-20T16:15:00Z", takenAt: "2026-10-20T16:02:00Z", lat: 26.12241, lng: -80.13735 }] },
   { id: "draw-2", dealId: "d9", requestedAt: "2026-10-18T11:30:00-07:00", by: "Quinn Sample (FAKE)", note: "Rough plumbing and electrical passed city inspection.", contact: "Quinn Sample, (555) 010-0109", photos: ["rough-plumbing.jpg", "panel.jpg"], lines: [{ scopeId: "plumbing", requested: 5_000 }, { scopeId: "electrical", requested: 5_000 }], status: "inspecting", approvers: [] },
   { id: "draw-3", dealId: "d12", requestedAt: "2026-10-15T08:45:00-07:00", by: "Blake Notreal (FAKE)", note: "Framing is finished and mechanicals are mostly roughed in.", contact: "Blake Notreal, (555) 010-0112", photos: ["framing-north.jpg", "framing-south.jpg", "ductwork.jpg"], lines: [{ scopeId: "framing", requested: 80_000, observedPct: 0.9 }, { scopeId: "mechanical", requested: 40_000, observedPct: 0.7 }], status: "inspected", approvers: ["Cam Capital (FAKE)"] },
   { id: "draw-4", dealId: "d13", requestedAt: "2026-10-21T14:10:00-07:00", by: "Kai Placeholder (FAKE)", note: "Bathrooms are done.", contact: "Kai Placeholder, (555) 010-0113", photos: ["bathroom.jpg"], lines: [{ scopeId: "bathrooms", requested: 2_500 }], status: "submitted", approvers: [] },

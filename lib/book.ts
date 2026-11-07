@@ -21,12 +21,14 @@ import { insuranceChecks, insuranceFileOf, policiesOf, policyProblem, policyWord
 import { addProblem, changeProblem, DEFAULT_LIBRARY, fromTemplate, libraryOf, missingStandard, templateProblem, templatesFor, type ConditionInput } from "./conditions";
 import { chosenTerms, draftSheet, exceptionDecisionProblem, exceptionReasons, exceptionRequestProblem, issueProblem as sheetProblem, latestSheet, matrixOf, pricedApp, respondProblem, startingTerms, termSheetChecks, type Prepay } from "./term-sheets";
 import { optionAt } from "./buy-down";
-import { DEMO_TEAM, seedDeals, seedBids, seedDraws, seedLoanSales, seedLoanOffers, seedMessages, seedPhotoRequests, DEMO_SPONSORS, capitalSources, partners as seedPartners, brokers as seedBrokers, loanBuyers, BORROWER_ID, DEMO_PARTNER_ID, DEMO_BUYER_ID, DEMO_BROKER_ID, type Broker, type ClosingAgent, type Closure, type Deal, type DefaultKind, type Bid, type DrawRequest, type DrawRequestLine, type LoanExtension, type LoanMessage, type Screening, type WireInstruction, type Partner, type PayoffChannel, type PayoffLetter, type PayoffRequest, type NoticeToOwner, type LienWaiver, type ConditionTemplate, type LoanCondition, type DocStatus, type CapitalSource, type LoanBuyer, type LoanOffer, type LoanSale, type LoanPayment, type LoanStatus, type TeamMember, type PaymentMethod, type PhotoRequest, type RequestPhoto, type ScopeLine, type Sponsor, type StageEntry, type PolicyKind, type InsurancePolicy, type InsuranceRenewal, type ChangeOrder } from "./mockData";
+import { DEMO_TEAM, seedDeals, seedBids, seedDraws, seedLoanSales, seedLoanOffers, seedMessages, seedPhotoRequests, DEMO_SPONSORS, capitalSources, partners as seedPartners, brokers as seedBrokers, loanBuyers, BORROWER_ID, DEMO_PARTNER_ID, DEMO_BUYER_ID, DEMO_BROKER_ID, type Broker, type ClosingAgent, type Closure, type Deal, type DefaultKind, type Bid, type DrawRequest, type DrawRequestLine, type DrawPhoto, type FloodMap, type LoanExtension, type LoanMessage, type Screening, type WireInstruction, type Partner, type PayoffChannel, type PayoffLetter, type PayoffRequest, type NoticeToOwner, type LienWaiver, type ConditionTemplate, type LoanCondition, type DocStatus, type CapitalSource, type LoanBuyer, type LoanOffer, type LoanSale, type LoanPayment, type LoanStatus, type TeamMember, type PaymentMethod, type PhotoRequest, type RequestPhoto, type ScopeLine, type Sponsor, type StageEntry, type PolicyKind, type InsurancePolicy, type InsuranceRenewal, type ChangeOrder } from "./mockData";
+import { applyFloodMap, withFloodFollowUps } from "./flood-zones";
+import { afterCheck, freshInspectionNeeded, type StormCheck, type StormWatch } from "./storms";
 import { BASE_VERSION, currentPricing, type PricingPayload } from "./pricing-versions";
 import { TEAM_ROLE_LABEL, type TeamRole } from "./loan-team";
 import { addDays, DEMO_SERVICING_DAY, firstDueDate, ledger, maturityOf, payoffFor, SERVICED, servicingDate, settle } from "./servicing";
 
-export interface Book { partnerId: string; buyerId: string; brokerId: string; borrowerId: string; loanPrefix: string; deals: Deal[]; bids: Bid[]; partners: Partner[]; buyers: LoanBuyer[]; brokers: Broker[]; sales: LoanSale[]; offers: LoanOffer[]; draws: DrawRequest[]; photoRequests: PhotoRequest[]; payoffs: PayoffRequest[]; messages: LoanMessage[]; sources: CapitalSource[]; conditionLibrary: ConditionTemplate[]; audit: { at: string; text: string }[]; sample?: boolean; /** A borrower's own referrals, summed up for them: friends' loans are never in their book (lib/referrals.ts). */ myReferrals?: MyReferral[]; /** The pricing its loans use, as sent to a browser. Not part of the records. */ pricing?: PricingPayload }
+export interface Book { partnerId: string; buyerId: string; brokerId: string; borrowerId: string; loanPrefix: string; deals: Deal[]; bids: Bid[]; partners: Partner[]; buyers: LoanBuyer[]; brokers: Broker[]; sales: LoanSale[]; offers: LoanOffer[]; draws: DrawRequest[]; photoRequests: PhotoRequest[]; payoffs: PayoffRequest[]; messages: LoanMessage[]; sources: CapitalSource[]; conditionLibrary: ConditionTemplate[]; /** Storms whose forecast cone has covered funded loans (lib/storms.ts). Staff only. */ storms: StormWatch[]; audit: { at: string; text: string }[]; sample?: boolean; /** A borrower's own referrals, summed up for them: friends' loans are never in their book (lib/referrals.ts). */ myReferrals?: MyReferral[]; /** The pricing its loans use, as sent to a browser. Not part of the records. */ pricing?: PricingPayload }
 
 export type BookAction =
   | { t: "submitApp"; app: Application; address: string; city: string; zip: string; entityName: string; exitStrategy: string; closingDate?: string; client?: { name: string; borrowerId?: string; brokerId?: string; brokerPoints?: number }; source?: string; sponsor?: Sponsor; refinances?: string }
@@ -79,6 +81,10 @@ export type BookAction =
   /** The property's last recorded sale, for the price-jump check (lib/risk.ts). */
   /** The property's place on the map, found by the server (lib/geocode.ts). */
   | { t: "placeProperty"; dealId: string; lat: number; lng: number }
+  /** FEMA's flood map at the property's point. Only the server asks FEMA (lib/property-facts.ts). */
+  | { t: "recordFloodMap"; dealId: string; map: FloodMap }
+  /** What NHC's latest forecast cones cover. Only the server reads NHC's files, or a demo seat its sample storm. */
+  | { t: "recordStormCheck"; at: string; storms: StormCheck[] }
   | { t: "saveLastSale"; dealId: string; price: number; on: string; by: string }
   | { t: "postInvestorUpdate"; dealId: string; updateId: string; text: string; by: string }
   | { t: "setWorkout"; dealId: string; on: boolean; note: string; by: string }
@@ -112,8 +118,9 @@ export type BookAction =
   /** The nightly check: reminds borrowers of term sheets about to expire and expires the ones past their last day. */
   | { t: "checkTermSheets"; asOf: string }
   | { t: "saveScope"; dealId: string; scope: ScopeLine[]; summary: string }
-  | { t: "requestDraw"; dealId: string; by: string; note: string; contact: string; photos: string[]; photoIds?: string[]; lines: DrawRequestLine[] }
-  | { t: "askForPhotos"; requestId: string; dealId: string; drawId?: string; to: string; email?: string; who: PhotoRequest["who"]; scopeIds: string[]; by: string; byTeam: boolean; expiresAt: string }
+  /** linePhotos: the photos taken line by line on the borrower's phone, with where and when (lib/draw-walk.ts). */
+  | { t: "requestDraw"; dealId: string; by: string; note: string; contact: string; photos: string[]; photoIds?: string[]; lines: DrawRequestLine[]; linePhotos?: Omit<DrawPhoto, "id" | "at">[] }
+  | { t: "askForPhotos"; requestId: string; dealId: string; drawId?: string; stormId?: string; to: string; email?: string; who: PhotoRequest["who"]; scopeIds: string[]; by: string; byTeam: boolean; expiresAt: string }
   | { t: "renewPhotoRequest"; requestId: string; expiresAt: string }
   | { t: "turnOffPhotoRequest"; requestId: string }
   | { t: "addRequestPhoto"; requestId: string; photo: RequestPhoto }
@@ -252,6 +259,8 @@ function demoTeam(deal: Deal): Deal["team"] {
 }
 
 const DEMO_SURVEYS: Record<string, { score: number; comment?: string; at: string }> = { d11: { score: 10, comment: "Closed in nine days and the draws came the day after each inspection (FAKE)", at: "2026-07-10T15:00:00Z" }, d17: { score: 9, at: "2026-10-24T15:00:00Z" }, d13: { score: 6, comment: "The appraisal took two weeks (FAKE)", at: "2026-04-02T15:00:00Z" } };
+// Roughly the middle of each demo loan's city: the addresses are made up, the cities aren't.
+const DEMO_PLACES: Record<string, { lat: number; lng: number }> = { d1: { lat: 26.0112, lng: -80.1495 }, d3: { lat: 25.8487, lng: -80.2389 }, d4: { lat: 26.0078, lng: -80.2963 }, d5: { lat: 26.3683, lng: -80.1289 }, d6: { lat: 26.5629, lng: -81.9495 }, d7: { lat: 26.2379, lng: -80.1248 }, d8: { lat: 26.7153, lng: -80.0534 }, d9: { lat: 26.023, lng: -80.119 }, d10: { lat: 26.2712, lng: -80.2706 }, d11: { lat: 25.767, lng: -80.204 }, d12: { lat: 26.4615, lng: -80.0728 }, d13: { lat: 26.1404, lng: -80.2134 }, d14: { lat: 26.3184, lng: -80.0998 }, d15: { lat: 26.1195, lng: -80.128 }, d16: { lat: 26.1669, lng: -80.2564 }, d17: { lat: 26.2445, lng: -80.2064 }, d18: { lat: 26.0765, lng: -80.2521 } };
 const DEMO_REFERRALS: Record<string, { on: string; paidOn?: string }> = { d12: { on: "2026-03-10", paidOn: "2026-04-15" }, d17: { on: "2026-09-28" }, d16: { on: "2026-10-30" } };
 
 /** The demo's firms were screened with its loans; the unsigned prospect has a possible match to review. */
@@ -336,8 +345,14 @@ export function demoBook(): Book {
     // Three borrowers answered the closing survey; the demo borrower's own flip still has the question waiting.
     const answer = DEMO_SURVEYS[d.id];
     if (answer) deals[i] = { ...deals[i], surveys: [{ stage: "funded", comment: "", ...answer }] };
-    // The demo borrower's flip is on the map, so its contractor's photos are checked against it.
+    // The demo borrower's flip is on the map, so its contractor's photos are checked against it. The others sit at their
+    // cities, so the sample storm's cone covers some and not others.
     if (d.id === "d2") deals[i] = { ...deals[i], geo: { lat: 26.1224, lng: -80.1374, at: "2026-10-20T10:00:00Z" } };
+    else if (DEMO_PLACES[d.id]) deals[i] = { ...deals[i], geo: { ...DEMO_PLACES[d.id], at: "2026-10-20T10:00:00Z" } };
+    // FEMA's map on the funded loans agrees with the zone recorded from their determinations; one new application's
+    // address isn't mapped.
+    if (deals[i].insurance?.flood && SERVICED.includes(d.status)) deals[i] = { ...deals[i], floodMap: { mapped: true, zone: deals[i].insurance!.flood!.zone, sfha: deals[i].insurance!.flood!.sfha, at: "2026-10-20T10:00:00Z" } };
+    if (d.id === "d16") deals[i] = { ...deals[i], floodMap: { mapped: false, zone: "", sfha: false, at: "2026-10-31T15:00:00Z" } };
     // The demo borrower's flip has a change order waiting: the kitchen grew and the floors came in under budget.
     if (d.id === "d2") deals[i] = { ...deals[i], changeOrders: [{ id: "co-demo-1", from: "flooring", to: "kitchen", amount: 3_000, reason: "Added an island to the kitchen; the flooring came in under its budget (FAKE)", by: "Alex Sample (FAKE)", byTeam: false, at: "2026-10-29T11:00:00-07:00", status: "requested" }] };
     // Three friends the demo borrower referred: one whose bonus was paid, one funded and owed, one still applying.
@@ -354,11 +369,11 @@ export function demoBook(): Book {
     { id: "payoff-1", dealId: "d11", goodThrough: "2026-11-15", requestedAt: "2026-10-22T10:00:00-07:00", by: "Avery Mock (FAKE)", status: "requested", receivedOn: "2026-10-22", channel: "portal", requester: { kind: "borrower", name: "Avery Mock (FAKE)" }, ...quoted },
     { id: "payoff-2", dealId: "d10", goodThrough: "2026-11-20", requestedAt: "2026-10-30T14:00:00-07:00", by: "Dana Escrow (FAKE)", status: "requested", receivedOn: "2026-10-30", channel: "web_form", requester: { kind: "title", name: "Dana Escrow (FAKE)", company: "Sample Title & Escrow (FAKE)", email: "closings@sample-title.test", phone: "(954) 555-0142", fileNumber: "ST-1010-B" }, check: { status: "pending", note: "Signed authorization uploaded with the request.", fileName: "borrower-authorization.pdf" }, ...payoffFor(deals.find((d) => d.id === "d10")!, "2026-11-20") },
   ];
-  return { partnerId: DEMO_PARTNER_ID, buyerId: DEMO_BUYER_ID, brokerId: DEMO_BROKER_ID, borrowerId: BORROWER_ID, loanPrefix: DEMO_PREFIX, deals, bids: [...seedBids, { id: "bid-demo-11", dealId: "d11", partnerId: DEMO_PARTNER_ID, pct: 50, lenderRate: 9.25, lenderPoints: 0.5, conditions: "", status: "accepted", type: "bid", at: "2026-06-20T14:00:00Z" }], partners: seedPartners.map((firm) => withDemoScreening(firm)), buyers: loanBuyers.map((firm) => withDemoScreening(firm)), brokers: seedBrokers, sales: seedLoanSales, offers: seedLoanOffers, draws: seedDraws, photoRequests: seedPhotoRequests, payoffs, messages: seedMessages, sources: capitalSources, conditionLibrary: DEFAULT_LIBRARY, audit: [{ at: SEED_AT, text: "Demo data loaded (all records are FAKE)" }] };
+  return { partnerId: DEMO_PARTNER_ID, buyerId: DEMO_BUYER_ID, brokerId: DEMO_BROKER_ID, borrowerId: BORROWER_ID, loanPrefix: DEMO_PREFIX, deals, bids: [...seedBids, { id: "bid-demo-11", dealId: "d11", partnerId: DEMO_PARTNER_ID, pct: 50, lenderRate: 9.25, lenderPoints: 0.5, conditions: "", status: "accepted", type: "bid", at: "2026-06-20T14:00:00Z" }], partners: seedPartners.map((firm) => withDemoScreening(firm)), buyers: loanBuyers.map((firm) => withDemoScreening(firm)), brokers: seedBrokers, sales: seedLoanSales, offers: seedLoanOffers, draws: seedDraws, photoRequests: seedPhotoRequests, payoffs, messages: seedMessages, sources: capitalSources, conditionLibrary: DEFAULT_LIBRARY, storms: [], audit: [{ at: SEED_AT, text: "Demo data loaded (all records are FAKE)" }] };
 }
 
 /** A book with no records: a new database, or an account with nothing to see yet. */
-export const emptyBook = (): Book => ({ partnerId: "", buyerId: "", brokerId: "", borrowerId: "", loanPrefix: "LH-", deals: [], bids: [], partners: [], buyers: [], brokers: [], sales: [], offers: [], draws: [], photoRequests: [], payoffs: [], messages: [], sources: [], conditionLibrary: [], audit: [] });
+export const emptyBook = (): Book => ({ partnerId: "", buyerId: "", brokerId: "", borrowerId: "", loanPrefix: "LH-", deals: [], bids: [], partners: [], buyers: [], brokers: [], sales: [], offers: [], draws: [], photoRequests: [], payoffs: [], messages: [], sources: [], conditionLibrary: [], storms: [], audit: [] });
 
 /**
  * Every change to the book goes through here. A loan that moves to another stage has the time noted, so reports can
@@ -553,6 +568,17 @@ function apply(s: Book, a: BookAction): Book {
       return { ...s, deals: upd(a.dealId, (d) => ({ ...d, friendReferral: { referrerId: a.referrerId, referrerName, on: a.on, bonus: round2(Math.max(0, a.bonus)) } })), audit: log(`${deal.loanNumber}: referred by ${referrerName}, a LendHous borrower`) };
     }
     case "placeProperty": return { ...s, deals: upd(a.dealId, (d) => ({ ...d, geo: { lat: a.lat, lng: a.lng, at: now() } })) };
+    case "recordFloodMap": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      return { ...s, deals: upd(a.dealId, (d) => applyFloodMap(d, a.map, serviceDay(s))), audit: log(`${deal.loanNumber}: FEMA flood map ${a.map.mapped ? `shows zone ${a.map.zone}${a.map.sfha ? ", a special flood hazard area" : ""}` : "has no flood zone here (not mapped)"}`) };
+    }
+    case "recordStormCheck": {
+      const result = afterCheck(s.storms ?? [], a.storms, a.at);
+      // A storm that's passed: draws on its loans need an inspection from after it.
+      const held = new Map(result.passed.flatMap((storm) => storm.dealIds.map((id) => [id, { stormId: storm.id, name: storm.label, passedAt: a.at }] as const)));
+      const notes = [...result.added.map((storm) => `${storm.label}: forecast cone covers ${storm.dealIds.length} funded loan${storm.dealIds.length === 1 ? "" : "s"}`), ...result.passed.map((storm) => `${storm.label} has passed: photos and fresh inspections for ${storm.dealIds.length} loan${storm.dealIds.length === 1 ? "" : "s"}`)];
+      return { ...s, storms: result.storms, deals: held.size ? s.deals.map((d) => (held.has(d.id) ? { ...d, stormHold: held.get(d.id) } : d)) : s.deals, audit: notes.reduce((list, text) => [{ at: now(), text }, ...list], s.audit).slice(0, 50) };
+    }
     case "saveLastSale": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
       return { ...s, deals: upd(a.dealId, (d) => ({ ...d, lastSale: { price: Math.round(a.price), on: a.on, by: a.by, at: now() } })), audit: log(`${deal.loanNumber}: last recorded sale entered by ${a.by}`) };
@@ -767,13 +793,18 @@ function apply(s: Book, a: BookAction): Book {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
       const lines = a.lines.filter((line) => line.requested > 0);
       if (drawRequestError(deal, lines)) return s;
-      const draw: DrawRequest = { id: `draw${uid()}`, dealId: a.dealId, requestedAt: now(), by: a.by, note: a.note, contact: a.contact, photos: a.photos, photoIds: a.photoIds, lines, status: "submitted", approvers: [] };
+      const at = now();
+      // Only the photos of lines asked for, each stamped with when it arrived so its age can be checked.
+      const linePhotos = (a.linePhotos ?? []).filter((photo) => lines.some((line) => line.scopeId === photo.scopeId)).map((photo, index): DrawPhoto => ({ ...photo, id: `dp${uid()}${index}`, at }));
+      const draw: DrawRequest = { id: `draw${uid()}`, dealId: a.dealId, requestedAt: at, by: a.by, note: a.note, contact: a.contact, photos: a.photos, photoIds: a.photoIds, lines: lines.map((line) => (line.claimedPct === undefined ? line : { ...line, claimedPct: Math.min(1, Math.max(0, line.claimedPct)) })), ...(linePhotos.length ? { linePhotos } : {}), status: "submitted", approvers: [] };
       return { ...s, draws: [draw, ...s.draws], audit: log(`${deal.loanNumber}: draw of $${lines.reduce((sum, line) => sum + line.requested, 0).toLocaleString()} requested`) };
     }
     case "askForPhotos": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
-      const request: PhotoRequest = { id: a.requestId, dealId: a.dealId, drawId: a.drawId, to: a.to, email: a.email, who: a.who, scopeIds: a.scopeIds, sentBy: a.by, byTeam: a.byTeam, sentAt: now(), expiresAt: a.expiresAt, status: "open", photos: [] };
-      return { ...s, photoRequests: [request, ...s.photoRequests], audit: log(`${deal.loanNumber}: photos requested from ${a.to}`) };
+      const request: PhotoRequest = { id: a.requestId, dealId: a.dealId, drawId: a.drawId, ...(a.stormId ? { stormId: a.stormId } : {}), to: a.to, email: a.email, who: a.who, scopeIds: a.scopeIds, sentBy: a.by, byTeam: a.byTeam, sentAt: now(), expiresAt: a.expiresAt, status: "open", photos: [] };
+      // Photos of the property after a storm are its follow-up, so the storm page shows who's been asked.
+      const storms = a.stormId ? (s.storms ?? []).map((storm) => (storm.id === a.stormId ? { ...storm, followedUp: [...new Set([...(storm.followedUp ?? []), a.dealId])] } : storm)) : s.storms;
+      return { ...s, storms, photoRequests: [request, ...s.photoRequests], audit: log(`${deal.loanNumber}: ${a.stormId ? "photos of the property after the storm" : "photos"} requested from ${a.to}`) };
     }
     case "renewPhotoRequest": return { ...s, photoRequests: photos(a.requestId, (r) => ({ ...r, expiresAt: a.expiresAt, status: r.status === "off" ? (r.finishedAt ? "received" : "open") : r.status })), audit: log(`New photo link sent to ${requestOf(a.requestId).to}`) };
     case "turnOffPhotoRequest": return { ...s, photoRequests: photos(a.requestId, (r) => ({ ...r, status: "off" })), audit: log(`Photo link for ${requestOf(a.requestId).to} turned off`) };
@@ -793,7 +824,11 @@ function apply(s: Book, a: BookAction): Book {
         }),
         audit: log(`${deal.loanNumber}: ${request.photos.length} photos received from ${a.by}${signs ? ", who signed off the draw's work" : ""}${inspects ? ", who recorded the inspection" : ""}`) };
     }
-    case "sendInspector": return { ...s, draws: s.draws.map((d) => (d.id === a.drawId && d.status === "submitted" ? { ...d, status: "inspecting" } : d)), audit: log("Draw inspection ordered") };
+    case "sendInspector": {
+      // A storm since the last inspection sends an inspected or approved draw back for a fresh one (lib/storms.ts).
+      const again = (d: DrawRequest) => (d.status === "inspected" || d.status === "approved") && Boolean(freshInspectionNeeded(s.deals.find((deal) => deal.id === d.dealId) ?? {}, d));
+      return { ...s, draws: s.draws.map((d) => (d.id === a.drawId && (d.status === "submitted" || again(d)) ? { ...d, status: "inspecting", ...(again(d) ? { approvers: [], approved: undefined } : {}) } : d)), audit: log("Draw inspection ordered") };
+    }
     case "recordInspection": return { ...s, draws: s.draws.map((d) => (d.id === a.drawId && d.status === "inspecting" ? { ...d, status: "inspected", lines: d.lines.map((line) => ({ ...line, observedPct: a.observed[line.scopeId] ?? 0 })), inspection: { by: "The team", at: now(), notes: "" } } : d)), audit: log("Draw inspection recorded") };
     case "approveDrawRequest": {
       const draw = s.draws.find((d) => d.id === a.drawId)!; const deal = s.deals.find((d) => d.id === draw.dealId)!;
@@ -861,7 +896,7 @@ function apply(s: Book, a: BookAction): Book {
     case "setFloodZone": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
       const flood = { sfha: a.sfha, zone: a.zone.trim().toUpperCase(), by: a.by, at: now() };
-      return { ...s, deals: upd(a.dealId, (d) => withInsurance(d, { ...insuranceFileOf(d), flood })), audit: log(`${deal.loanNumber}: flood zone recorded${flood.zone ? ` (${flood.zone})` : ""}, ${a.sfha ? "in" : "not in"} a special flood hazard area`) };
+      return { ...s, deals: upd(a.dealId, (d) => withFloodFollowUps(withInsurance(d, { ...insuranceFileOf(d), flood }), flood.sfha, serviceDay(s), flood.at)), audit: log(`${deal.loanNumber}: flood zone recorded${flood.zone ? ` (${flood.zone})` : ""}, ${a.sfha ? "in" : "not in"} a special flood hazard area`) };
     }
     case "insuranceRenewal": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;

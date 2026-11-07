@@ -28,7 +28,7 @@ export function photoCheck(photo: Pick<RequestPhoto, "lat" | "lng" | "takenAt" |
 const distance = (meters: number) => (meters < 1000 ? `${Math.round(meters)} m` : `${(meters / 1000).toFixed(1)} km`);
 
 /** A line for the team on a set of photos: how many were at the property, how many weren't, and how many were old. */
-export function photosSummary(photos: RequestPhoto[], geo: Deal["geo"]) {
+export function photosSummary(photos: Pick<RequestPhoto, "lat" | "lng" | "takenAt" | "at">[], geo: Deal["geo"]) {
   if (!photos.length) return null;
   const checks = photos.map((photo) => photoCheck(photo, geo));
   const far = checks.filter((item) => item.far);

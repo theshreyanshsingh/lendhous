@@ -25,6 +25,8 @@ import { makeBorrowerStatements } from "@/lib/borrower-statement-store";
 import { prisma } from "@/lib/prisma";
 import { SERVICED, servicingDate } from "@/lib/servicing";
 import { getSettings } from "@/lib/settings";
+import { mapMissing } from "@/lib/property-facts";
+import { checkStorms } from "@/lib/storm-watch";
 
 type Job = (now: Date) => Promise<string>;
 
@@ -153,9 +155,21 @@ async function sendDigest(now: Date) {
   return digest.subject;
 }
 
-export const JOBS: Record<string, Job> = { sanctions: checkSanctions, servicing: checkServicing, termSheets: checkTermSheets, insurance: checkInsurance, sessions: purgeSessions, retention: cleanRetention, encryption: sealStoredData, statements: makeMonthlyStatements, digest: sendDigest };
+// Properties not yet on the map or without a flood zone: the Census geocoder and FEMA's flood map (lib/property-facts.ts).
+const mapProperties = () => mapMissing();
 
-export const runKeyFor = (job: string, now: Date) => `${job}:${now.toISOString().slice(0, 10)}`;
+// NHC's forecast cones against the funded loans (lib/storm-watch.ts). A failure is a failed run, so it's retried and seen.
+async function watchStorms(now: Date) {
+  const result = await checkStorms(now);
+  if ("error" in result) throw new Error(result.error);
+  return result.summary;
+}
+
+export const JOBS: Record<string, Job> = { sanctions: checkSanctions, servicing: checkServicing, termSheets: checkTermSheets, insurance: checkInsurance, properties: mapProperties, storms: watchStorms, sessions: purgeSessions, retention: cleanRetention, encryption: sealStoredData, statements: makeMonthlyStatements, digest: sendDigest };
+
+/** NHC writes a new advisory every six hours, so the storm check runs once in each six-hour window; the rest once a day. */
+const EVERY_SIX_HOURS = new Set(["storms"]);
+export const runKeyFor = (job: string, now: Date) => `${job}:${now.toISOString().slice(0, 10)}${EVERY_SIX_HOURS.has(job) ? `T${String(Math.floor(now.getUTCHours() / 6) * 6).padStart(2, "0")}` : ""}`;
 
 export async function runJob(job: string, now = new Date()) {
   const fn = JOBS[job];

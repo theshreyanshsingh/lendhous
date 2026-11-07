@@ -7,6 +7,7 @@ import { coverageShort, coverNeeds, insuranceGaps, kindsFor, lapsedPolicies, ope
 import type { Deal, InsurancePolicy, InsuranceRenewal, PolicyKind } from "@/lib/mockData";
 import { daysBetween, SERVICED } from "@/lib/servicing";
 import { useStore } from "@/lib/store";
+import { FloodMapLine } from "./FloodMapLine";
 import { useServiceDay } from "./use-service-day";
 
 const small = "h-9! px-3! text-xs!";
@@ -58,9 +59,10 @@ export function InsurancePanel({ deal }: { deal: Deal }) {
 
         <div className="space-y-2 border-t border-border pt-3">
           <p className="font-medium">Flood zone</p>
+          <FloodMapLine deal={deal} />
           {flood && !floodOpen ? (
             <div className="text-xs" data-testid="flood-zone">
-              <p>{flood.zone ? `Zone ${flood.zone}` : "Zone not given"} · {flood.sfha ? "in a special flood hazard area" : "not in a special flood hazard area"}</p>
+              <p>{flood.zone ? `Zone ${flood.zone}` : "Zone not given"} · {flood.sfha ? "in a special flood hazard area" : "not in a special flood hazard area"}{flood.source === "fema" ? " · from FEMA's map" : ""}</p>
               <button type="button" className={`btn-ghost ${small} mt-1`} data-testid="edit-flood" onClick={() => setFloodOpen(true)}>Change it</button>
             </div>
           ) : (

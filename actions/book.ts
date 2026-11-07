@@ -2,6 +2,7 @@
 
 import { createHash, randomUUID } from "crypto";
 import { revalidatePath, revalidateTag } from "next/cache";
+import { after } from "next/server";
 import { audit } from "@/lib/audit";
 import { canUploadFile, docOf, scopeBook, type Viewer } from "@/lib/book-access";
 import { parseAction } from "@/lib/book-actions";
@@ -28,6 +29,8 @@ import type { PolicyKind } from "@/lib/mockData";
 import { SHOWCASE_TAG } from "@/lib/showcase-store";
 import { servicingDate } from "@/lib/servicing";
 import { consumeRateLimit } from "@/lib/rate-limit";
+import { recordError } from "@/lib/errors";
+import { mapProperty } from "@/lib/property-facts";
 import { extensionOf, mimeFor, putBytes, safeBasename } from "@/lib/storage";
 import { attachmentName, documentNameContext, uploadProblem } from "@/lib/uploads";
 
@@ -54,6 +57,10 @@ async function perform(viewer: Viewer, action: BookAction, options: { trusted?: 
   // New names on a loan are screened straight away, so a possible sanctions match surfaces before anyone works on it.
   const named = result.action.t === "submitApp" ? result.after.deals.find((deal) => !result.before.deals.some((old) => old.id === deal.id))?.id : result.action.t === "saveSponsor" ? result.action.dealId : undefined;
   const screened = named ? await screenAutomatically(named) : null;
+  // A new application, or a draw on a loan not yet on the map, gets its place and flood zone looked up once the reply has
+  // gone, so neither the Census Bureau nor FEMA slows the borrower down (lib/property-facts.ts).
+  const placeFor = result.action.t === "submitApp" ? named : result.action.t === "requestDraw" && !result.after.deals.find((deal) => deal.id === (result.action as { dealId: string }).dealId)?.floodMap ? result.action.dealId : undefined;
+  if (placeFor) after(() => mapProperty(placeFor).then(() => undefined, (error) => recordError(error, "property-facts", "action")));
   // A partner or buyer is screened as soon as it's saved, with whoever signs in for it, before any teaser or bid.
   const firmChecked = result.action.t === "saveFirm" ? await screenFirm(result.action.kind, result.action.id, viewer) : null;
   if (firmChecked && !("error" in firmChecked)) await sendAlerts(firmChecked.before, firmChecked.after, firmChecked.action);

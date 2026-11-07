@@ -45,6 +45,7 @@ export default function Servicing() {
   return (
     <div className="space-y-4">
       <PageIntro eyebrow="Servicing" title="Loan servicing" lede="Every funded loan: what's due, what's late, what's maturing and who's paying off." />
+      <p className="text-sm text-muted-foreground" data-testid="storm-link">Hurricane forecast cones are checked against these loans every six hours. <Link className="text-link underline underline-offset-2" href="/admin/storms">Storm watch</Link></p>
       <MaturityDesk />
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <div className="glass p-4"><Stat label="Loans" value={loans.length} /></div>
