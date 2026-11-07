@@ -12,6 +12,7 @@ import { noticeOwed } from "./adverse-action";
 import { needsExitAnswer } from "./exit-plans";
 import { bonusOf } from "./referrals";
 import { budgetBalance, openChanges } from "./budget";
+import { brokerStanding, PRIORITY_TIERS } from "./broker-program";
 
 const SERVICED_STATUSES = new Set(SERVICED);
 import { clockOf, SLA_TARGETS, type Clock, type Targets } from "./sla";
@@ -32,6 +33,8 @@ export type QueueItem = {
   priority: number;
   /** A borrower with loans paid as agreed: worked first among items of the same kind (the Rewards page promises it). */
   repeat?: boolean;
+  /** The tier of the loan's broker when it's one whose clients go first (lib/broker-program.ts). */
+  brokerTier?: string;
 };
 
 /** Whether a loan's borrower has earlier LendHous loans paid as agreed, with no late payment pausing it (lib/repeat-borrower.ts). */
@@ -47,9 +50,16 @@ export function workQueue(book: Book, viewer: { id: string; email?: string }, no
   const add = (item: Omit<QueueItem, "mine" | "owner" | "deal"> & { deal?: Deal }) => {
     const { deal } = item;
     const repeat = Boolean(deal && repeatBorrower(deal));
-    items.push({ ...item, deal: deal && { id: deal.id, loanNumber: deal.loanNumber, borrowerName: deal.borrowerName, address: deal.address }, mine: Boolean(deal && isMine(deal, viewer)), owner: deal?.team?.officer?.name ?? deal?.team?.processor?.name, ...(repeat ? { repeat, priority: item.priority - 0.5 } : {}) });
+    const tier = deal?.brokerId ? tierOf(deal.brokerId) : undefined;
+    items.push({ ...item, deal: deal && { id: deal.id, loanNumber: deal.loanNumber, borrowerName: deal.borrowerName, address: deal.address }, mine: Boolean(deal && isMine(deal, viewer)), owner: deal?.team?.officer?.name ?? deal?.team?.processor?.name, ...(repeat ? { repeat } : {}), ...(tier ? { brokerTier: tier } : {}), ...(repeat || tier ? { priority: item.priority - 0.5 } : {}) });
   };
   const today = servicingDate(now);
+  // Each broker's tier once, not once per item.
+  const tiers = new Map<string, string | undefined>();
+  const tierOf = (brokerId: string) => {
+    if (!tiers.has(brokerId)) { const name = brokerStanding(book.deals, brokerId, today).tier?.name; tiers.set(brokerId, name && PRIORITY_TIERS.has(name) ? name : undefined); }
+    return tiers.get(brokerId);
+  };
   for (const deal of book.deals) {
     const notice = noticeOwed(deal);
     if (notice) add({ key: `notice:${deal.id}`, label: "Send the decline notice (Reg B)", href: tab(deal), deal, due: notice.dueOn, priority: 0 });

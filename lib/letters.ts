@@ -3,8 +3,11 @@
 // page its QR code opens, which shows only that it's valid, whom it's for, the limits and the expiry.
 import type { Product } from "./engine";
 
-export type LetterKind = "pre_approval" | "proof_of_funds";
-export const LETTER_KIND: Record<LetterKind, string> = { pre_approval: "Pre-approval", proof_of_funds: "Proof of funds" };
+/** "pre_qualification": a broker's own letter, within the limit an owner set for the brokerage (lib/broker-program.ts). */
+export type LetterKind = "pre_approval" | "proof_of_funds" | "pre_qualification";
+export const LETTER_KIND: Record<LetterKind, string> = { pre_approval: "Pre-approval", proof_of_funds: "Proof of funds", pre_qualification: "Pre-qualification" };
+/** The kinds LendHous's own team issues. */
+export const STAFF_LETTER_KINDS: LetterKind[] = ["pre_approval", "proof_of_funds"];
 
 /** Most letters a seller sees are under 30 days old; 90 is the longest a lender commonly gives. */
 export const LETTER_DAYS = { default: 30, min: 7, max: 90 };
@@ -33,6 +36,8 @@ export type LetterDetails = {
   propertyAddress: string;
   conditions: string[];
   validDays: number;
+  /** The brokerage that issued a pre-qualification letter through LendHous. */
+  brokerName?: string;
 };
 
 /** Why a letter can't go out as entered, or null. */
@@ -52,5 +57,5 @@ export const letterState = (letter: { expiresOn: string; revokedAt?: string | Da
 /** The day a letter issued today stops standing. */
 export const expiryFor = (today: string, days: number) => { const date = new Date(`${today}T12:00:00Z`); date.setUTCDate(date.getUTCDate() + days); return date.toISOString().slice(0, 10); };
 
-/** The printed number: PA-2026-0001 for a pre-approval, PF- for proof of funds. */
-export const letterNumber = (kind: LetterKind, year: string, sequence: number) => `${kind === "pre_approval" ? "PA" : "PF"}-${year}-${String(sequence).padStart(4, "0")}`;
+/** The printed number: PA-2026-0001 for a pre-approval, PF- for proof of funds, PQ- for a broker's pre-qualification. */
+export const letterNumber = (kind: LetterKind, year: string, sequence: number) => `${kind === "pre_approval" ? "PA" : kind === "pre_qualification" ? "PQ" : "PF"}-${year}-${String(sequence).padStart(4, "0")}`;

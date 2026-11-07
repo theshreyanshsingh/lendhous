@@ -95,6 +95,13 @@ function actionAlerts(before: Book, after: Book, action: BookAction): Alert[] {
   const loan = (dealId?: string) => after.deals.find((deal) => deal.id === dealId);
   const number = (dealId?: string) => loan(dealId)?.loanNumber ?? "your loan";
   switch (action.t) {
+    case "postInvestorUpdate": case "setWorkout": {
+      // Only the partners and buyers who hold the loan hear about it.
+      const deal = loan(action.dealId);
+      if (!deal) return [];
+      const text = action.t === "postInvestorUpdate" ? action.text.trim() : action.on ? `The loan is in a workout: ${action.note.trim()}` : `The workout ended: ${action.note.trim()}`;
+      return holdersOf(deal).map((holder): Alert => ({ ...holder, subject: `Update on ${deal.loanNumber}`, body: `${deal.loanNumber}, the ${deal.app.product === "dscr" ? "rental" : "loan"} on ${deal.city}: ${text}`, event: "investor.update" }));
+    }
     case "requestChangeOrder": {
       const deal = loan(action.dealId);
       const order = deal?.changeOrders?.find((item) => item.id === action.orderId);
@@ -121,7 +128,10 @@ function actionAlerts(before: Book, after: Book, action: BookAction): Alert[] {
     }
     case "submitApp": {
       const deal = after.deals.find((item) => !before.deals.some((old) => old.id === item.id));
-      return deal ? [{ to: "team", subject: `New application: ${deal.loanNumber}`, body: `${deal.borrowerName} applied for a loan on ${deal.address}, ${deal.city}.`, event: "loan.submitted" }] : [];
+      if (!deal) return [];
+      const submitted: Alert = { to: "team", subject: `New application: ${deal.loanNumber}`, body: `${deal.borrowerName} applied for a loan on ${deal.address}, ${deal.city}.`, event: "loan.submitted" };
+      // A client a broker referred who comes back on their own is still the broker's, and the broker hears so.
+      return deal.referredBy && !action.client?.brokerId ? [submitted, { to: "broker", dealId: deal.id, subject: `Your client applied with LendHous: ${deal.loanNumber}`, body: `${deal.borrowerName}, whom you referred on ${longDate(deal.referredBy.on)}, applied with LendHous directly for a loan on ${deal.address}, ${deal.city}. Under your broker agreement the loan is yours: it's on your deals page, and your fee is set before the term sheet goes out.`, event: "broker.client_direct" }] : [submitted];
     }
     case "advanceLoan": {
       const deal = loan(action.dealId);

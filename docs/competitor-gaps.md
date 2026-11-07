@@ -175,6 +175,8 @@ Ranked by money and risk to LendHous, against the effort.
 
 ### 1.8 What brokers get elsewhere
 
+**Built 2026-11-07** (`lib/broker-program.ts`): tiers from funded volume, white-label quotes and term sheets, broker-issued pre-qualification letters within an owner's limit, and word when a client comes direct. YSP and table funding still wait for the attorney.
+
 - **Today:**
   - The broker's fee is in points, tracked to paid.
   - Referral protection lasts 12 months.
@@ -204,6 +206,8 @@ Ranked by money and risk to LendHous, against the effort.
 - **Attorney first:** YSP (it counts toward Florida's usury cap, and must be disclosed) and table funding in the broker's name (licensing).
 
 ### 1.9 The capital side
+
+**Partly built 2026-11-07** (`lib/investor-updates.ts`): plain statuses, workouts and team updates on partners' and buyers' portfolios. Still to come: the fee split in Settings, rollover choices, partner substitution and pro-rata draws.
 
 - **Today:**
   - Partners bid loan by loan and wire their share at closing.

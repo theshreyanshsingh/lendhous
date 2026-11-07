@@ -3,8 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { audit } from "@/lib/audit";
 import { requirePermission } from "@/lib/auth";
-import { referralByCode } from "@/lib/broker-store";
-import { notifyTeam } from "@/lib/email";
+import { brokerForClient, referralByCode } from "@/lib/broker-store";
+import { notify, notifyTeam } from "@/lib/email";
 import { openLead, sealLead, sealQuote } from "@/lib/lead-store";
 import { notDeleted, prisma } from "@/lib/prisma";
 import { issuePhotoKey } from "@/lib/property-photos";
@@ -35,7 +35,9 @@ export async function sendQuote(raw: unknown, honeypot = "", referral?: string, 
   // Looked up here, not taken from the browser: only an approved brokerage's code counts, or a borrower's while the
   // referral program is on.
   const referred = await referralByCode(referral).catch(() => null);
-  const broker = referred?.kind === "broker" ? referred : null;
+  // Without a link, a client a broker referred in the last 12 months is still theirs, and the broker is told below.
+  const returning = !referred ? await brokerForClient(quote.borrower.email).catch(() => null) : null;
+  const broker = referred?.kind === "broker" ? referred : returning;
   const friendOf = referred?.kind === "borrower" ? referred : null;
   const channel = channelOf(from);
   let leadId: string;
@@ -50,6 +52,10 @@ export async function sendQuote(raw: unknown, honeypot = "", referral?: string, 
     await audit({ actorId: null, action: "lead.created", entityType: "Lead", entityId: leadId, after: { kind: "quote", submitter: quote.submitter, channel, ...(broker ? { referredBy: broker.id } : {}), ...(friendOf ? { referrerId: friendOf.id } : {}) } });
     const origin = process.env.NEXT_PUBLIC_APP_URL || "";
     await notifyTeam(`New quote request: ${LOAN_TYPES[quote.loanType]}, ${quote.address.city}, ${quote.address.state}`, `${quoteSummary(quote)}${broker ? `\n\nReferred by ${broker.name}.` : friendOf ? `\n\nReferred by ${friendOf.name}, a LendHous borrower.` : ""}${channel !== "site" ? `\n\nSent from the ${channelLabel(channel).toLowerCase()}.` : ""}\n\nOpen the leads inbox: ${origin}/admin/leads`, "lead.new", contact.email);
+    if (returning) {
+      const people = await prisma.user.findMany({ where: { organizationId: returning.id, ...notDeleted }, select: { email: true } });
+      for (const person of people) await notify(person.email, `Your client asked LendHous for a quote: ${quote.borrower.firstName} ${quote.borrower.lastName}`, `${quote.borrower.firstName} ${quote.borrower.lastName}, a client you referred, asked LendHous for a quote directly on ${quote.address.street}, ${quote.address.city}. Under your broker agreement they're still your client, so the request is marked yours, and a loan from it will be too. Sign in to follow it: ${origin}/admin/broker`, { eventCode: "broker.client_direct" });
+    }
   } catch (error) {
     console.error("[lendhous-leads] could not alert the team:", error);
   }

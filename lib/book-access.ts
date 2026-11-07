@@ -28,7 +28,9 @@ import { viewFor, type MemberAccess, type Permission } from "./permissions";
 import { approveProblem, canSendDeals, feePaidProblem } from "./brokers";
 import { bonusPaidProblem, referralProblem, referralsBy } from "./referrals";
 import { optionAt } from "./buy-down";
+import { brandProblem } from "./broker-program";
 import { surveyProblem } from "./surveys";
+import { updateProblem, workoutProblem } from "./investor-updates";
 import { changeOrderProblem, CONTINGENCY_ID, openChanges, reservePaymentProblem } from "./budget";
 
 export type Viewer = MemberAccess & { id: string; name: string; roleCodes: RoleCode[]; organizationId?: string | null };
@@ -83,7 +85,7 @@ const quietPayoff = (payoff: PayoffRequest): PayoffRequest => ({
 
 /** Removes what identifies the borrower, for a partner or buyer who hasn't closed on the loan. */
 function blind(deal: Deal): Deal {
-  return { ...deal, insurance: undefined, friendReferral: undefined, surveys: undefined, borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined, closure: undefined, defaults: undefined, extensions: undefined, paidOff: undefined, closing: undefined, wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, termSheets: undefined, pricingException: undefined, conditions: undefined, lienFile: undefined, completed: undefined, revenue: undefined, adverseAction: undefined, legalHold: undefined, propertyPhotos: undefined, partnerFunding: undefined, agents: undefined, ...quietPayments(deal, false) };
+  return { ...deal, insurance: undefined, friendReferral: undefined, surveys: undefined, investorUpdates: undefined, workout: undefined, borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined, closure: undefined, defaults: undefined, extensions: undefined, paidOff: undefined, closing: undefined, wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, termSheets: undefined, pricingException: undefined, conditions: undefined, lienFile: undefined, completed: undefined, revenue: undefined, adverseAction: undefined, legalHold: undefined, propertyPhotos: undefined, partnerFunding: undefined, agents: undefined, ...quietPayments(deal, false) };
 }
 
 /** The conditions that are the borrower's to meet (Spec B17), without who on the team handled them or why one was waived. */
@@ -117,8 +119,11 @@ const clientInsurance = (deal: Deal): Partial<Deal> => ({
 
 /** What only the team sees on a loan it shares with a client. Wire instructions never leave the team: a client who sees them is a client who can be sent fake ones. */
 function forClient(deal: Deal): Deal {
-  return { ...deal, ...latestForClient(deal), ...clientConditions(deal), ...clientRecords(deal), ...clientAgents(deal), ...clientInsurance(deal), partnerFunding: undefined, allocations: [], teaserSentTo: [], route: undefined, capitalStatus: "not_started", contractorIsGtAffiliate: undefined, source: "", fundingApprovers: undefined, creditReview: undefined, ...quietPayments(deal, true), ...quietExits(deal), wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, friendReferral: undefined, surveys: undefined };
+  return { ...deal, ...latestForClient(deal), ...clientConditions(deal), ...clientRecords(deal), ...clientAgents(deal), ...clientInsurance(deal), partnerFunding: undefined, allocations: [], teaserSentTo: [], route: undefined, capitalStatus: "not_started", contractorIsGtAffiliate: undefined, source: "", fundingApprovers: undefined, creditReview: undefined, ...quietPayments(deal, true), ...quietExits(deal), wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, friendReferral: undefined, surveys: undefined, investorUpdates: undefined, workout: undefined };
 }
+
+/** What a partner or buyer that holds a loan also sees: the team's updates for its investors and any workout. */
+const forHolder = (deal: Deal): Deal => ({ ...forClient(deal), investorUpdates: deal.investorUpdates, workout: deal.workout });
 
 /** The part of the book this account may see. Nothing else leaves the server. */
 export function scopeBook(book: Book, viewer: Viewer): Book {
@@ -154,7 +159,7 @@ function scopeRecords(book: Book, viewer: Viewer): Book {
     const deals = book.deals.filter((deal) => deal.teaserSentTo.includes(me.id));
     // Someone else's accepted bid only says the deal is gone: no firm, no price.
     const taken = book.bids.filter((bid) => bid.partnerId !== me.id && bid.status === "accepted" && deals.some((deal) => deal.id === bid.dealId)).map((bid) => ({ ...bid, partnerId: "", pct: 0, lenderRate: 0, lenderPoints: 0, conditions: "" }));
-    return { ...empty, partnerId: me.id, partners: [ownRecord(me)], bids: [...mine, ...taken], deals: deals.map((deal) => (won.has(deal.id) ? { ...forClient(deal), teaserSentTo: [me.id], contractorIsGtAffiliate: deal.contractorIsGtAffiliate, partnerFunding: deal.partnerFunding?.partnerId === me.id ? { ...deal.partnerFunding, sendTo: sendToFor(deal) } : undefined } : { ...blind(deal), teaserSentTo: [me.id] })) };
+    return { ...empty, partnerId: me.id, partners: [ownRecord(me)], bids: [...mine, ...taken], deals: deals.map((deal) => (won.has(deal.id) ? { ...forHolder(deal), teaserSentTo: [me.id], contractorIsGtAffiliate: deal.contractorIsGtAffiliate, partnerFunding: deal.partnerFunding?.partnerId === me.id ? { ...deal.partnerFunding, sendTo: sendToFor(deal) } : undefined } : { ...blind(deal), teaserSentTo: [me.id] })) };
   }
 
   if (view === "buyer") {
@@ -167,7 +172,7 @@ function scopeRecords(book: Book, viewer: Viewer): Book {
     const sales = book.sales.filter((sale) => sale.status === "listed" || sale.soldTo === me.id || offered.has(sale.id));
     const owned = new Set(sales.filter((sale) => sale.soldTo === me.id).map((sale) => sale.dealId));
     const deals = book.deals.filter((deal) => sales.some((sale) => sale.dealId === deal.id));
-    return { ...empty, buyerId: me.id, buyers: [ownRecord(me)], offers, sales: sales.map(hideBuyer), deals: deals.map((deal) => (owned.has(deal.id) ? forClient(deal) : blind(deal))) };
+    return { ...empty, buyerId: me.id, buyers: [ownRecord(me)], offers, sales: sales.map(hideBuyer), deals: deals.map((deal) => (owned.has(deal.id) ? forHolder(deal) : blind(deal))) };
   }
   return empty;
 }
@@ -417,6 +422,22 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       const problem = approveProblem(book.brokers.find((item) => item.id === action.brokerId), action.reason);
       return problem ? no(problem) : staffOnlyAllowed("manage_brokers") ? ok({ ...action, by: viewer.name }) : no(NOT_ALLOWED);
     }
+    case "saveBrokerBrand": {
+      const broker = book.brokers.find((item) => item.id === action.brokerId);
+      if (!broker) return no(GONE);
+      const own = view === "broker" && firmOf(viewer) === broker.id;
+      if (!own && !staffOnlyAllowed("manage_brokers")) return no(NOT_ALLOWED);
+      if (broker.status !== "approved") return no("LendHous approves a brokerage before its brand goes on quotes.");
+      const problem = brandProblem(action.brand);
+      return problem ? no(problem) : ok();
+    }
+    case "setBrokerLetterLimit": {
+      const broker = book.brokers.find((item) => item.id === action.brokerId);
+      if (!broker) return no(GONE);
+      if (broker.status !== "approved" && action.limit > 0) return no("Approve the brokerage before it issues letters.");
+      if (!Number.isFinite(action.limit) || action.limit < 0 || action.limit > 5_000_000) return no("A letter limit is $0 to $5,000,000.");
+      return staffOnlyAllowed("manage_brokers") ? ok({ ...action, by: viewer.name }) : no(NOT_ALLOWED);
+    }
     case "suspendBroker": {
       const broker = book.brokers.find((item) => item.id === action.brokerId);
       if (!broker || broker.status === "suspended") return no("That brokerage isn't active.");
@@ -432,6 +453,14 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       if (!trusted) return no(NOT_ALLOWED);
       const problem = referralProblem(book.deals, action.dealId, action.referrerId);
       return problem ? no(problem) : ok();
+    }
+    case "postInvestorUpdate": {
+      const problem = updateProblem(dealOf(action.dealId), action.text);
+      return problem ? no(problem) : staffOnlyAllowed("manage_capital", "service_loans") ? ok({ ...action, text: action.text.trim(), by: viewer.name }) : no(NOT_ALLOWED);
+    }
+    case "setWorkout": {
+      const problem = workoutProblem(dealOf(action.dealId), action.on, action.note);
+      return problem ? no(problem) : staffOnlyAllowed("service_loans", "declare_default") ? ok({ ...action, by: viewer.name }) : no(NOT_ALLOWED);
     }
     case "answerSurvey": {
       const deal = dealOf(action.dealId);

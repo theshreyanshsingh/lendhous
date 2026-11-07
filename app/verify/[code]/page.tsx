@@ -22,7 +22,7 @@ export default async function VerifyLetter({ params }: { params: Promise<{ code:
   const allowed = await consumeRateLimit(`verify-letter:${(await requestMeta()).ipAddress}`, 60, 60 * 60 * 1000);
   const found = code === "demo"
     ? { number: "PA-2026-0000", kind: "pre_approval" as const, who: "Sample Flips LLC (FAKE), Alex Sample (FAKE)", maxLoan: 340_000, maxPurchasePrice: 400_000, propertyAddress: "", expiresOn: "2026-11-30", state: "valid" as const, sample: true }
-    : await (async () => { const letter = allowed ? await letterByCode(code) : null; return letter && { number: letter.row.number, kind: letter.details.kind, who: [letter.details.entityName, letter.details.name].filter((part) => part.trim()).join(", "), maxLoan: letter.details.maxLoan, maxPurchasePrice: letter.details.maxPurchasePrice, propertyAddress: letter.details.propertyAddress, expiresOn: letter.row.expiresOn, state: letter.state, sample: false }; })();
+    : await (async () => { const letter = allowed ? await letterByCode(code) : null; return letter && { number: letter.row.number, kind: letter.details.kind, who: [letter.details.entityName, letter.details.name].filter((part) => part.trim()).join(", "), maxLoan: letter.details.maxLoan, maxPurchasePrice: letter.details.maxPurchasePrice, propertyAddress: letter.details.propertyAddress, brokerName: letter.details.brokerName, expiresOn: letter.row.expiresOn, state: letter.state, sample: false }; })();
   return (
     <div className="min-h-screen">
       <header className="border-b border-rule"><div className="mx-auto max-w-xl px-4 py-5"><Logo /></div></header>
@@ -39,6 +39,7 @@ export default async function VerifyLetter({ params }: { params: Promise<{ code:
             {found.sample && <p className="mt-2 text-sm font-medium text-bad">SAMPLE ONLY. This isn&apos;t a real letter.</p>}
             <dl className="glass mt-6 grid gap-x-6 gap-y-2 p-5 text-sm sm:grid-cols-[auto_1fr]">
               <dt className="text-muted-foreground">Letter</dt><dd>{LETTER_KIND[found.kind]} {found.number}</dd>
+              {"brokerName" in found && found.brokerName && <><dt className="text-muted-foreground">Issued by</dt><dd data-testid="verify-broker">{found.brokerName}, an independent broker, through LendHous</dd></>}
               <dt className="text-muted-foreground">For</dt><dd className="wrap-anywhere">{found.who}</dd>
               <dt className="text-muted-foreground">Loan up to</dt><dd>{dollars(found.maxLoan)}</dd>
               <dt className="text-muted-foreground">Purchase price up to</dt><dd>{dollars(found.maxPurchasePrice)}</dd>

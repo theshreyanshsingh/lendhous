@@ -10,6 +10,7 @@ import { Badge, Stat, k, points, productLabel, statusLabel, usd } from "@/compon
 import type { Deal } from "@/lib/mockData";
 import { canSendDeals, FEE_STATE, feeOf, PROTECTION_MONTHS, referralPath } from "@/lib/brokers";
 import { est, useStore } from "@/lib/store";
+import { BrokerBrandForm, BrokerLetters, BrokerStanding } from "@/components/BrokerProgram";
 
 const CLOSED = ["funded", "servicing_current", "servicing_delinquent", "matured", "default", "paid_off"];
 // Declined or withdrawn: no longer in process, and never earned a fee.
@@ -68,8 +69,10 @@ export default function BrokerHome() {
         <div className="glass p-4"><Stat label="Fees expected" value={usd(total("expected"))} sub="loans in process" /></div>
         <div className="glass p-4"><Stat label="Fees earned" value={<span className="text-good" data-testid="fees-earned">{usd(total("paid") + total("unpaid"))}</span>} sub={total("unpaid") ? <span className="text-warn" data-testid="fees-unpaid">{usd(total("unpaid"))} not paid yet</span> : "all paid"} /></div>
       </div>
+      <BrokerStanding firm={firm} />
       {firm.referralCode && <ReferralLink code={firm.referralCode} />}
       {firm.referralCode && <EmbedSnippet referral={firm.referralCode} title="A quote on your own website">Paste this into a page on your site. Visitors see LendHous&apos;s terms on their deal there, and a quote they save is yours, the same as through your link.</EmbedSnippet>}
+      <div className="grid gap-4 lg:grid-cols-2"><BrokerBrandForm firm={firm} /><BrokerLetters firm={firm} /></div>
       {mine.length === 0 && <EmptyState>No deals yet. Submit your first one to get an instant estimate.</EmptyState>}
       <div className="grid gap-4 lg:grid-cols-2">
         {mine.map((deal) => {

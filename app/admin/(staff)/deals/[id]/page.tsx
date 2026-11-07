@@ -27,6 +27,7 @@ import { ConditionsPanel } from "@/components/loan/ConditionsPanel";
 import { LienProtection } from "@/components/loan/LienProtection";
 import { InsurancePanel } from "@/components/loan/InsurancePanel";
 import { BudgetControls } from "@/components/loan/BudgetControls";
+import { InvestorUpdates } from "@/components/loan/InvestorUpdates";
 import { INSURED } from "@/lib/insurance";
 import { PropertyPhotos } from "@/components/loan/PropertyPhotos";
 import { LoanTeam } from "@/components/loan/LoanTeam";
@@ -293,6 +294,7 @@ export default function DealWorkspace() {
       {tab === "Closing" && <div className="space-y-4"><ClosingPanel deal={d} />{INSURED.includes(d.status) && <InsurancePanel deal={d} />}{(d.app.product === "fix_flip" || d.app.product === "ground_up" || d.lienFile) && <LienProtection deal={d} />}<OfacPanel deal={d} /></div>}
       {tab === "Servicing" && (SERVICED.includes(d.status) || d.status === "paid_off") && <LoanLedger deal={d} />}
       {tab === "Servicing" && SERVICED.includes(d.status) && <BudgetControls deal={d} side="team" />}
+      {tab === "Servicing" && (SERVICED.includes(d.status) || d.status === "paid_off") && <InvestorUpdates deal={d} />}
       {tab === "Servicing" && SERVICED.includes(d.status) && <InsurancePanel deal={d} />}
       {tab === "Servicing" && SERVICED.includes(d.status) && <ExitPlanCard deal={d} side="team" />}
       {tab === "Servicing" && (SERVICED.includes(d.status) || d.status === "paid_off") && <TeamLoanStatements deal={d} />}

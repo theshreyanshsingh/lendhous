@@ -68,10 +68,16 @@ export type BookAction =
   | { t: "brokerFeePaid"; dealId: string; amount: number; on: string; reference: string; by: string }
   /** A loan started from a lead that came by a broker's referral link. Only the server does it: it reads the lead. */
   | { t: "referLoan"; dealId: string; brokerId: string; on: string }
+  /** How a brokerage shows on its quotes and term sheets, and the largest pre-qualification letter it may issue (lib/broker-program.ts). */
+  | { t: "saveBrokerBrand"; brokerId: string; brand: { name: string; phone: string; email: string; website: string } }
+  | { t: "setBrokerLetterLimit"; brokerId: string; limit: number; by: string }
   /** A loan started from a lead that came by a borrower's referral link, with the bonus Settings named that day. Server only. */
   | { t: "referFriend"; dealId: string; referrerId: string; on: string; bonus: number }
   | { t: "referralBonusPaid"; dealId: string; amount: number; on: string; reference: string; by: string }
   /** The borrower's 0 to 10 on how likely they are to recommend LendHous, at closing or payoff (lib/surveys.ts). */
+  /** An update on a funded loan for its investors, and a workout declared or lifted (lib/investor-updates.ts). */
+  | { t: "postInvestorUpdate"; dealId: string; updateId: string; text: string; by: string }
+  | { t: "setWorkout"; dealId: string; on: boolean; note: string; by: string }
   | { t: "answerSurvey"; dealId: string; stage: "funded" | "paid_off"; score: number; comment: string }
   | { t: "setBrokerPoints"; dealId: string; points: number }
   /** Puts someone on the loan as its officer or processor, or takes them off (null). Only the server does it: it looks the person up. */
@@ -318,6 +324,9 @@ export function demoBook(): Book {
       if (separate) policies.push({ kind: "windstorm", carrier: "Coastal Wind Pool (FAKE)", policy: `CW-${d.loanNumber.slice(-4)}`, expiresOn: "2027-05-31", mortgagee: true, by: "Pat Processor (FAKE)", at }, { kind: "flood", carrier: "Sample Flood (FAKE)", policy: `SF-${d.loanNumber.slice(-4)}`, expiresOn: "2027-03-01", coverage: 250_000, mortgagee: true, by: "Pat Processor (FAKE)", at });
       deals[i] = { ...deals[i], insurance: { policies, flood: { sfha: separate, zone: separate ? "AE" : "X", by: "Pat Processor (FAKE)", at } } };
     }
+    // The loans the demo partner and buyer hold have an update from the team.
+    if (d.id === "d11") deals[i] = { ...deals[i], investorUpdates: [{ id: "iu-demo-11", text: "Paying on time. The borrower expects to refinance into a rental loan in the spring (FAKE).", by: "Cam Capital (FAKE)", at: "2026-10-15T14:00:00Z" }] };
+    if (d.id === "d14") deals[i] = { ...deals[i], investorUpdates: [{ id: "iu-demo-14", text: "Cabinets are back-ordered; the borrower asked for a 3-month extension, under review (FAKE).", by: "Sam Servicer (FAKE)", at: "2026-10-28T18:00:00Z" }] };
     // Three borrowers answered the closing survey; the demo borrower's own flip still has the question waiting.
     const answer = DEMO_SURVEYS[d.id];
     if (answer) deals[i] = { ...deals[i], surveys: [{ stage: "funded", comment: "", ...answer }] };
@@ -515,6 +524,16 @@ function apply(s: Book, a: BookAction): Book {
       const broker = s.brokers.find((item) => item.id === a.brokerId)!;
       return { ...s, brokers: s.brokers.map((item) => (item.id === a.brokerId ? { ...item, status: "suspended" as const, suspended: { by: a.by, at: now(), reason: a.reason.trim() } } : item)), audit: log(`Broker ${broker.name} suspended by ${a.by}: ${a.reason.trim()}`) };
     }
+    case "saveBrokerBrand": {
+      const broker = s.brokers.find((item) => item.id === a.brokerId)!;
+      const brand = { name: a.brand.name.trim(), phone: a.brand.phone.trim(), email: a.brand.email.trim().toLowerCase(), website: a.brand.website.trim() };
+      return { ...s, brokers: s.brokers.map((item) => (item.id === a.brokerId ? { ...item, brand } : item)), audit: log(`Broker ${broker.name}: brand on quotes and term sheets set to ${brand.name}`) };
+    }
+    case "setBrokerLetterLimit": {
+      const broker = s.brokers.find((item) => item.id === a.brokerId)!;
+      const limit = Math.max(0, Math.round(a.limit));
+      return { ...s, brokers: s.brokers.map((item) => (item.id === a.brokerId ? { ...item, letterLimit: limit || undefined } : item)), audit: log(`Broker ${broker.name}: pre-qualification letters ${limit ? `up to $${limit.toLocaleString("en-US")}` : "turned off"} by ${a.by}`) };
+    }
     case "referLoan": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
       const broker = s.brokers.find((item) => item.id === a.brokerId);
@@ -524,6 +543,16 @@ function apply(s: Book, a: BookAction): Book {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
       const referrerName = s.deals.find((item) => item.borrowerId === a.referrerId)?.borrowerName ?? "A borrower";
       return { ...s, deals: upd(a.dealId, (d) => ({ ...d, friendReferral: { referrerId: a.referrerId, referrerName, on: a.on, bonus: round2(Math.max(0, a.bonus)) } })), audit: log(`${deal.loanNumber}: referred by ${referrerName}, a LendHous borrower`) };
+    }
+    case "postInvestorUpdate": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, investorUpdates: [...(d.investorUpdates ?? []), { id: a.updateId, text: a.text.trim(), by: a.by, at: now() }] })), audit: log(`${deal.loanNumber}: update posted for its investors by ${a.by}`) };
+    }
+    case "setWorkout": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const at = now();
+      // Lifting it keeps the record of what was agreed as an update.
+      return { ...s, deals: upd(a.dealId, (d) => (a.on ? { ...d, workout: { since: serviceDay(s), note: a.note.trim(), by: a.by, at } } : { ...d, workout: undefined, investorUpdates: [...(d.investorUpdates ?? []), { id: `wo${uid()}`, text: `Workout ended: ${a.note.trim()}`, by: a.by, at }] })), audit: log(`${deal.loanNumber}: workout ${a.on ? "declared" : "ended"} by ${a.by}`) };
     }
     case "answerSurvey": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;

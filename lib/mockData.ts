@@ -123,6 +123,9 @@ export interface Deal {
   brokerFeePaid?: { amount: number; on: string; reference: string; by: string; at: string };
   /** The broker whose referral link brought this borrower, and when (lib/brokers.ts). */
   referredBy?: { brokerId: string; on: string };
+  /** The team's updates on the loan for the partners and buyers who hold it, and a workout it declared (lib/investor-updates.ts). */
+  investorUpdates?: { id: string; text: string; by: string; at: string }[];
+  workout?: { since: string; note: string; by: string; at: string };
   /** The borrower's answer to "how likely are you to recommend us?", at closing and at payoff (lib/surveys.ts). */
   surveys?: { stage: "funded" | "paid_off"; score: number; comment: string; at: string }[];
   /** Budget moved between lines after funding, and overruns found at inspections (lib/budget.ts). */
@@ -384,6 +387,10 @@ export interface Broker {
   referralCode?: string;
   /** The firm's formation documents and certificate of good standing, sent with its application. The files are encrypted Documents. */
   docs?: { kind: "articles" | "good_standing"; documentId: string; fileName: string; at: string }[];
+  /** How the brokerage shows on the quotes and term sheets it hands clients; LendHous is still named as the lender (lib/broker-program.ts). */
+  brand?: { name: string; phone: string; email: string; website: string };
+  /** The largest loan its own pre-qualification letters may name, set by an owner. Unset: it issues none. */
+  letterLimit?: number;
 }
 export interface CapitalSource { id: string; name: string; type: "gt_balance_sheet" | "gt_credit_line" | "partner_lender"; commitment: number; baseDeployed: number; baseUnfunded: number; lineUndrawn?: number; orgId?: string }
 /** A firm whose money LendHous takes: its owners and officers as the team entered them, and its sanctions screening (lib/ofac.ts). */
@@ -492,7 +499,7 @@ export const seedLoanSales: LoanSale[] = [
 ];
 
 export const brokers: Broker[] = [{
-  id: DEMO_BROKER_ID, name: "Demo Brokerage (FAKE)", status: "approved", referralCode: "demobrkr",
+  id: DEMO_BROKER_ID, name: "Demo Brokerage (FAKE)", status: "approved", referralCode: "demobrkr", letterLimit: 500_000,
   application: { legalName: "Demo Brokerage (FAKE)", entityState: "FL", principals: ["Bea Broker (FAKE)"], nmls: "", license: "", agreementVersion: "PLACEHOLDER-2026-11-04", signedName: "Bea Broker (FAKE)", signedAt: "2026-09-02T14:00:00Z", ip: "203.0.113.10" },
   screening: { id: "ofac-demo-broker", at: "2026-09-02T14:00:05Z", by: "Broker application", checkedAt: "2026-09-02T14:00:05Z", list: { fetchedAt: "2026-09-02T06:00:00Z", names: 18_000 }, subjects: [{ name: "Demo Brokerage (FAKE)", role: "entity", hits: [] }, { name: "Bea Broker (FAKE)", role: "principal", hits: [] }], status: "clear" },
   approved: { by: "Olivia Owner (FAKE)", at: "2026-09-03T13:30:00Z" },

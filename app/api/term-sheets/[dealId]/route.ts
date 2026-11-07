@@ -7,6 +7,7 @@ import { permissionCheck, readBook } from "@/lib/book-store";
 import { viewFor } from "@/lib/permissions";
 import { termSheetPdf } from "@/lib/term-sheet-pdf";
 import { latestSheet, sheetContent } from "@/lib/term-sheets";
+import { brandContact } from "@/lib/broker-program";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,5 +39,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ deal
   const client = sheet === latest && ((view === "borrower" && deal.borrowerId === user.id) || (view === "broker" && deal.brokerId === firmOf(user)));
   if (!staff && !client) return refused();
   await audit({ actorId: user.id, action: "term_sheet.opened", entityType: "LoanBook", entityId: deal.id, after: { version } });
-  return pdf(await termSheetPdf(sheetContent(deal, sheet, process.env.LENDER_NAME || "LendHous")), `term-sheet-${deal.loanNumber}-v${version}`);
+  // A broker's loan carries the brokerage's brand, when it has one, on the copy the borrower and broker download.
+  const brand = book.brokers.find((item) => item.id === deal.brokerId)?.brand;
+  const content = sheetContent(deal, sheet, process.env.LENDER_NAME || "LendHous");
+  return pdf(await termSheetPdf(brand ? { ...content, presentedBy: { name: brand.name, contact: brandContact(brand) } } : content), `term-sheet-${deal.loanNumber}-v${version}`);
 }

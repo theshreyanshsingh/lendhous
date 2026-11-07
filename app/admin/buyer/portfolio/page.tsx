@@ -5,6 +5,7 @@ import type { LoanBuyer } from "@/lib/mockData";
 import { useStore } from "@/lib/store";
 import { PageIntro } from "@/components/page-intro";
 import { Badge, Section, Stat, k, productLabel, usd } from "@/components/ui";
+import { INVESTOR_STATUS, investorStatus, latestUpdate, STATUS_TONE } from "@/lib/investor-updates";
 import { BuyerGate } from "../buyer-gate";
 import { shortDay } from "@/lib/format";
 import { InvestorStatements } from "@/components/InvestorStatements";
@@ -43,7 +44,8 @@ function Holdings({ me }: { me: LoanBuyer }) {
           {owned.map(({ sale, tape, holding }) => (
             <li key={sale.id} data-testid="owned-loan">
               <Link href={`/admin/buyer/loans/${sale.id}`} className="block py-3 hover:bg-hover/60">
-                <div className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium">{tape.tapeId} · {productLabel[tape.product]} · {tape.county}, {tape.state}</span>{tape.current ? <Badge tone="green">Paying on time</Badge> : <Badge tone="rose">{tape.paymentsLate} late</Badge>}</div>
+                <div className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium">{tape.tapeId} · {productLabel[tape.product]} · {tape.county}, {tape.state}</span>{(() => { const deal = s.deals.find((item) => item.id === sale.dealId); const status = deal ? investorStatus(deal) : tape.current ? "current" : "late"; return <Badge tone={STATUS_TONE[status]}>{status === "late" ? `${INVESTOR_STATUS.late}: ${tape.paymentsLate} payment${tape.paymentsLate === 1 ? "" : "s"}` : INVESTOR_STATUS[status]}</Badge>; })()}</div>
+                {(() => { const deal = s.deals.find((item) => item.id === sale.dealId); const update = deal && latestUpdate(deal); return update ? <p className="mt-1 text-sm text-muted-foreground" data-testid="portfolio-update">Update {shortDay(update.at.slice(0, 10))}: {update.text}</p> : null; })()}
                 <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
                   <Stat label="Balance" value={usd(tape.balance)} />
                   <Stat label="You paid" value={usd(holding.paid)} sub={`${sale.soldPct?.toFixed(2)} on ${sale.soldAt}`} />

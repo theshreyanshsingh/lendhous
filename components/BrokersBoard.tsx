@@ -8,6 +8,8 @@ import { approveProblem, BROKER_STATUS, FEE_STATE, feeOf, referralPath } from "@
 import { shortDay } from "@/lib/format";
 import type { Broker } from "@/lib/mockData";
 import { useStore } from "@/lib/store";
+import { brokerStanding } from "@/lib/broker-program";
+import { serviceDay } from "@/lib/book";
 
 const tone = (status?: Broker["status"]) => (status === "approved" ? "green" : status === "suspended" ? "rose" : "amber");
 
@@ -15,6 +17,23 @@ const tone = (status?: Broker["status"]) => (status === "approved" ? "green" : s
  * The owners' list of brokerages: what each signed and sent, its OFAC screening and W-9, and its loans and fees.
  * Approving one lets it send deals and gives it a referral link; suspending stops new deals.
  */
+/** A brokerage's tier from its funded volume, its brand, and the pre-qualification letter limit an owner sets (lib/broker-program.ts). */
+function BrokerTierAndLimit({ broker }: { broker: Broker }) {
+  const { s, dispatch, viewerName } = useStore();
+  const standing = brokerStanding(s.deals, broker.id, serviceDay(s));
+  const [limit, setLimit] = useState(String(broker.letterLimit ?? ""));
+  return (
+    <div className="space-y-2 border-t border-border pt-3" data-testid="broker-tier">
+      <p><b>{standing.tier ? `${standing.tier.name} broker` : "No tier yet"}</b> · {usd(standing.funded)} funded in 12 months across {standing.loans} loan{standing.loans === 1 ? "" : "s"}{standing.lateShare ? `, ${Math.round(standing.lateShare * 100)}% behind now` : ""}{broker.brand ? ` · quotes show "${broker.brand.name}"` : ""}</p>
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="block"><span className="label">Their pre-qualification letters, up to ($)</span><input className="desk-input w-40!" inputMode="numeric" data-testid="broker-letter-limit" placeholder="None" value={limit} onChange={(event) => setLimit(event.target.value.replace(/[^0-9]/g, ""))} /></label>
+        <button type="button" className="btn-ghost" data-testid="save-letter-limit" disabled={Number(limit || 0) === (broker.letterLimit ?? 0)} onClick={() => void dispatch({ t: "setBrokerLetterLimit", brokerId: broker.id, limit: Number(limit || 0), by: viewerName })}>Save</button>
+        <p className="w-full text-xs text-muted-foreground">Blank lets them issue none. Each letter says it&apos;s from the brokerage through LendHous, isn&apos;t an approval, and sellers can check it.</p>
+      </div>
+    </div>
+  );
+}
+
 export function BrokersBoard() {
   const { s, dispatch, applyReply, local, viewerName } = useStore();
   const [taxForms, setTaxForms] = useState<Record<string, { kind: "w9" | "w8"; signedAt: string }>>({});
@@ -59,6 +78,7 @@ export function BrokersBoard() {
               ) : <p className="text-muted-foreground">Hasn&apos;t signed the broker agreement yet.</p>}
               {/* A possible match found after approval, by the nightly check: the brokerage can't send deals until it's reviewed. */}
               {broker.status === "approved" && broker.screening?.status === "review" && <FirmMatchReview kind="broker" firmId={broker.id} screening={broker.screening} />}
+              {broker.status === "approved" && <BrokerTierAndLimit broker={broker} />}
               {broker.status === "approved" && broker.referralCode && <p className="text-xs text-muted-foreground">Referral link: <span className="font-mono">{referralPath(broker.referralCode)}</span>{broker.approved ? ` · approved by ${broker.approved.by} on ${shortDay(broker.approved.at)}` : ""}</p>}
               {broker.status === "suspended" && <p className="text-xs text-bad">Suspended by {broker.suspended?.by} on {broker.suspended ? shortDay(broker.suspended.at) : ""}: {broker.suspended?.reason}</p>}
               {fees.length > 0 && (

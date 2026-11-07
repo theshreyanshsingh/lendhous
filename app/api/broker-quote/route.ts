@@ -5,6 +5,7 @@ import { firmOf } from "@/lib/book-access";
 import { parseAction } from "@/lib/book-actions";
 import { readBook } from "@/lib/book-store";
 import { brokerQuoteContent } from "@/lib/broker-quote";
+import { brandContact } from "@/lib/broker-program";
 import { canSendDeals } from "@/lib/brokers";
 import { isDemoEmail } from "@/lib/deploy";
 import { viewFor } from "@/lib/permissions";
@@ -37,7 +38,8 @@ export async function POST(request: Request) {
   if (!checked || checked.t !== "submitApp" || !client) return new NextResponse("Add the client's name and the loan's numbers.", { status: 400 });
   await loadPricing();
   const { pricingVersion: _version, termRate: _rate, termPoints: _points, repeat: _repeat, ...app } = checked.app;
-  const content = brokerQuoteContent({ app, broker: firm!.name, client, brokerPoints: points, address, today: servicingDate(new Date()) });
+  const brand = firm && "brand" in firm ? firm.brand : undefined;
+  const content = { ...brokerQuoteContent({ app, broker: brand?.name || firm!.name, client, brokerPoints: points, address, today: servicingDate(new Date()) }), ...(brand ? { presentedBy: { name: brand.name, contact: brandContact(brand) } } : {}) };
   await audit({ actorId: user.id, action: "broker.quote_made", entityType: "Broker", entityId: demo ? "demo" : firmOf(user), after: { product: app.product } });
   const bytes = await termSheetPdf({ ...content, ...(demo ? { sample: true } : {}) });
   return new NextResponse(new Uint8Array(bytes), { headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="lendhous-quote.pdf"`, "Cache-Control": "no-store" } });

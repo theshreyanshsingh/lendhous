@@ -176,6 +176,8 @@ const longDay = (day: string) => new Date(`${day}T12:00:00Z`).toLocaleDateString
 
 export type SheetContent = {
   lender: string; title: string; subtitle: string; banner?: string; sample?: boolean;
+  /** A broker's own brand above LendHous's on what they hand their client (lib/broker-program.ts). LendHous stays the lender. */
+  presentedBy?: { name: string; contact: string };
   facts: [string, string][]; terms: [string, string][]; conditions: string[]; paragraphs: string[]; signature: string;
 };
 

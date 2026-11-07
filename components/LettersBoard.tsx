@@ -4,7 +4,7 @@ import { issueApprovalLetter, letterBorrowers, revokeApprovalLetter, staffLetter
 import { Badge, Section, productLabel, usd } from "@/components/ui";
 import type { Product } from "@/lib/engine";
 import { shortDay } from "@/lib/format";
-import { DEFAULT_CONDITIONS, LETTER_DAYS, LETTER_KIND, type LetterKind } from "@/lib/letters";
+import { DEFAULT_CONDITIONS, LETTER_DAYS, LETTER_KIND, STAFF_LETTER_KINDS, type LetterKind } from "@/lib/letters";
 
 type Letter = Awaited<ReturnType<typeof staffLetters>>[number];
 type Borrower = Awaited<ReturnType<typeof letterBorrowers>>[number];
@@ -47,7 +47,7 @@ export function LettersBoard({ demo }: { demo: boolean }) {
     <div className="space-y-4">
       <Section title="Issue a letter">
         <div className="grid gap-3 sm:grid-cols-2" data-testid="letter-form">
-          <label className="block"><span className="label">Kind</span><select className="desk-input" data-testid="letter-kind" value={form.kind} onChange={(event) => put({ kind: event.target.value as LetterKind })}>{(Object.keys(LETTER_KIND) as LetterKind[]).map((kind) => <option key={kind} value={kind}>{LETTER_KIND[kind]}</option>)}</select></label>
+          <label className="block"><span className="label">Kind</span><select className="desk-input" data-testid="letter-kind" value={form.kind} onChange={(event) => put({ kind: event.target.value as LetterKind })}>{STAFF_LETTER_KINDS.map((kind) => <option key={kind} value={kind}>{LETTER_KIND[kind]}</option>)}</select></label>
           <label className="block"><span className="label">Borrower account (optional)</span><select className="desk-input" data-testid="letter-borrower" value={form.borrowerId} onChange={(event) => pick(event.target.value)}><option value="">Not in the portal</option>{borrowers.map((account) => <option key={account.id} value={account.id}>{account.name} · {account.email}</option>)}</select></label>
           <label className="block"><span className="label">Borrower&apos;s name</span><input className="desk-input" data-testid="letter-name" maxLength={120} value={form.name} onChange={(event) => put({ name: event.target.value })} /></label>
           <label className="block"><span className="label">Email it to (optional)</span><input className="desk-input" type="email" data-testid="letter-email" maxLength={200} value={form.email} onChange={(event) => put({ email: event.target.value })} /></label>

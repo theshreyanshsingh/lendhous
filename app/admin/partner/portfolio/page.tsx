@@ -3,7 +3,8 @@ import Link from "next/link";
 import { InvestorStatements } from "@/components/InvestorStatements";
 import { PortfolioCharts } from "@/components/charts/PortfolioCharts";
 import { PageIntro } from "@/components/page-intro";
-import { Badge, Section, Stat, k, productLabel, statusLabel, usd } from "@/components/ui";
+import { Badge, Section, Stat, k, productLabel, shortDate, usd } from "@/components/ui";
+import { INVESTOR_STATUS, investorStatus, latestUpdate, STATUS_TONE } from "@/lib/investor-updates";
 import { evaluate } from "@/lib/engine";
 import { holdingsOf, splitOf } from "@/lib/investor-statements";
 import { balanceOf, ledger } from "@/lib/servicing";
@@ -38,8 +39,9 @@ export default function PartnerPortfolio() {
               <Link href={`/admin/partner/teasers/${row.holding.deal.id}`} className="block hover:bg-hover/60">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="min-w-0 font-medium">{row.holding.deal.loanNumber} · {productLabel[row.holding.deal.app.product]} · {row.holding.deal.address}, {row.holding.deal.city}</span>
-                  {row.paidOff ? <Badge tone="slate">Paid off</Badge> : row.late ? <Badge tone="rose">{row.late} days late</Badge> : <Badge tone="green">{statusLabel(row.holding.deal.status)}</Badge>}
+                  <span className="flex flex-wrap items-center gap-2">{row.late > 0 && !row.paidOff && <span className="text-xs text-bad">{row.late} days late</span>}<Badge tone={STATUS_TONE[investorStatus(row.holding.deal)]}>{INVESTOR_STATUS[investorStatus(row.holding.deal)]}</Badge></span>
                 </div>
+                {latestUpdate(row.holding.deal) && <p className="mt-1 text-sm text-muted-foreground" data-testid="portfolio-update">Update {shortDate(latestUpdate(row.holding.deal)!.at)}: {latestUpdate(row.holding.deal)!.text}</p>}
                 <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-5">
                   <Stat label="Your share" value={`${Math.round(row.holding.share * 100)}%`} sub={`${row.holding.investorRate.toFixed(2)}% to you`} />
                   <Stat label="Balance" value={usd(row.balance)} />

@@ -28,8 +28,15 @@ export function termSheetPdf(content: SheetContent): Promise<Buffer> {
     };
     const heading = (text: string) => { doc.font("Times-Bold").fontSize(13).fillColor(INK).text(text, left, doc.y); doc.moveDown(0.4); };
 
-    doc.font("Times-Bold").fontSize(22).fillColor(INK).text(content.lender, left, doc.y);
-    doc.font("Times-Roman").fontSize(15).text(content.title);
+    if (content.presentedBy) {
+      // The broker's brand on top, and LendHous named as the lender right under it.
+      doc.font("Times-Bold").fontSize(22).fillColor(INK).text(content.presentedBy.name, left, doc.y);
+      if (content.presentedBy.contact) doc.font("Helvetica").fontSize(9).fillColor(MUTED).text(content.presentedBy.contact);
+      doc.font("Times-Roman").fontSize(15).fillColor(INK).text(`${content.title} · Lender: ${content.lender}`);
+    } else {
+      doc.font("Times-Bold").fontSize(22).fillColor(INK).text(content.lender, left, doc.y);
+      doc.font("Times-Roman").fontSize(15).text(content.title);
+    }
     doc.font("Helvetica").fontSize(9).fillColor(MUTED).text(content.subtitle);
     rule(SAGE, 1.25);
     if (content.sample) { doc.font("Helvetica-Bold").fontSize(10).fillColor("#9B2C2C").text("SAMPLE ONLY. These are made-up figures, not a real term sheet."); doc.moveDown(0.5); }
