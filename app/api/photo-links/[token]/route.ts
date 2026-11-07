@@ -82,7 +82,7 @@ export async function DELETE(request: Request, { params }: Context) {
   return NextResponse.json({ ok: true });
 }
 
-const finish = z.object({ name: z.string().trim().min(1).max(120), note: z.string().trim().max(2000), confirmed: z.literal(true) });
+const finish = z.object({ name: z.string().trim().min(1).max(120), note: z.string().trim().max(2000), confirmed: z.literal(true), signDraw: z.boolean().optional() });
 
 /** "I'm done": tells the team. The link keeps working until its date, in case something was missed. */
 export async function PATCH(request: Request, { params }: Context) {
@@ -93,7 +93,8 @@ export async function PATCH(request: Request, { params }: Context) {
   const parsed = finish.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return refuse("Add your name and confirm the photos.", 400);
   if (!link.request.photos.length) return refuse("Add at least one photo first.", 400);
-  const action = { t: "finishPhotoRequest" as const, requestId: link.request.id, by: parsed.data.name, note: parsed.data.note };
+  // Only a contractor's link for a draw can sign it off; the reducer checks the same.
+  const action = { t: "finishPhotoRequest" as const, requestId: link.request.id, by: parsed.data.name, note: parsed.data.note, signDraw: Boolean(parsed.data.signDraw && link.request.who === "contractor" && link.request.drawId) };
   const saved = await runAction(linkActor(link.request), action, { trusted: true });
   if ("error" in saved) return refuse(saved.error, 409);
   await audit({ actorId: null, action: "photos.confirmed", entityType: "LoanBook", entityId: link.deal.id, after: { photoRequest: link.request.id, photos: link.request.photos.length } });

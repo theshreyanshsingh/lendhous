@@ -129,6 +129,8 @@ Ranked by money and risk to LendHous, against the effort.
 
 ### 1.6 Construction budget controls
 
+**Built 2026-11-07** (`lib/budget.ts`): a contingency line spent only by change orders; change orders that move budget between lines after funding, with the new ARV checked; overruns that put the loan out of balance and hold draws until covered; the interest reserve's balance and months left; the work done against the money paid; and the contractor's sign-off on their photo link. Still with N: phone draws with location and the inspector's link.
+
 - **Today:**
   - Draws have retainage and lien-law holds.
   - There's no contingency line, no reallocation, and no change-of-scope request.
@@ -226,6 +228,8 @@ Ranked by money and risk to LendHous, against the effort.
 
 ### 1.10 Booking a call, and Florida pages that rank
 
+**Built 2026-11-07** (`lib/calls.ts`, `lib/counties.ts`, `lib/surveys.ts`): `/book` with half-hour calls in Florida business hours, eight county pages with terms from the live pricing and LendHous's own funded figures from three loans up, and a 0-to-10 survey at closing and payoff that asks promoters for a review and scores in Reports. Still to come: rate and LTC on "Recently funded" for borrowers who opt in, and each loan officer's own booking hours.
+
 - **Today:**
   - No way to book a call.
   - No city or county pages.
@@ -246,7 +250,7 @@ Ranked by money and risk to LendHous, against the effort.
 
 ### 1.11 Smaller items
 
-- **Accounting export:** a monthly journal of the servicing ledger for QuickBooks. The Mortgage Office, LendingWise and Ursara have it, Ursara with account mapping (C). No vendor is needed for a file export.
+- **Accounting export** (**built 2026-11-07**, `lib/journal.ts`): a monthly journal of the servicing ledger for QuickBooks. The Mortgage Office, LendingWise and Ursara have it, Ursara with account mapping (C). No vendor is needed for a file export.
 - **Webhooks and an API key** for Zapier and the like (Mortgage Automator, LendingWise, C).
 - **A per-loan email address** that files replies and attachments to the loan (LendingWise, C).
 - **Custom fields** on loans (LendingWise, C).

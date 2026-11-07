@@ -10,6 +10,7 @@ import { DEFAULT_KINDS, maturityAfter, WITHDRAW_REASONS } from "@/lib/loan-exits
 import { latestSheet } from "@/lib/term-sheets";
 import { policiesOf, policyWord } from "@/lib/insurance";
 import { bonusOf, PAY_WITHIN_BUSINESS_DAYS } from "@/lib/referrals";
+import { budgetBalance } from "@/lib/budget";
 import { dueOf, fromThirdParty, letterChanges, receivedOf, requesterLine, staleLetter } from "@/lib/payoffs";
 import { prisma } from "@/lib/prisma";
 import { defaultInterestFrom, defaultRateOf, ledger, maturityOf, servicingTermsOf } from "@/lib/servicing";
@@ -94,6 +95,24 @@ function actionAlerts(before: Book, after: Book, action: BookAction): Alert[] {
   const loan = (dealId?: string) => after.deals.find((deal) => deal.id === dealId);
   const number = (dealId?: string) => loan(dealId)?.loanNumber ?? "your loan";
   switch (action.t) {
+    case "requestChangeOrder": {
+      const deal = loan(action.dealId);
+      const order = deal?.changeOrders?.find((item) => item.id === action.orderId);
+      if (!deal || !order || order.byTeam) return [];
+      const line = (id: string) => deal.scope?.find((item) => item.id === id)?.division ?? "a line";
+      return [{ to: "team", dealId: deal.id, subject: `Change order to decide: ${deal.loanNumber}`, body: `${deal.borrowerName} asks to move ${dollars(order.amount)} from ${line(order.from)} to ${order.to === "new" ? `a new line, ${order.newDivision}` : line(order.to)}: ${order.reason}${order.arv ? ` New after-repair value: ${dollars(order.arv)}.` : ""} Decide it on the loan's Servicing tab.`, event: "budget.change_requested" }];
+    }
+    case "decideChangeOrder": {
+      const deal = loan(action.dealId);
+      const order = deal?.changeOrders?.find((item) => item.id === action.orderId);
+      if (!deal || !order || order.status === "requested") return [];
+      return [{ to: "borrower", dealId: deal.id, subject: `Your change order was ${order.status === "approved" ? "approved" : "declined"}: ${deal.loanNumber}`, body: order.status === "approved" ? `Your budget now has ${dollars(order.amount)} moved to ${order.newDivision ?? deal.scope?.find((item) => item.id === order.to)?.division ?? "the line you asked for"}. Draws against it can go ahead.${order.decided?.note ? ` ${order.decided.note}` : ""}` : `We couldn't move the money as asked: ${order.decided?.note ?? ""}`, event: `budget.change_${order.status}` }];
+    }
+    case "recordOverrun": {
+      const deal = loan(action.dealId);
+      const balance = deal ? budgetBalance(deal) : null;
+      return deal && balance && !balance.inBalance ? [{ to: "borrower", dealId: deal.id, subject: `Your loan's budget is short: ${deal.loanNumber}`, body: `The inspection found the work will cost ${dollars(action.amount)} more than budgeted: ${action.note.trim()} That leaves the loan out of balance by ${dollars(balance.shortfall)}, so draws are on hold until it's covered. Pay the contractor the difference yourself and send us the receipt, or ask to move money from another line on your loan page.`, event: "budget.out_of_balance" }, { to: "team", dealId: deal.id, subject: `Out of balance: ${deal.loanNumber}`, body: `${deal.borrowerName}'s loan is out of balance by ${dollars(balance.shortfall)} after an overrun of ${dollars(action.amount)} was recorded. Draws are held until it's covered.`, event: "budget.out_of_balance" }] : [];
+    }
     case "assignLoanTeam": {
       const deal = after.deals.find((item) => item.id === action.dealId);
       const label = TEAM_ROLE_LABEL[action.role].toLowerCase();

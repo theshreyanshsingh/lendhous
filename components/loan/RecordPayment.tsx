@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { serviceDay } from "@/lib/book";
 import type { Deal, PaymentMethod } from "@/lib/mockData";
+import { reserveOf } from "@/lib/budget";
 import { ledger, METHODS, previewPayment } from "@/lib/servicing";
 import { useStore } from "@/lib/store";
 import { usd } from "@/components/ui";
@@ -24,6 +25,8 @@ export function RecordPayment({ deal, onDone }: { deal: Deal; onDone?: () => voi
   const [today, setToday] = useState("");
   const [receivedOn, setReceivedOn] = useState("");
   const [saving, setSaving] = useState(false);
+  // A loan with an interest reserve can have its interest paid from it (lib/budget.ts).
+  const reserve = reserveOf(deal, serviceDay(s));
   useEffect(() => {
     const day = serviceDay(s) > deal.closingDate ? serviceDay(s) : deal.closingDate;
     setToday(day);
@@ -45,7 +48,7 @@ export function RecordPayment({ deal, onDone }: { deal: Deal; onDone?: () => voi
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block"><span className="label">Amount received ($)</span><input className="desk-input" data-testid="payment-amount" inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} /></label>
         <label className="block"><span className="label">Received on</span><input className="desk-input" data-testid="payment-date" type="date" min={deal.closingDate} max={today || undefined} value={receivedOn} onChange={(event) => setReceivedOn(event.target.value)} /></label>
-        <label className="block"><span className="label">How it was paid</span><select className="desk-input" data-testid="payment-method" value={method} onChange={(event) => setMethod(event.target.value as PaymentMethod)}>{Object.entries(METHODS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
+        <label className="block"><span className="label">How it was paid</span><select className="desk-input" data-testid="payment-method" value={method} onChange={(event) => setMethod(event.target.value as PaymentMethod)}>{Object.entries(METHODS).filter(([key]) => key !== "reserve" || reserve).map(([key, label]) => <option key={key} value={key}>{key === "reserve" && reserve ? `${label} (${usd(reserve.remaining, 2)} left)` : label}</option>)}</select></label>
         <label className="block"><span className="label">Reference (optional)</span><input className="desk-input" data-testid="payment-reference" maxLength={120} placeholder={method === "check" ? "Check number" : "Confirmation number"} value={reference} onChange={(event) => setReference(event.target.value)} /></label>
       </div>
       {preview && (

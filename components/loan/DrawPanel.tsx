@@ -2,6 +2,7 @@
 import { DrawLienChecklist } from "./DrawLienChecklist";
 import { useState } from "react";
 import { PhotoRequests } from "@/components/loan/PhotoRequests";
+import { isContingency } from "@/lib/budget";
 import { drawRequestError } from "@/lib/draws";
 import type { Deal, DrawRequest } from "@/lib/mockData";
 import { shrinkPhoto } from "@/lib/shrink-photo";
@@ -72,7 +73,7 @@ export function DrawPanel({ deal }: { deal: Deal }) {
         <div className="mt-4 space-y-3 border-t border-border pt-4" data-testid="draw-form">
           <p className="text-sm text-muted-foreground">Enter how much you need for work that&apos;s finished, by budget line.</p>
           <ul className="space-y-2">
-            {(deal.scope ?? []).filter((line) => line.budget > line.released).map((line) => (
+            {(deal.scope ?? []).filter((line) => line.budget > line.released && !isContingency(line)).map((line) => (
               <li key={line.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
                 <span className="min-w-0 flex-1 basis-32 text-sm">{line.division}<small className="block text-xs text-muted-foreground">{usd(line.budget - line.released)} left</small></span>
                 <input aria-label={`Amount for ${line.division}`} data-testid={`draw-${line.id}`} className="desk-input w-28!" inputMode="numeric" placeholder="0" value={amounts[line.id] ? amounts[line.id].toLocaleString("en-US") : ""} onChange={(event) => setAmounts({ ...amounts, [line.id]: Number(event.target.value.replace(/[^0-9]/g, "")) || 0 })} />

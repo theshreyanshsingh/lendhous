@@ -43,10 +43,12 @@ export function SiteFooter() {
           <Link href="/calculators">Calculators</Link>
           <Link href="/rates">Rates and leverage</Link>
           <Link href="/rewards">Borrower rewards</Link>
+          <Link href="/florida">Florida counties</Link>
         </div>
         <div>
           <h3>GET STARTED</h3>
           <Link href="/start">Get a quote</Link>
+          <Link href="/book">Book a call</Link>
           <Link href="/payoff">Request a payoff letter</Link>
           <Link href="/login">Portal login</Link>
         </div>

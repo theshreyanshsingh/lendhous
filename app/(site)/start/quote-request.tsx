@@ -337,6 +337,7 @@ function QuoteSent({ quote, pricing, photos, signupOpen, embed }: { quote: Quote
         {signupOpen && quote.submitter === "borrower" && <p className="quote-small" data-testid="quote-signup">Want to move faster? <Link className="text-link" href="/login/signup" data-testid="quote-signup-link" onClick={remember} {...away}>Create your LendHous account</Link> and your application starts with this property and these numbers filled in.</p>}
         <div className="quote-actions">
           <button type="button" className="button" onClick={download}>Download a copy</button>
+          <Link href="/book" className="text-link" data-testid="quote-book-call" {...away}>Pick a time for the call</Link>
           <Link href="/programs" className="text-link" {...away}>Compare our loan programs</Link>
         </div>
       </div>

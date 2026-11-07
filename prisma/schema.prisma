@@ -318,6 +318,10 @@ model PlatformSettings {
   // What a borrower earns when a friend they referred has their first loan fund (lib/referrals.ts). 0 keeps the program
   // off: no links, and nothing about it on the site.
   referralBonusCents            Int      @default(0)
+  // Where a borrower who'd recommend LendHous is asked to leave a review (Google, Trustpilot): https only. Blank asks nothing.
+  reviewUrl                     String   @default("")
+  // Lets visitors book a call on /book. Unset counts as on.
+  allowCallBooking              Boolean?
   updatedAt                     DateTime @updatedAt
 }
 
@@ -363,6 +367,19 @@ model Lead {
   deletedAt          DateTime?
 
   @@index([createdAt])
+}
+
+// A call a visitor booked from the site's /book page (lib/calls.ts). One per half hour. Name, email, phone and notes are
+// encrypted like a lead's.
+model CallBooking {
+  id        String   @id @default(uuid()) @map("_id")
+  startsAt  DateTime @unique
+  name      String
+  email     String
+  phone     String
+  topic     String
+  notes     String   @default("")
+  createdAt DateTime @default(now())
 }
 
 model JobRun {

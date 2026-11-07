@@ -15,7 +15,7 @@ export const SERVICED = ["funded", "servicing_current", "servicing_delinquent", 
 /** PLACEHOLDER: the days before maturity a short-term loan's borrower is asked how they'll pay it off (lib/exit-plans.ts). */
 export const EXIT_OUTREACH_DAYS = [120, 90, 60, 30];
 
-export const METHODS: Record<PaymentMethod, string> = { wire: "Wire", ach: "ACH", check: "Check", other: "Other" };
+export const METHODS: Record<PaymentMethod, string> = { wire: "Wire", ach: "ACH", check: "Check", other: "Other", reserve: "From the interest reserve" };
 
 /** The same day a number of months later. Only used with due dates, which are always the 1st. */
 export function addMonths(date: string, months: number) {

@@ -10,7 +10,7 @@ if (existsSync(".env")) process.loadEnvFile(".env");
 const BASE = process.env.BASE_URL || "http://localhost:3000";
 const CHROME = process.env.CHROME || (process.platform === "darwin" ? "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" : "/usr/bin/google-chrome");
 const PASSWORD = "Lendhous2026!";
-const PUBLIC = ["/", "/start", "/programs", "/rates", "/rewards", "/programs/fix-flip", "/about", "/resources", "/resources/first-investment", "/calculators", "/payoff", "/disclosures", "/login", "/login/signup", "/login/forgot", "/apply/demo", "/verify/demo", "/embed/quote"];
+const PUBLIC = ["/", "/start", "/programs", "/rates", "/rewards", "/book", "/florida", "/florida/broward", "/programs/fix-flip", "/about", "/resources", "/resources/first-investment", "/calculators", "/payoff", "/disclosures", "/login", "/login/signup", "/login/forgot", "/apply/demo", "/verify/demo", "/embed/quote"];
 const SEATS = {
   borrower: ["alex.sample@lendhous.test", ["/admin/borrower", "/admin/borrower/d1", "/admin/borrower/d2", "/admin/borrower/d18", "/admin/apply", "/admin/account/security"]],
   staff: ["olivia.owner@lendhous.test", ["/admin", "/admin/deals/d1", "/admin/deals/d2?tab=Documents", "/admin/deals/d13?tab=Servicing", "/admin/leads", "/admin/servicing", "/admin/draws", "/admin/reports", "/admin/members", "/admin/settings", "/admin/pricing", "/admin/letters", "/admin/capital", "/admin/loan-sales", "/admin/new-loan"]],

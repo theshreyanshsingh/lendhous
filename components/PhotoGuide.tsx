@@ -16,7 +16,7 @@ const TIPS = [
 ];
 
 /** The page a contractor or borrower opens from a link: one budget line at a time, saying exactly what to photograph. */
-export function PhotoGuide({ token, to, sentBy, address, steps, photos, finished, finishedBy, note: sentNote, expiresAt }: { token: string | null; to: string; sentBy: string; address: string; steps: GuideStep[]; photos: Sent[]; finished: boolean; finishedBy: string; note: string; expiresAt: string }) {
+export function PhotoGuide({ token, to, sentBy, address, steps, photos, finished, finishedBy, note: sentNote, expiresAt, signsDraw = false }: { token: string | null; to: string; sentBy: string; address: string; steps: GuideStep[]; photos: Sent[]; finished: boolean; finishedBy: string; note: string; expiresAt: string; signsDraw?: boolean }) {
   const [tiles, setTiles] = useState<Tile[]>(() => photos.map((photo) => ({ key: photo.id, scopeId: photo.scopeId, shot: photo.shot, state: "sent", photoId: photo.id, url: `/api/photo-links/${token}/${photo.id}` })));
   // 0 is the welcome, then one page per guide step, then the review.
   const [page, setPage] = useState(0);
@@ -25,6 +25,8 @@ export function PhotoGuide({ token, to, sentBy, address, steps, photos, finished
   const [name, setName] = useState(finishedBy || to);
   const [note, setNote] = useState(sentNote);
   const [confirmed, setConfirmed] = useState(false);
+  // The contractor on a draw also signs off the work itself, as competitors' draw forms ask (lib/budget.ts).
+  const [signed, setSigned] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [locating, setLocating] = useState<"off" | "asking" | "on" | "refused">("off");
@@ -99,7 +101,7 @@ export function PhotoGuide({ token, to, sentBy, address, steps, photos, finished
     setSending(true);
     setError("");
     if (token) {
-      const response = await fetch(`/api/photo-links/${token}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, note, confirmed }) }).catch(() => null);
+      const response = await fetch(`/api/photo-links/${token}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name, note, confirmed, signDraw: signsDraw && signed }) }).catch(() => null);
       const body = await response?.json().catch(() => ({}));
       if (!response?.ok) { setSending(false); setError(body?.error || "That didn't go through. Check your connection and try again."); return; }
     }
@@ -166,6 +168,7 @@ export function PhotoGuide({ token, to, sentBy, address, steps, photos, finished
             <label className="mt-5 block"><span className="label">Your name</span><input className="desk-input" data-testid="photo-name" value={name} maxLength={120} autoComplete="name" onChange={(event) => setName(event.target.value)} /></label>
             <label className="mt-3 block"><span className="label">Anything LendHous should know? (optional)</span><textarea className="desk-input h-auto! py-2" data-testid="photo-note" rows={3} maxLength={2000} value={note} placeholder="For example, what's still left to finish." onChange={(event) => setNote(event.target.value)} /></label>
             <label className="mt-4 flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" data-testid="photo-confirm" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />These photos show this property as it is now.</label>
+            {signsDraw && <label className="mt-2 flex items-start gap-2 text-sm"><input type="checkbox" className="mt-1" data-testid="photo-sign-draw" checked={signed} onChange={(event) => setSigned(event.target.checked)} />I&apos;m the contractor, and the work on these lines is done as these photos show. My name below is my signature.</label>}
             {error && <p role="alert" className="mt-3 text-sm text-bad">{error}</p>}
             <div className="sticky bottom-0 mt-5 flex gap-2 bg-background py-3">
               <button className="btn-ghost h-12!" onClick={() => setPage(steps.length)}>Back</button>

@@ -5,11 +5,13 @@ import { CONFIDENCE, EXIT_CHOICES, exitPlanProblem, type ExitPlan } from "./exit
 import { evaluate, fundedBalances, round2, type Application, type BuyBox } from "./engine";
 import { countedDeals, missingDocs, needsList, withSponsor } from "./credit";
 import { approversNeeded, approvalError, defaultScope, drawRequestError, releaseToScope, reviewDraw } from "./draws";
+import { applyChange, changeOrderProblem } from "./budget";
 import { activeWire, fundsProblem, missingClosingItems, recordingProblem, verifyProblem, wireProblem } from "./closing";
 import { latestScreening, ofacBlocker, sameResult, screeningSubjects } from "./ofac";
 import { carryOverDocs, carryOverTrackRecord, earlierLoans, repeatHistory, trackDocCarried } from "./repeat-borrower";
 import { referralCodeFor, referralHolds } from "./brokers";
 import { DEMO_BONUS, type MyReferral } from "./referrals";
+import { surveyProblem } from "./surveys";
 import { cureError, defaultError, executeError, extensionFee, extensionRequestError, payoffError, payoffOn, PRE_FUNDING, reopenTo, closureReason, DEFAULT_KINDS } from "./loan-exits";
 import { canAdvance, nextStage } from "./loan-stages";
 import { issueProblem, latestLetter, letterFigures, receivedOnFor } from "./payoffs";
@@ -19,7 +21,7 @@ import { insuranceChecks, insuranceFileOf, policiesOf, policyProblem, policyWord
 import { addProblem, changeProblem, DEFAULT_LIBRARY, fromTemplate, libraryOf, missingStandard, templateProblem, templatesFor, type ConditionInput } from "./conditions";
 import { chosenTerms, draftSheet, exceptionDecisionProblem, exceptionReasons, exceptionRequestProblem, issueProblem as sheetProblem, latestSheet, matrixOf, pricedApp, respondProblem, startingTerms, termSheetChecks, type Prepay } from "./term-sheets";
 import { optionAt } from "./buy-down";
-import { DEMO_TEAM, seedDeals, seedBids, seedDraws, seedLoanSales, seedLoanOffers, seedMessages, seedPhotoRequests, DEMO_SPONSORS, capitalSources, partners as seedPartners, brokers as seedBrokers, loanBuyers, BORROWER_ID, DEMO_PARTNER_ID, DEMO_BUYER_ID, DEMO_BROKER_ID, type Broker, type ClosingAgent, type Closure, type Deal, type DefaultKind, type Bid, type DrawRequest, type DrawRequestLine, type LoanExtension, type LoanMessage, type Screening, type WireInstruction, type Partner, type PayoffChannel, type PayoffLetter, type PayoffRequest, type NoticeToOwner, type LienWaiver, type ConditionTemplate, type LoanCondition, type DocStatus, type CapitalSource, type LoanBuyer, type LoanOffer, type LoanSale, type LoanPayment, type LoanStatus, type TeamMember, type PaymentMethod, type PhotoRequest, type RequestPhoto, type ScopeLine, type Sponsor, type StageEntry, type PolicyKind, type InsurancePolicy, type InsuranceRenewal } from "./mockData";
+import { DEMO_TEAM, seedDeals, seedBids, seedDraws, seedLoanSales, seedLoanOffers, seedMessages, seedPhotoRequests, DEMO_SPONSORS, capitalSources, partners as seedPartners, brokers as seedBrokers, loanBuyers, BORROWER_ID, DEMO_PARTNER_ID, DEMO_BUYER_ID, DEMO_BROKER_ID, type Broker, type ClosingAgent, type Closure, type Deal, type DefaultKind, type Bid, type DrawRequest, type DrawRequestLine, type LoanExtension, type LoanMessage, type Screening, type WireInstruction, type Partner, type PayoffChannel, type PayoffLetter, type PayoffRequest, type NoticeToOwner, type LienWaiver, type ConditionTemplate, type LoanCondition, type DocStatus, type CapitalSource, type LoanBuyer, type LoanOffer, type LoanSale, type LoanPayment, type LoanStatus, type TeamMember, type PaymentMethod, type PhotoRequest, type RequestPhoto, type ScopeLine, type Sponsor, type StageEntry, type PolicyKind, type InsurancePolicy, type InsuranceRenewal, type ChangeOrder } from "./mockData";
 import { BASE_VERSION, currentPricing, type PricingPayload } from "./pricing-versions";
 import { TEAM_ROLE_LABEL, type TeamRole } from "./loan-team";
 import { addDays, DEMO_SERVICING_DAY, firstDueDate, ledger, maturityOf, payoffFor, SERVICED, servicingDate, settle } from "./servicing";
@@ -69,6 +71,8 @@ export type BookAction =
   /** A loan started from a lead that came by a borrower's referral link, with the bonus Settings named that day. Server only. */
   | { t: "referFriend"; dealId: string; referrerId: string; on: string; bonus: number }
   | { t: "referralBonusPaid"; dealId: string; amount: number; on: string; reference: string; by: string }
+  /** The borrower's 0 to 10 on how likely they are to recommend LendHous, at closing or payoff (lib/surveys.ts). */
+  | { t: "answerSurvey"; dealId: string; stage: "funded" | "paid_off"; score: number; comment: string }
   | { t: "setBrokerPoints"; dealId: string; points: number }
   /** Puts someone on the loan as its officer or processor, or takes them off (null). Only the server does it: it looks the person up. */
   | { t: "assignLoanTeam"; dealId: string; role: TeamRole; member: TeamMember | null; by: string }
@@ -104,12 +108,19 @@ export type BookAction =
   | { t: "turnOffPhotoRequest"; requestId: string }
   | { t: "addRequestPhoto"; requestId: string; photo: RequestPhoto }
   | { t: "removeRequestPhoto"; requestId: string; photoId: string }
-  | { t: "finishPhotoRequest"; requestId: string; by: string; note: string }
+  /** signDraw: the contractor also signs off that the work on the draw's lines is done as the photos show. */
+  | { t: "finishPhotoRequest"; requestId: string; by: string; note: string; signDraw?: boolean }
   | { t: "sendInspector"; drawId: string }
   | { t: "recordInspection"; drawId: string; observed: Record<string, number> }
   | { t: "approveDrawRequest"; drawId: string; by: string }
   | { t: "rejectDraw"; drawId: string; reason: string }
   | { t: "releaseDraw"; drawId: string }
+  /** Budget moved between a funded loan's lines (lib/budget.ts): asked for by the borrower or the team, decided by the team. */
+  | { t: "requestChangeOrder"; dealId: string; orderId: string; from: string; to: string; newDivision?: string; amount: number; reason: string; arv?: number; by: string; byTeam: boolean }
+  | { t: "decideChangeOrder"; dealId: string; orderId: string; approve: boolean; note: string; by: string }
+  /** Work found at an inspection to cost more than its budget: the loan is out of balance until the borrower covers it. */
+  | { t: "recordOverrun"; dealId: string; overrunId: string; amount: number; scopeId?: string; note: string; by: string }
+  | { t: "coverOverrun"; dealId: string; overrunId: string; how: string; by: string }
   /** The loan's lien file: the contractor and the Notice of Commencement (Fla. Stat. 713.13). */
   | { t: "saveLienFile"; dealId: string; contractor: string; noc?: { recordedOn: string; reference: string; expiresOn: string; commencedOn?: string; lenderNamed: boolean; mortgageFirst?: boolean }; mortgageRecordedOn?: string; by: string }
   | { t: "addNoticeToOwner"; dealId: string; lienor: string; role: NoticeToOwner["role"]; servedOn: string; by: string }
@@ -230,6 +241,7 @@ function demoTeam(deal: Deal): Deal["team"] {
   return { officer: Number(deal.loanNumber.slice(-1)) % 2 ? uma : olivia, processor: pat };
 }
 
+const DEMO_SURVEYS: Record<string, { score: number; comment?: string; at: string }> = { d11: { score: 10, comment: "Closed in nine days and the draws came the day after each inspection (FAKE)", at: "2026-07-10T15:00:00Z" }, d17: { score: 9, at: "2026-10-24T15:00:00Z" }, d13: { score: 6, comment: "The appraisal took two weeks (FAKE)", at: "2026-04-02T15:00:00Z" } };
 const DEMO_REFERRALS: Record<string, { on: string; paidOn?: string }> = { d12: { on: "2026-03-10", paidOn: "2026-04-15" }, d17: { on: "2026-09-28" }, d16: { on: "2026-10-30" } };
 
 /** The demo's firms were screened with its loans; the unsigned prospect has a possible match to review. */
@@ -306,6 +318,11 @@ export function demoBook(): Book {
       if (separate) policies.push({ kind: "windstorm", carrier: "Coastal Wind Pool (FAKE)", policy: `CW-${d.loanNumber.slice(-4)}`, expiresOn: "2027-05-31", mortgagee: true, by: "Pat Processor (FAKE)", at }, { kind: "flood", carrier: "Sample Flood (FAKE)", policy: `SF-${d.loanNumber.slice(-4)}`, expiresOn: "2027-03-01", coverage: 250_000, mortgagee: true, by: "Pat Processor (FAKE)", at });
       deals[i] = { ...deals[i], insurance: { policies, flood: { sfha: separate, zone: separate ? "AE" : "X", by: "Pat Processor (FAKE)", at } } };
     }
+    // Three borrowers answered the closing survey; the demo borrower's own flip still has the question waiting.
+    const answer = DEMO_SURVEYS[d.id];
+    if (answer) deals[i] = { ...deals[i], surveys: [{ stage: "funded", comment: "", ...answer }] };
+    // The demo borrower's flip has a change order waiting: the kitchen grew and the floors came in under budget.
+    if (d.id === "d2") deals[i] = { ...deals[i], changeOrders: [{ id: "co-demo-1", from: "flooring", to: "kitchen", amount: 3_000, reason: "Added an island to the kitchen; the flooring came in under its budget (FAKE)", by: "Alex Sample (FAKE)", byTeam: false, at: "2026-10-29T11:00:00-07:00", status: "requested" }] };
     // Three friends the demo borrower referred: one whose bonus was paid, one funded and owed, one still applying.
     const referred = DEMO_REFERRALS[d.id];
     if (referred) deals[i] = { ...deals[i], friendReferral: { referrerId: BORROWER_ID, referrerName: "Alex Sample (FAKE)", on: referred.on, bonus: DEMO_BONUS, ...(referred.paidOn ? { paid: { amount: DEMO_BONUS, on: referred.paidOn, reference: "ACH 2026-04-15 (FAKE)", by: "Cam Capital (FAKE)", at: `${referred.paidOn}T15:00:00Z` } } : {}) } };
@@ -507,6 +524,11 @@ function apply(s: Book, a: BookAction): Book {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
       const referrerName = s.deals.find((item) => item.borrowerId === a.referrerId)?.borrowerName ?? "A borrower";
       return { ...s, deals: upd(a.dealId, (d) => ({ ...d, friendReferral: { referrerId: a.referrerId, referrerName, on: a.on, bonus: round2(Math.max(0, a.bonus)) } })), audit: log(`${deal.loanNumber}: referred by ${referrerName}, a LendHous borrower`) };
+    }
+    case "answerSurvey": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (surveyProblem(deal, a.stage, a.score, serviceDay(s))) return s;
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, surveys: [...(d.surveys ?? []), { stage: a.stage, score: a.score, comment: a.comment.trim(), at: now() }] })), audit: log(`${deal.loanNumber}: the borrower answered the ${a.stage === "funded" ? "closing" : "payoff"} survey`) };
     }
     case "referralBonusPaid": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
@@ -717,7 +739,11 @@ function apply(s: Book, a: BookAction): Book {
     case "removeRequestPhoto": return { ...s, photoRequests: photos(a.requestId, (r) => ({ ...r, photos: r.photos.filter((photo) => photo.id !== a.photoId) })) };
     case "finishPhotoRequest": {
       const request = requestOf(a.requestId); const deal = s.deals.find((d) => d.id === request.dealId)!;
-      return { ...s, photoRequests: photos(a.requestId, (r) => ({ ...r, status: "received", finishedAt: now(), finishedBy: a.by, note: a.note })), audit: log(`${deal.loanNumber}: ${request.photos.length} photos received from ${a.by}`) };
+      const signs = Boolean(a.signDraw && request.who === "contractor" && request.drawId);
+      const at = now();
+      return { ...s, photoRequests: photos(a.requestId, (r) => ({ ...r, status: "received", finishedAt: at, finishedBy: a.by, note: a.note })),
+        draws: signs ? s.draws.map((draw) => (draw.id === request.drawId ? { ...draw, contractorSigned: { name: a.by.trim(), at, requestId: request.id } } : draw)) : s.draws,
+        audit: log(`${deal.loanNumber}: ${request.photos.length} photos received from ${a.by}${signs ? ", who signed off the draw's work" : ""}`) };
     }
     case "sendInspector": return { ...s, draws: s.draws.map((d) => (d.id === a.drawId && d.status === "submitted" ? { ...d, status: "inspecting" } : d)), audit: log("Draw inspection ordered") };
     case "recordInspection": return { ...s, draws: s.draws.map((d) => (d.id === a.drawId && d.status === "inspecting" ? { ...d, status: "inspected", lines: d.lines.map((line) => ({ ...line, observedPct: a.observed[line.scopeId] ?? 0 })) } : d)), audit: log("Draw inspection recorded") };
@@ -740,6 +766,29 @@ function apply(s: Book, a: BookAction): Book {
         // Brought up to today first, so the payments already due keep the amount they owed before this draw.
         deals: upd(deal.id, (d) => ({ ...settle(d, serviceDay(s)), disbursedDraws: (d.disbursedDraws ?? 0) + draw.approved!, scope: releaseToScope(d.scope ?? [], d, draw) })),
         audit: log(`${deal.loanNumber}: draw of $${draw.approved.toLocaleString()} released`) };
+    }
+    case "requestChangeOrder": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (changeOrderProblem(deal, a)) return s;
+      const order: ChangeOrder = { id: a.orderId, from: a.from, to: a.to, ...(a.to === "new" ? { newDivision: a.newDivision!.trim() } : {}), amount: round2(a.amount), reason: a.reason.trim(), ...(a.arv ? { arv: a.arv } : {}), by: a.by, byTeam: a.byTeam, at: now(), status: "requested" };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, changeOrders: [...(d.changeOrders ?? []), order] })), audit: log(`${deal.loanNumber}: change order asked for by ${a.by}: $${order.amount.toLocaleString("en-US")}`) };
+    }
+    case "decideChangeOrder": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const order = deal.changeOrders?.find((item) => item.id === a.orderId);
+      // Checked again on the budget as it is now: a draw may have used the money since it was asked for.
+      if (order?.status !== "requested" || (a.approve && changeOrderProblem(deal, order))) return s;
+      const decided = { by: a.by, at: now(), note: a.note.trim() };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, ...(a.approve ? { scope: applyChange(d.scope ?? [], order) } : {}), changeOrders: d.changeOrders!.map((item) => (item.id === a.orderId ? { ...item, status: a.approve ? "approved" as const : "declined" as const, decided } : item)) })), audit: log(`${deal.loanNumber}: change order ${a.approve ? "approved" : "declined"} by ${a.by}`) };
+    }
+    case "recordOverrun": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const overrun = { id: a.overrunId, amount: round2(a.amount), ...(a.scopeId ? { scopeId: a.scopeId } : {}), note: a.note.trim(), by: a.by, at: now() };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, overruns: [...(d.overruns ?? []), overrun] })), audit: log(`${deal.loanNumber}: overrun of $${overrun.amount.toLocaleString("en-US")} found by ${a.by}`) };
+    }
+    case "coverOverrun": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, overruns: (d.overruns ?? []).map((item) => (item.id === a.overrunId && !item.covered ? { ...item, covered: { by: a.by, at: now(), how: a.how.trim() } } : item)) })), audit: log(`${deal.loanNumber}: overrun covered (${a.how.trim()})`) };
     }
     case "saveLienFile": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;

@@ -123,6 +123,11 @@ export interface Deal {
   brokerFeePaid?: { amount: number; on: string; reference: string; by: string; at: string };
   /** The broker whose referral link brought this borrower, and when (lib/brokers.ts). */
   referredBy?: { brokerId: string; on: string };
+  /** The borrower's answer to "how likely are you to recommend us?", at closing and at payoff (lib/surveys.ts). */
+  surveys?: { stage: "funded" | "paid_off"; score: number; comment: string; at: string }[];
+  /** Budget moved between lines after funding, and overruns found at inspections (lib/budget.ts). */
+  changeOrders?: ChangeOrder[];
+  overruns?: Overrun[];
   /** The borrower whose referral link brought this one, the bonus it earns them once it funds, and its payment (lib/referrals.ts). */
   friendReferral?: { referrerId: string; referrerName: string; on: string; bonus: number; paid?: { amount: number; on: string; reference: string; by: string; at: string } };
   /** The borrower's choice to show this loan on the website's "Recently funded" list (lib/showcase.ts). Off unless they turn it on. */
@@ -200,12 +205,23 @@ export interface Payoff {
   letter?: { payoffId: string; number: number; total: number; shortfall: number };
   release?: { sentOn?: string; recordedOn?: string; reference: string; by: string };
 }
-export type PaymentMethod = "wire" | "ach" | "check" | "other";
+/** "reserve": interest paid from the loan's own interest reserve (lib/budget.ts), not money the borrower sent. */
+export type PaymentMethod = "wire" | "ach" | "check" | "other" | "reserve";
 export interface LoanPayment { id: string; amount: number; receivedOn: string; method: PaymentMethod; reference: string; by: string; at: string; reversed?: { by: string; at: string; reason: string } }
 export interface Bill { due: string; amount: number }
 export interface FeeWaiver { due: string; by: string; at: string; reason: string }
 /** One division of a project's rehab or construction budget. Draws are requested against these. */
+/** A line of the rehab budget. The one with id "contingency" is set aside for surprises and only spent by moving it (lib/budget.ts). */
 export interface ScopeLine { id: string; division: string; budget: number; released: number }
+/** Budget moved between lines of a funded loan's scope (lib/budget.ts): asked for by the borrower or the team, decided by the team. */
+export interface ChangeOrder {
+  id: string; from: string; to: string | "new"; newDivision?: string; amount: number; reason: string;
+  /** The borrower's new estimate of the after-repair value, if the change moves it. */
+  arv?: number;
+  by: string; byTeam: boolean; at: string; status: "requested" | "approved" | "declined"; decided?: { by: string; at: string; note: string };
+}
+/** Work costing more than its line's budget, found at an inspection. Until it's covered the loan is out of balance. */
+export interface Overrun { id: string; amount: number; scopeId?: string; note: string; by: string; at: string; covered?: { by: string; at: string; how: string } }
 export interface DrawRequestLine { scopeId: string; requested: number; observedPct?: number }
 export interface DrawRequest {
   id: string; dealId: string; requestedAt: string; by: string; note: string; contact: string; photos: string[]; lines: DrawRequestLine[];
@@ -218,6 +234,8 @@ export interface DrawRequest {
   override?: { by: string; at: string; reason: string; holds: string[] };
   /** When it was approved or turned down, which stops its clock (lib/sla.ts). */
   decidedAt?: string;
+  /** The contractor's sign-off through their photo link that the work on these lines is done as the photos show. */
+  contractorSigned?: { name: string; at: string; requestId: string };
 }
 export interface LienFile {
   contractor?: string;

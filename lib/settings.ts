@@ -14,6 +14,8 @@ const DEFAULTS: Omit<PlatformSettings, "updatedAt"> = {
   slaTargets: null,
   paymentInstructions: "",
   referralBonusCents: 0,
+  reviewUrl: "",
+  allowCallBooking: true,
 };
 
 let cached: { at: number; value: Omit<PlatformSettings, "updatedAt"> } | null = null;

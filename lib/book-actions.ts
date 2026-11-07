@@ -10,6 +10,8 @@ const optionalMoney = money.optional();
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const product = z.enum(["fix_flip", "bridge", "ground_up", "dscr"]);
 const method = z.enum(["wire", "ach", "check", "other"]);
+// A regular payment can also come from the loan's interest reserve; a payoff never does.
+const paymentMethod = z.enum(["wire", "ach", "check", "other", "reserve"]);
 const policyKind = z.enum(["hazard", "windstorm", "flood", "builders_risk"]);
 
 const application = z.object({
@@ -106,6 +108,7 @@ const schema = z.discriminatedUnion("t", [
   z.object({ t: z.literal("suspendBroker"), brokerId: id, reason: text(1000), by: z.string().max(120) }),
   z.object({ t: z.literal("setBrokerPoints"), dealId: id, points: z.number().finite().min(0).max(5) }),
   z.object({ t: z.literal("brokerFeePaid"), dealId: id, amount: money, on: date, reference: text(160), by: z.string().max(120) }),
+  z.object({ t: z.literal("answerSurvey"), dealId: id, stage: z.enum(["funded", "paid_off"]), score: z.number().int().min(0).max(10), comment: text(1000) }),
   z.object({ t: z.literal("referralBonusPaid"), dealId: id, amount: money, on: date, reference: text(160), by: z.string().max(120) }),
   z.object({ t: z.literal("signNda"), partnerId: z.string().max(120) }),
   z.object({ t: z.literal("signBuyerNda"), buyerId: z.string().max(120) }),
@@ -126,6 +129,10 @@ const schema = z.discriminatedUnion("t", [
   z.object({ t: z.literal("saveScope"), dealId: id, scope: z.array(z.object({ id, division: text(120), budget: money, released: money })).max(60), summary: text(4000) }),
   z.object({ t: z.literal("requestDraw"), dealId: id, by: z.string().max(120), note: text(2000), contact: text(200).min(1), photos: z.array(text(200)).max(30), photoIds: z.array(id).max(30).optional(), lines: z.array(z.object({ scopeId: id, requested: money })).max(60) }),
   z.object({ t: z.literal("sendInspector"), drawId: id }),
+  z.object({ t: z.literal("requestChangeOrder"), dealId: id, orderId: id, from: id, to: id, newDivision: text(60).optional(), amount: money, reason: text(1000), arv: optionalMoney, by: z.string().max(120), byTeam: z.boolean() }),
+  z.object({ t: z.literal("decideChangeOrder"), dealId: id, orderId: id, approve: z.boolean(), note: text(1000), by: z.string().max(120) }),
+  z.object({ t: z.literal("recordOverrun"), dealId: id, overrunId: id, amount: money, scopeId: id.optional(), note: text(1000), by: z.string().max(120) }),
+  z.object({ t: z.literal("coverOverrun"), dealId: id, overrunId: id, how: text(300), by: z.string().max(120) }),
   z.object({ t: z.literal("recordInspection"), drawId: id, observed: z.record(z.string().max(120), z.number().min(0).max(1)) }),
   z.object({ t: z.literal("approveDrawRequest"), drawId: id, by: z.string().max(120) }),
   z.object({ t: z.literal("rejectDraw"), drawId: id, reason: text(500).min(1) }),
@@ -140,7 +147,7 @@ const schema = z.discriminatedUnion("t", [
   z.object({ t: z.literal("checkAffidavit"), drawId: id, unpaidLienors: z.boolean(), by: z.string().max(120) }),
   z.object({ t: z.literal("setFinalDraw"), drawId: id, final: z.boolean() }),
   z.object({ t: z.literal("overrideDrawHolds"), drawId: id, reason: text(1000).min(1), by: z.string().max(120) }),
-  z.object({ t: z.literal("recordPayment"), dealId: id, amount: z.number().positive().max(100_000_000), receivedOn: date, method, reference: text(120), by: z.string().max(120) }),
+  z.object({ t: z.literal("recordPayment"), dealId: id, amount: z.number().positive().max(100_000_000), receivedOn: date, method: paymentMethod, reference: text(120), by: z.string().max(120) }),
   z.object({ t: z.literal("reversePayment"), dealId: id, paymentId: id, reason: text(300).min(1), by: z.string().max(120) }),
   z.object({ t: z.literal("waiveLateFee"), dealId: id, due: date, reason: text(300).min(1), by: z.string().max(120) }),
   z.object({ t: z.literal("requestPayoff"), dealId: id, goodThrough: date, by: z.string().max(120) }),

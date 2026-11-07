@@ -11,8 +11,11 @@ import { dueOf, staleLetter } from "./payoffs";
 import { noticeOwed } from "./adverse-action";
 import { needsExitAnswer } from "./exit-plans";
 import { bonusOf } from "./referrals";
+import { budgetBalance, openChanges } from "./budget";
+
+const SERVICED_STATUSES = new Set(SERVICED);
 import { clockOf, SLA_TARGETS, type Clock, type Targets } from "./sla";
-import { servicingDate } from "./servicing";
+import { SERVICED, servicingDate } from "./servicing";
 
 export type QueueItem = {
   key: string; label: string; href: string;
@@ -79,6 +82,9 @@ export function workQueue(book: Book, viewer: { id: string; email?: string }, no
       const since = deal.completed?.at ?? firstStage(deal, ["underwriting"]);
       add({ key: `sheet:${deal.id}`, label: "Build and send the term sheet", href: tab(deal, "Term sheet"), deal, since, clock: since ? clockOf(since, now, targets.termSheet) : undefined, priority: 15 });
     }
+    const changes = openChanges(deal);
+    if (changes.length) add({ key: `change:${deal.id}`, label: `Decide ${changes.length === 1 ? "a change order" : `${changes.length} change orders`}`, href: tab(deal, "Servicing"), deal, since: oldest(changes.map((item) => item.at)), priority: 11 });
+    if (SERVICED_STATUSES.has(deal.status) && (deal.scope?.length ?? 0) > 0 && !budgetBalance(deal).inBalance) add({ key: `balance:${deal.id}`, label: "Out of balance: draws held until the overrun is covered", href: tab(deal, "Servicing"), deal, priority: 8 });
     if (bonusOf(deal).state === "earned") add({ key: `referral:${deal.id}`, label: `Pay ${deal.friendReferral!.referrerName}'s referral bonus`, href: tab(deal, "Capital Routing"), deal, since: firstStage(deal, ["funded"]) ?? deal.closingDate, priority: 19 });
     if (needsOfficer(deal)) add({ key: `officer:${deal.id}`, label: "Needs a loan officer", href: tab(deal), deal, priority: 16 });
   }

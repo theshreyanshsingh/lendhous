@@ -33,6 +33,7 @@ export default async function Start({ searchParams }: { searchParams: Promise<{ 
           </ol>
           <p className="quote-small">Business-purpose loans to investors and their LLCs only. No credit is pulled for a quote.</p>
           <Link href="/programs" className="text-link">Compare loan programs</Link>
+          <p className="quote-small" style={{ marginTop: 10 }}>Rather talk it through? <Link href="/book" className="text-link">Book a call</Link> at a time that suits you.</p>
         </aside>
       </main>
     </>

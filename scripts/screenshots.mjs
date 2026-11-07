@@ -25,6 +25,9 @@ const prisma = new PrismaClient();
 const OWN_LEAD = { propertyValueCents: 30_000_000, requestedLoanCents: 24_000_000 };
 await prisma.lead.deleteMany({ where: OWN_LEAD });
 await prisma.rateWindow.deleteMany({ where: { key: { startsWith: "lead:" } } });
+// Calls booked by earlier runs: their names are sealed, so they go by the run's own topic and time window.
+await prisma.callBooking.deleteMany({ where: { topic: "new_loan", createdAt: { gte: new Date(Date.now() - 7 * 86_400_000) } } });
+await prisma.rateWindow.deleteMany({ where: { key: { startsWith: "call:" } } });
 await prisma.user.deleteMany({ where: { email: INVITED } });
 await prisma.rateWindow.deleteMany({ where: { key: { contains: INVITED } } });
 const browser = await chromium.launch({ executablePath: CHROME, args: ["--no-sandbox"] });
@@ -71,7 +74,7 @@ await page.goto(BASE + "/admin");
 ok("a signed-out visitor is sent to sign-in", page.url().includes("/login?next=%2Fadmin"));
 
 // The public site: every page opens without an account, and Portal login leads to sign-in
-const publicRoutes = ["/", "/programs", "/rates", "/rewards", "/programs/fix-flip", "/programs/dscr", "/programs/bridge", "/programs/construction", "/programs/portfolio", "/about", "/resources", "/resources/first-investment", "/resources/leverage", "/resources/dscr-explained", "/resources/draws", "/resources/interest-only", "/calculators", "/start", "/disclosures"];
+const publicRoutes = ["/", "/programs", "/rates", "/rewards", "/book", "/florida", "/florida/broward", "/programs/fix-flip", "/programs/dscr", "/programs/bridge", "/programs/construction", "/programs/portfolio", "/about", "/resources", "/resources/first-investment", "/resources/leverage", "/resources/dscr-explained", "/resources/draws", "/resources/interest-only", "/calculators", "/start", "/disclosures"];
 const statuses = await Promise.all(publicRoutes.map(async (r) => [r, (await fetch(BASE + r, { redirect: "manual" })).status]));
 const broken = statuses.filter(([, status]) => status !== 200);
 ok(`all ${publicRoutes.length} public pages open without an account${broken.length ? ` (${broken.join("; ")})` : ""}`, broken.length === 0);
@@ -185,6 +188,22 @@ await nightly.getByTestId("quote-strAnnualIncome").fill("60000");
 await nightly.getByTestId("quote-see-terms").click();
 ok("and is priced on it", (await seen(nightly.getByTestId("quote-live"))) && (await nightly.getByTestId("quote-amount").innerText()).startsWith("up to $"));
 await shot(nightly, "00e-site-quote-short-term.png");
+// Florida's county pages, from the pricing; and booking a call at an open time.
+await nightly.goto(BASE + "/florida");
+ok("the Florida page lists the counties we cover", (await nightly.getByTestId("county-card").count()) === 8);
+await nightly.goto(BASE + "/florida/broward");
+ok("a county page says what we lend there from today's pricing", (await nightly.getByTestId("county-terms").innerText()).includes("one of LendHous's core markets") && (await nightly.getByTestId("county-page").innerText()).includes("Broward County Clerk"));
+await nightly.goto(BASE + "/florida/lee");
+ok("and less leverage outside the core markets", (await nightly.getByTestId("county-terms").innerText()).includes("5% less leverage"));
+await nightly.goto(BASE + "/book");
+await nightly.getByTestId("call-day").nth(1).click();
+await nightly.getByTestId("call-time").first().click();
+await nightly.getByTestId("call-name").fill("Smoke Test Caller");
+await nightly.getByTestId("call-phone").fill("(954) 555-0166");
+await nightly.getByTestId("call-email").fill("smoke.caller@example.org");
+await nightly.getByTestId("call-submit").click();
+ok("a visitor books a call at an open time", (await seen(nightly.getByTestId("call-booked"))) && (await nightly.getByTestId("call-booked").innerText()).includes("Eastern"));
+await shot(nightly, "00h-site-book-call.png");
 await nightly.close();
 // The quote widget: a page for other sites to frame, and the only one that may be framed.
 const widgetReply = await page.goto(BASE + "/embed/quote?site=wholesale");
@@ -364,6 +383,7 @@ ok("the staff seat lands on the pipeline", new URL(page.url()).pathname === "/ad
 await page.goto(BASE + "/login");
 ok("Portal login takes someone already signed in straight to the panel", new URL(page.url()).pathname === "/admin");
 await page.goto(BASE + "/admin/leads");
+ok("the team sees the call booked from the site", (await seen(page.getByTestId("booked-call"))) && (await page.getByTestId("booked-calls").innerText()).includes("Smoke Test Caller"));
 const inbox = page.getByTestId("leads-table").locator("tr", { hasText: LEAD_NAME });
 ok("the quote request reaches the staff inbox with its ARV", (await inbox.count()) === 1 && (await inbox.innerText()).includes("$240,000") && (await inbox.innerText()).includes("ARV $520,000"));
 await inbox.scrollIntoViewIfNeeded();
@@ -399,6 +419,9 @@ ok("they list the loan stuck in underwriting", (await page.getByTestId("stuck-ro
 ok("they show capital and the portfolio as of today", (await page.getByTestId("kpi-available").innerText()).includes("$3.69M") && (await page.getByTestId("kpi-outstanding").innerText()).includes("$2.73M") && (await page.getByTestId("delinquency-row").count()) === 5);
 ok("the reports say what the quote funnel shows on a real account", await seen(page.getByTestId("quote-funnel-demo")));
 ok("the reports show how loans are ending", await seen(page.getByTestId("exits-report")));
+ok("and what borrowers say after closing, as a net promoter score", (await seen(page.getByTestId("survey-report"))) && (await page.getByTestId("survey-report").innerText()).includes("Net promoter score"));
+await page.getByTestId("journal-month").selectOption("2026-10");
+ok("the accounting journal for a month is ready for QuickBooks", (await page.getByTestId("journal-summary").innerText()).match(/^\d+ journal entries for October 2026/) !== null && (await page.getByTestId("journal-download").isEnabled()));
 ok("and how fast the team worked against its targets", (await seen(page.getByTestId("speed-measures"))) && (await page.getByTestId("speed-firstLook").innerText()).includes("New application looked at"));
 ok("they break the period down by loan officer", (await page.getByTestId("by-officer").innerText()).includes("Uma Underwriter (FAKE)"));
 await shot(page, "24-admin-reports.png");
@@ -728,6 +751,11 @@ ok("the borrower can message the team", await seen(page.getByTestId("loan-messag
 
 await page.goto(BASE + "/admin/borrower/d2");
 await seen(page.getByTestId("request-draw"));
+ok("a funded flip shows its budget in balance and the change order waiting", (await page.getByTestId("budget-balance").innerText()).includes("pays for the") && (await page.getByTestId("change-order").innerText()).includes("Waiting for the team"));
+ok("the borrower is asked how likely they are to recommend LendHous", await seen(page.getByTestId("survey")));
+await page.getByTestId("survey-score-9").click();
+await page.getByTestId("survey-send").click();
+ok("and thanked once they answer", await seen(page.getByTestId("survey-thanks")));
 ok("a funded loan offers the next one, with what paying as agreed earns", (await page.getByTestId("repeat-status").innerText()).includes("loan paid as agreed takes 0.25% off the rate") && (await page.getByTestId("repeat-status").innerText()).includes("more take it to 0.5% off"));
 await shot(page, "02e-next-loan.png", false);
 ok("a funded loan says how to pay and shows last month's statement", (await seen(page.getByTestId("how-to-pay"))) && (await seen(page.getByTestId("loan-statement-preview"))) && (await page.getByTestId("loan-statement-received").innerText()).startsWith("$"));
@@ -811,9 +839,24 @@ await page.goto(BASE + "/admin/servicing");
 ok("the maturity desk lists the short-term loans by when they come due, with the borrower's plan", (await seen(page.getByTestId("maturity-desk"))) && (await page.getByTestId("desk-row").filter({ hasText: "LH-DEMO-1002" }).getByTestId("desk-plan").innerText()).includes("rental loan"));
 await page.goto(BASE + "/admin/deals/d2");
 ok("and can take it down", await page.getByTestId("showcase-team").waitFor({ state: "detached", timeout: 5000 }).then(() => true, () => false));
+await page.goto(BASE + "/admin/deals/d2?tab=Servicing");
+ok("the team sees the budget, the work against the money and the change order", (await seen(page.getByTestId("budget-controls"))) && (await page.getByTestId("project-health").innerText()).includes("Work done about 50%"));
+await page.getByTestId("change-order-decision-note").fill("Move it once the island's permit is in (FAKE)");
+await page.getByTestId("decline-change-order").click();
+ok("and decides the change order with a note", (await page.getByTestId("change-order").innerText()).includes("Declined") && (await page.getByTestId("change-order-note").innerText()).includes("island's permit"));
+await page.getByTestId("overrun-open").click();
+await page.getByTestId("overrun-amount").fill("4000");
+await page.getByTestId("overrun-note").fill("Subfloor rot under the kitchen (FAKE)");
+await page.getByTestId("record-overrun").click();
+ok("an overrun found at inspection puts the loan out of balance", (await page.getByTestId("budget-balance").innerText()).includes("Out of balance by $4,000"));
+await shot(page, "19i-admin-budget.png");
+await page.getByTestId("overrun-how").fill("Borrower paid the contractor directly (FAKE)");
+await page.getByTestId("cover-overrun").click();
+ok("and covering it brings the loan back in balance", (await page.getByTestId("budget-balance").innerText()).includes("pays for the"));
 await page.goto(BASE + "/admin/draws");
 const draw = page.getByTestId("draw-card").filter({ hasText: "Cabinets are in" });
 await seen(draw);
+ok("a draw says whether the contractor has signed off the work", await seen(draw.getByTestId("draw-contractor-unsigned")));
 await shot(page, "18-admin-draws.png");
 // Asking for photos by link. A demo seat sends nothing, and its link opens a preview.
 const seededDraw = page.getByTestId("draw-card").filter({ hasText: "Cabinets are in and the flooring is down." });

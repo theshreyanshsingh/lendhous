@@ -1,6 +1,7 @@
 // Scope of work and construction draws (Spec 7). The release math is the engine's approveDraw; this supplies its inputs
 // and decides who has to sign. Competitors' borrowers request draws against an approved, itemized budget, so do these.
-import { approveDraw, evaluate, fundedBalances, inBalanceTest, type Product } from "./engine";
+import { budgetBalance, isContingency } from "./budget";
+import { approveDraw, evaluate, fundedBalances, type Product } from "./engine";
 import type { Deal, DrawRequest, DrawRequestLine, ScopeLine } from "./mockData";
 import { currentPricing, pricingFor } from "./pricing-versions";
 
@@ -60,6 +61,7 @@ export function drawRequestError(deal: Deal, lines: DrawRequestLine[]) {
   for (const line of asked) {
     const item = lineFor(deal, line);
     if (!item) return "That budget line is no longer on this loan.";
+    if (isContingency(item)) return "Contingency isn't drawn on directly: ask for a change order to move it to the line the work is on.";
     if (line.requested > item.budget - item.released) return `${item.division} has only $${(item.budget - item.released).toLocaleString("en-US")} left.`;
   }
   const total = asked.reduce((sum, line) => sum + line.requested, 0);
@@ -73,8 +75,8 @@ export function reviewDraw(deal: Deal, draw: DrawRequest) {
     const item = lineFor(deal, line);
     return { budget: item?.budget ?? 0, observedPct: line.observedPct ?? 0, retainagePct: pricingFor(deal.app.pricingVersion).draws.retainagePct, releasedToDate: item?.released ?? 0, requested: line.requested };
   });
-  const costToComplete = (deal.scope ?? []).reduce((sum, item) => sum + item.budget - item.released, 0);
-  const { inBalance } = inBalanceTest({ remainingHoldback: holdbackLeft(deal), balancingDeposits: 0, costToComplete });
+  // In balance means what's left to draw still pays for the work left, overruns no one has covered included (lib/budget.ts).
+  const { inBalance } = budgetBalance(deal);
   // Nothing more goes out on a loan behind on its payments, past its maturity or in default.
   return approveDraw(lines, { holdbackRemaining: holdbackLeft(deal), inBalance, loanCurrent: !deal.paymentsLate && deal.status !== "matured" && deal.status !== "default" });
 }
@@ -86,6 +88,7 @@ export function approvalError(deal: Deal, draw: DrawRequest, approver: string) {
   if (draw.status !== "inspected") return "This draw isn't waiting for approval.";
   if (draw.approvers.includes(approver)) return "A second, different approver is required.";
   const review = reviewDraw(deal, draw);
+  if (review.blocked === "Loan out of balance") return `The loan is out of balance by $${budgetBalance(deal).shortfall.toLocaleString("en-US")}: the work left costs more than what's left to draw. Nothing can be released until the borrower covers the overrun.`;
   if (review.blocked) return `${review.blocked}, so nothing can be released.`;
   if (review.approved <= 0) return "The inspection doesn't support releasing anything yet.";
   return null;

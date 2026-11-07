@@ -46,7 +46,7 @@ export function RecordPayoff({ deal, onDone }: { deal: Deal; onDone?: () => void
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="block"><span className="label">Received on</span><input className="desk-input" data-testid="payoff-received-on" type="date" min={deal.closingDate} max={today || undefined} value={receivedOn} onChange={(event) => setReceivedOn(event.target.value)} /></label>
         <label className="block"><span className="label">Amount received ($)</span><input className="desk-input" data-testid="payoff-amount" inputMode="decimal" placeholder={quote ? quote.total.toFixed(2) : ""} value={amount} onChange={(event) => setAmount(event.target.value)} /></label>
-        <label className="block"><span className="label">How it was paid</span><select className="desk-input" data-testid="payoff-method" value={method} onChange={(event) => setMethod(event.target.value as PaymentMethod)}>{Object.entries(METHODS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
+        <label className="block"><span className="label">How it was paid</span><select className="desk-input" data-testid="payoff-method" value={method} onChange={(event) => setMethod(event.target.value as PaymentMethod)}>{Object.entries(METHODS).filter(([key]) => key !== "reserve").map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
         <label className="block"><span className="label">Reference (optional)</span><input className="desk-input" data-testid="payoff-reference" maxLength={120} placeholder="Wire confirmation or title company file" value={reference} onChange={(event) => setReference(event.target.value)} /></label>
       </div>
       {quote && (

@@ -7,6 +7,7 @@ import { useStore, est } from "@/lib/store";
 import { fundedBalances } from "@/lib/engine";
 import { CloseApplication } from "@/components/loan/CloseApplication";
 import { DrawPanel } from "@/components/loan/DrawPanel";
+import { BudgetControls } from "@/components/loan/BudgetControls";
 import { Extensions } from "@/components/loan/Extensions";
 import { PaidOff } from "@/components/loan/PaidOff";
 import { LoanMessages } from "@/components/loan/LoanMessages";
@@ -18,6 +19,7 @@ import { PropertyPhotos } from "@/components/loan/PropertyPhotos";
 import { TeamContacts } from "@/components/loan/LoanTeam";
 import { NeedsFromYou } from "@/components/loan/NeedsFromYou";
 import { NextLoan } from "@/components/loan/NextLoan";
+import { SurveyCard } from "@/components/loan/SurveyCard";
 import { NextStepCard } from "@/components/loan/NextStepCard";
 import { FundedNote } from "@/components/loan/FundedNote";
 import { LoanTimeline } from "@/components/loan/LoanTimeline";
@@ -65,6 +67,7 @@ export default function BorrowerLoan() {
       </div>
       <FundedNote deal={d} />
       <NextStepCard deal={d} />
+      {(funded || d.status === "paid_off") && <SurveyCard deal={d} />}
       {(funded || d.status === "paid_off") && <NextLoan deal={d} />}
       {!closed && d.status !== "paid_off" && <div id="needs-from-you"><NeedsFromYou deal={d} /></div>}
       <div id="term-sheet"><TermSheetCard deal={d} canSign /></div>
@@ -89,6 +92,7 @@ export default function BorrowerLoan() {
           </Section>
           {funded && e.holdback > 0 && <RehabProgress deal={d} />}
           {funded && e.holdback > 0 && <DrawPanel deal={d} />}
+          {funded && <BudgetControls deal={d} side="client" />}
           {funded && <ExitPlanCard deal={d} side="client" />}
           {(funded || d.status === "paid_off") && <LoanMoney deal={d} />}
           {funded && <InsuranceCard deal={d} />}

@@ -66,6 +66,9 @@ function DrawCard({ draw, deal }: { draw: DrawRequest; deal: Deal }) {
       {deal.contractorIsGtAffiliate && <p className="mt-2 rounded-md bg-bad/10 p-2 text-xs text-bad">Affiliated contractor: this needs an independent inspector and two approvers.</p>}
       {deal.paymentsLate ? <p className="mt-2 rounded-md bg-bad/10 p-2 text-xs text-bad">This loan has {deal.paymentsLate} payments past due. Nothing can be released until it&apos;s current.</p> : null}
       {draw.note && <p className="mt-2 text-sm">{draw.note}</p>}
+      {draw.contractorSigned
+        ? <p className="mt-2 text-xs text-good" data-testid="draw-contractor-signed">Signed off by the contractor, {draw.contractorSigned.name}, on {shortDate(draw.contractorSigned.at)}: the work on these lines is done as their photos show.</p>
+        : draw.status !== "funded" && draw.status !== "rejected" && <p className="mt-2 text-xs text-muted-foreground" data-testid="draw-contractor-unsigned">The contractor hasn&apos;t signed off this draw. A photo link for it, sent to them from the loan, asks them to.</p>}
       <p className="mt-2 text-sm sm:hidden" data-testid="draw-summary"><b className="tabular-nums">{usd(drawTotal(draw))}</b> requested across {draw.lines.length} line{draw.lines.length === 1 ? "" : "s"}{holds.length ? ` · ${holds.length} held` : ""}</p>
       <button type="button" className="mt-2 flex min-h-11 w-full items-center justify-between rounded-[2px] border border-border px-3 text-left text-sm sm:hidden" aria-expanded={details} data-testid="draw-details-toggle" onClick={() => setDetails(!details)}>
         <span>{details ? "Hide the lines, photos and lien waivers" : "Lines, photos and lien waivers"}</span><span aria-hidden="true">{details ? "−" : "+"}</span>

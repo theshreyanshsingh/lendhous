@@ -28,6 +28,8 @@ import { viewFor, type MemberAccess, type Permission } from "./permissions";
 import { approveProblem, canSendDeals, feePaidProblem } from "./brokers";
 import { bonusPaidProblem, referralProblem, referralsBy } from "./referrals";
 import { optionAt } from "./buy-down";
+import { surveyProblem } from "./surveys";
+import { changeOrderProblem, CONTINGENCY_ID, openChanges, reservePaymentProblem } from "./budget";
 
 export type Viewer = MemberAccess & { id: string; name: string; roleCodes: RoleCode[]; organizationId?: string | null };
 
@@ -81,7 +83,7 @@ const quietPayoff = (payoff: PayoffRequest): PayoffRequest => ({
 
 /** Removes what identifies the borrower, for a partner or buyer who hasn't closed on the loan. */
 function blind(deal: Deal): Deal {
-  return { ...deal, insurance: undefined, friendReferral: undefined, borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined, closure: undefined, defaults: undefined, extensions: undefined, paidOff: undefined, closing: undefined, wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, termSheets: undefined, pricingException: undefined, conditions: undefined, lienFile: undefined, completed: undefined, revenue: undefined, adverseAction: undefined, legalHold: undefined, propertyPhotos: undefined, partnerFunding: undefined, agents: undefined, ...quietPayments(deal, false) };
+  return { ...deal, insurance: undefined, friendReferral: undefined, surveys: undefined, borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined, closure: undefined, defaults: undefined, extensions: undefined, paidOff: undefined, closing: undefined, wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, termSheets: undefined, pricingException: undefined, conditions: undefined, lienFile: undefined, completed: undefined, revenue: undefined, adverseAction: undefined, legalHold: undefined, propertyPhotos: undefined, partnerFunding: undefined, agents: undefined, ...quietPayments(deal, false) };
 }
 
 /** The conditions that are the borrower's to meet (Spec B17), without who on the team handled them or why one was waived. */
@@ -115,7 +117,7 @@ const clientInsurance = (deal: Deal): Partial<Deal> => ({
 
 /** What only the team sees on a loan it shares with a client. Wire instructions never leave the team: a client who sees them is a client who can be sent fake ones. */
 function forClient(deal: Deal): Deal {
-  return { ...deal, ...latestForClient(deal), ...clientConditions(deal), ...clientRecords(deal), ...clientAgents(deal), ...clientInsurance(deal), partnerFunding: undefined, allocations: [], teaserSentTo: [], route: undefined, capitalStatus: "not_started", contractorIsGtAffiliate: undefined, source: "", fundingApprovers: undefined, creditReview: undefined, ...quietPayments(deal, true), ...quietExits(deal), wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, friendReferral: undefined };
+  return { ...deal, ...latestForClient(deal), ...clientConditions(deal), ...clientRecords(deal), ...clientAgents(deal), ...clientInsurance(deal), partnerFunding: undefined, allocations: [], teaserSentTo: [], route: undefined, capitalStatus: "not_started", contractorIsGtAffiliate: undefined, source: "", fundingApprovers: undefined, creditReview: undefined, ...quietPayments(deal, true), ...quietExits(deal), wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, friendReferral: undefined, surveys: undefined };
 }
 
 /** The part of the book this account may see. Nothing else leaves the server. */
@@ -134,7 +136,7 @@ function scopeRecords(book: Book, viewer: Viewer): Book {
   if (view === "borrower") {
     const mine = book.deals.filter((deal) => deal.borrowerId === viewer.id);
     const ids = new Set(mine.map((deal) => deal.id));
-    return { ...empty, borrowerId: viewer.id, deals: mine.map((deal) => ({ ...forClient(deal), brokerId: undefined, brokerPoints: undefined })), draws: book.draws.filter((draw) => ids.has(draw.dealId)).map((draw) => ({ ...draw, approvers: [], override: undefined })), photoRequests: book.photoRequests.filter((request) => ids.has(request.dealId)), payoffs: book.payoffs.filter((payoff) => ids.has(payoff.dealId)).map(quietPayoff), messages: shared(ids), myReferrals: referralsBy(book.deals, viewer.id) };
+    return { ...empty, borrowerId: viewer.id, deals: mine.map((deal) => ({ ...forClient(deal), surveys: deal.surveys, brokerId: undefined, brokerPoints: undefined })), draws: book.draws.filter((draw) => ids.has(draw.dealId)).map((draw) => ({ ...draw, approvers: [], override: undefined })), photoRequests: book.photoRequests.filter((request) => ids.has(request.dealId)), payoffs: book.payoffs.filter((payoff) => ids.has(payoff.dealId)).map(quietPayoff), messages: shared(ids), myReferrals: referralsBy(book.deals, viewer.id) };
   }
 
   if (view === "broker") {
@@ -431,6 +433,13 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       const problem = referralProblem(book.deals, action.dealId, action.referrerId);
       return problem ? no(problem) : ok();
     }
+    case "answerSurvey": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      if (!(view === "borrower" && deal.borrowerId === viewer.id)) return no(NOT_ALLOWED);
+      const problem = surveyProblem(deal, action.stage, action.score, serviceDay(book));
+      return problem ? no(problem) : ok({ ...action, comment: action.comment.trim() });
+    }
     case "referralBonusPaid": {
       const problem = bonusPaidProblem(dealOf(action.dealId), action.amount, action.on, serviceDay(book));
       return problem ? no(problem) : staffOnlyAllowed("manage_capital", "service_loans") ? ok({ ...action, by: viewer.name }) : no(NOT_ALLOWED);
@@ -657,8 +666,12 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       if (!deal) return no(GONE);
       if (!ownsDeal(deal) && !(staff && allowed("review_documents"))) return no(NOT_ALLOWED);
       if (!BEFORE_CLOSING.includes(deal.status)) return no("The scope of work is locked once a loan clears to close.");
-      // Budgets come from the request, but what has been released comes from the record.
-      const scope = (deal.scope ?? []).map((line) => ({ ...line, budget: action.scope.find((item) => item.id === line.id)?.budget ?? line.budget }));
+      // Budgets come from the request, but what has been released comes from the record. The one line a borrower can add
+      // is the contingency (lib/budget.ts), and it can be taken out again while nothing is released from it.
+      const existing = (deal.scope ?? []).map((line) => ({ ...line, budget: action.scope.find((item) => item.id === line.id)?.budget ?? line.budget }));
+      const contingency = action.scope.find((item) => item.id === CONTINGENCY_ID);
+      const withContingency = contingency && !existing.some((line) => line.id === CONTINGENCY_ID) ? [...existing, { id: CONTINGENCY_ID, division: "Contingency", budget: contingency.budget, released: 0 }] : existing;
+      const scope = withContingency.filter((line) => line.id !== CONTINGENCY_ID || line.budget > 0 || line.released > 0);
       const refused = scopeError(scope, evaluate(deal.app).holdback);
       return refused ? no(refused) : ok({ ...action, scope });
     }
@@ -668,6 +681,42 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       if (!(view === "borrower" && deal.borrowerId === viewer.id)) return no(NOT_ALLOWED);
       if (!FUNDED.includes(deal.status)) return no("Draws start once the loan is funded.");
       return ok({ ...action, by: viewer.name });
+    }
+    case "requestChangeOrder": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      const team = staff && (allowed("approve_draw") || allowed("assign_inspection") || allowed("service_loans"));
+      if (!team && !(view === "borrower" && deal.borrowerId === viewer.id)) return no(NOT_ALLOWED);
+      if (openChanges(deal).length >= 5) return no("This loan has five change orders waiting already. Wait for those to be decided.");
+      const refused = changeOrderProblem(deal, action);
+      return refused ? no(refused) : ok({ ...action, by: viewer.name, byTeam: Boolean(team) });
+    }
+    case "decideChangeOrder": {
+      const deal = dealOf(action.dealId);
+      const order = deal?.changeOrders?.find((item) => item.id === action.orderId);
+      if (!deal || !order) return no(GONE);
+      if (!staff || !allowed("approve_draw")) return no(NOT_ALLOWED);
+      if (order.status !== "requested") return no("That change order has already been decided.");
+      if (!action.approve && !action.note.trim()) return no("Say why, so the borrower knows what to change.");
+      const refused = action.approve ? changeOrderProblem(deal, order) : null;
+      return refused ? no(refused) : ok({ ...action, by: viewer.name });
+    }
+    case "recordOverrun": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      if (!FUNDED.includes(deal.status)) return no("Overruns are found on a funded loan's inspections.");
+      if (!Number.isFinite(action.amount) || action.amount <= 0) return no("Enter how much more the work will cost.");
+      if (action.scopeId && !(deal.scope ?? []).some((line) => line.id === action.scopeId)) return no("That budget line is no longer on this loan.");
+      if (!action.note.trim()) return no("Say what the inspection found.");
+      return staffOnlyAllowed("assign_inspection", "approve_draw") ? ok({ ...action, by: viewer.name }) : no(NOT_ALLOWED);
+    }
+    case "coverOverrun": {
+      const deal = dealOf(action.dealId);
+      const overrun = deal?.overruns?.find((item) => item.id === action.overrunId);
+      if (!deal || !overrun) return no(GONE);
+      if (overrun.covered) return no("That overrun is already covered.");
+      if (!action.how.trim()) return no("Say how it was covered: the borrower paid the contractor, or a change order moved the money.");
+      return staffOnlyAllowed("approve_draw") ? ok({ ...action, by: viewer.name }) : no(NOT_ALLOWED);
     }
     case "sendInspector": case "recordInspection":
       if (!book.draws.some((draw) => draw.id === action.drawId)) return no(GONE);
@@ -737,6 +786,7 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       if (action.receivedOn > servicingDate(new Date())) return no("The date received can't be in the future.");
       if (action.receivedOn < deal.closingDate) return no("That date is before the loan closed.");
       if (action.amount > evaluate(deal.app).noteAmount) return no("That's more than the whole loan. A full repayment goes through a payoff.");
+      if (action.method === "reserve") { const refused = reservePaymentProblem(deal, action.amount, servicingDate(new Date())); if (refused) return no(refused); }
       const reference = action.reference.trim();
       // The same amount, day and reference twice is a double entry, not two payments.
       if (deal.payments?.some((payment) => !payment.reversed && payment.amount === action.amount && payment.receivedOn === action.receivedOn && payment.reference === reference)) return no("That payment is already recorded. If it's a second one, add its reference to tell them apart.");

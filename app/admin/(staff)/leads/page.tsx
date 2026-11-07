@@ -11,6 +11,8 @@ import { channelLabel } from "@/lib/quote-funnel";
 import { phonePill } from "@/lib/ui-classes";
 import { notDeleted, prisma } from "@/lib/prisma";
 import { PROPERTY_PHOTO } from "@/lib/property-photos";
+import { upcomingCalls } from "@/lib/call-store";
+import { CALL_TOPICS, slotLabel } from "@/lib/calls";
 
 export const metadata = { title: "Website leads" };
 export const dynamic = "force-dynamic";
@@ -20,6 +22,7 @@ const when = (date: Date) => date.toLocaleDateString("en-US", { month: "short", 
 
 export default async function Leads() {
   await requirePermission("view_pipeline");
+  const calls = await upcomingCalls().catch(() => []);
   const leads = (await prisma.lead.findMany({ where: notDeleted, orderBy: { createdAt: "desc" }, take: 200 })).map((row) => ({ ...openLead(row), request: openQuote(row) }));
   const links = await linkSummaries({ leadIds: leads.map((lead) => lead.id) });
   // Photos sent with each quote request, until the lead becomes a loan and they move to it.
@@ -32,6 +35,17 @@ export default async function Leads() {
   return (
     <div className="space-y-4">
       <PageIntro eyebrow="Website" title="Website leads" lede="Quote requests from the public site, from borrowers and brokers. Send the borrower the secure application link to turn one into a loan." />
+      {calls.length > 0 && (
+        <section className="glass p-4" data-testid="booked-calls" aria-labelledby="calls-title">
+          <h2 id="calls-title" className="text-base font-medium">Calls booked from the site</h2>
+          <ul className="mt-2 divide-y divide-border text-sm">{calls.map((call) => (
+            <li key={call.id} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 py-2" data-testid="booked-call">
+              <span className="min-w-0 flex-1 basis-64"><b>{slotLabel(call.startsAt)}</b> · {call.name} · {CALL_TOPICS[call.topic as keyof typeof CALL_TOPICS] ?? call.topic}{call.notes && <span className="block text-xs text-muted-foreground">{call.notes}</span>}</span>
+              <span className="text-xs"><a className="text-link" href={`tel:${call.phone.replace(/[^0-9+]/g, "")}`}>{call.phone}</a> · <a className="text-link" href={`mailto:${call.email}`}>{call.email}</a></span>
+            </li>
+          ))}</ul>
+        </section>
+      )}
       <div className="glass overflow-hidden px-4 lg:px-0">
         <div className="lg:overflow-x-auto">
           <table className="stack-table w-full lg:min-w-[900px]" data-testid="leads-table">

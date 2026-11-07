@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { CONTINGENCY_ID, CONTINGENCY_SUGGESTED, isContingency } from "@/lib/budget";
 import { scopeError, scopeTotal } from "@/lib/draws";
 import type { Deal } from "@/lib/mockData";
 import { est, useStore } from "@/lib/store";
@@ -30,13 +31,19 @@ export function ScopeOfWork({ deal, editable }: { deal: Deal; editable: boolean 
       <ul className="divide-y divide-border" data-testid="scope-lines">
         {lines.map((line, index) => (
           <li key={line.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 py-2 text-sm">
-            <span className="min-w-0 flex-1 basis-40">{line.division}{!open && <small className="block text-xs text-muted-foreground">{usd(line.released)} released · {usd(line.budget - line.released)} left</small>}</span>
+            <span className="min-w-0 flex-1 basis-40">{line.division}{isContingency(line) && <small className="block text-xs text-muted-foreground">Not drawn on directly: moved to a line by a change order.</small>}{!open && !isContingency(line) && <small className="block text-xs text-muted-foreground">{usd(line.released)} released · {usd(line.budget - line.released)} left</small>}</span>
             {open ? (
               <input aria-label={`Budget for ${line.division}`} data-testid={`scope-${line.id}`} className="desk-input w-32!" inputMode="numeric" value={line.budget.toLocaleString("en-US")} onChange={(event) => { setSaved(false); setLines(lines.map((item, at) => (at === index ? { ...item, budget: Number(event.target.value.replace(/[^0-9]/g, "")) || 0 } : item))); }} />
             ) : <b>{usd(line.budget)}</b>}
           </li>
         ))}
       </ul>
+      {open && !lines.some(isContingency) && (
+        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t border-border py-2 text-sm" data-testid="scope-contingency-add">
+          <span className="min-w-0 flex-1 basis-40">Contingency<small className="block text-xs text-muted-foreground">Set aside for surprises, about {usd(Math.round((budget * CONTINGENCY_SUGGESTED) / 100) * 100)}. It&apos;s spent by moving it to a line once the work needs it.</small></span>
+          <button type="button" className="btn-ghost h-9! text-xs!" data-testid="add-contingency" onClick={() => { setSaved(false); setLines([...lines, { id: CONTINGENCY_ID, division: "Contingency", budget: 0, released: 0 }]); }}>Add a contingency</button>
+        </div>
+      )}
       <div className="mt-2 flex flex-wrap justify-between gap-2 border-t border-border pt-2 text-sm font-semibold"><span>Total</span><span data-testid="scope-total">{usd(scopeTotal(lines))}{!open && released > 0 ? ` · ${usd(released)} released` : ""}</span></div>
       </div>}
       {open && showing && (

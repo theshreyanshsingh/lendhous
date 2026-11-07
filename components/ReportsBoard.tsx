@@ -11,6 +11,8 @@ import { useStore } from "@/lib/store";
 import { QuoteFunnel } from "@/components/QuoteFunnel";
 import { SpeedScoreboard } from "@/components/SpeedScoreboard";
 import { ExitsReport } from "@/components/ExitsReport";
+import { SurveyReport } from "@/components/SurveyReport";
+import { JournalExport } from "@/components/JournalExport";
 
 const RANGES = [
   { key: "30d", label: "Last 30 days" },
@@ -183,6 +185,8 @@ export function ReportsBoard() {
 
       <SpeedScoreboard period={period} />
       <ExitsReport period={period} />
+      <SurveyReport period={period} />
+      <JournalExport />
       <QuoteFunnel period={period} />
 
       <Section title="Capital today">
