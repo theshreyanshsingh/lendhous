@@ -50,6 +50,7 @@ export function PartnersBoard({ accounts }: { accounts: FirmAccount[] }) {
             )}
             {firm.principals?.length ? <p className="mt-1 text-xs text-muted-foreground">Owners and officers: {firm.principals.join(", ")}</p> : firm.buyBox ? <p className="mt-1 text-xs text-warn">Add its owners and officers so they're screened too.</p> : null}
             {(() => { const record = saved(firm.kind).find((item) => item.id === firm.id); return record ? <div className="mt-3 border-t border-border pt-3"><FirmScreening kind={firm.kind} firm={record} /></div> : null; })()}
+            {firm.kind === "partner" && s.partners.some((item) => item.id === firm.id) && <DrawFunding partnerId={firm.id} />}
             <button type="button" className="btn-ghost mt-3 h-9! px-3! text-xs!" data-testid="edit-firm" onClick={() => setEditing(firm)}>{firm.buyBox ? "Edit" : "Set up"}</button>
           </section>
         ))}
@@ -101,5 +102,23 @@ function FirmForm({ firm, onClose }: { firm: Firm; onClose: () => void }) {
         <button type="button" className="btn-ghost" onClick={onClose}>Cancel</button>
       </div>
     </section>
+  );
+}
+
+/**
+ * How a partner pays for a loan's holdback: all of its share at closing (the default), or its share of each draw as it's
+ * released, as its participation agreement says (lib/capital-moves.ts). It applies to loans it's accepted on from then.
+ */
+function DrawFunding({ partnerId }: { partnerId: string }) {
+  const { s, dispatch } = useStore();
+  // Shown ticked at once; a save the server refuses puts it back.
+  const [pending, setPending] = useState<boolean | null>(null);
+  const on = pending ?? Boolean(s.partners.find((item) => item.id === partnerId)?.fundsDraws);
+  const change = async (value: boolean) => { setPending(value); await dispatch({ t: "setFundsDraws", partnerId, on: value }); setPending(null); };
+  return (
+    <label className="mt-3 flex items-start gap-2 border-t border-border pt-3 text-sm" data-testid="funds-draws">
+      <input type="checkbox" className="mt-1" checked={on} disabled={pending !== null} onChange={(event) => void change(event.target.checked)} />
+      <span>Sends its share of each draw as it&apos;s released<small className="block text-xs text-muted-foreground">Instead of its whole share at closing. LendHous pays the borrower and asks the partner for its share, due in a few business days. For loans accepted from now on.</small></span>
+    </label>
   );
 }

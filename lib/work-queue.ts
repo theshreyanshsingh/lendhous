@@ -13,6 +13,7 @@ import { needsExitAnswer } from "./exit-plans";
 import { bonusOf } from "./referrals";
 import { budgetBalance, openChanges } from "./budget";
 import { brokerStanding, PRIORITY_TIERS } from "./broker-program";
+import { openDrawCalls, proceedsToSend, unsettledTransfers } from "./capital-moves";
 
 const SERVICED_STATUSES = new Set(SERVICED);
 import { clockOf, SLA_TARGETS, type Clock, type Targets } from "./sla";
@@ -109,6 +110,19 @@ export function workQueue(book: Book, viewer: { id: string; email?: string }, no
     if (!deal || draw.status === "funded" || draw.status === "rejected") continue;
     const deciding = draw.status !== "approved";
     add({ key: `draw:${draw.id}`, label: deciding ? "Decide the draw request" : "Release the approved draw", href: "/admin/draws", deal, since: draw.requestedAt, clock: deciding ? clockOf(draw.requestedAt, now, targets.drawDecision) : undefined, priority: 11 });
+  }
+  // The capital side's loose ends (lib/capital-moves.ts): payoff money owed to partners, share transfers to settle, and
+  // partners' shares of released draws still to come in. The partner's own deadline is in the label, not a legal one.
+  for (const { partner, proceeds } of proceedsToSend(book.partners)) {
+    const deal = book.deals.find((item) => item.id === proceeds.dealId);
+    add({ key: `proceeds:${proceeds.id}`, label: `Send ${partner.name} its payoff money ($${proceeds.toSend.toLocaleString("en-US", { maximumFractionDigits: 2 })})`, href: "/admin/capital", deal, since: proceeds.on, priority: 9 });
+  }
+  for (const { deal, transfer } of unsettledTransfers(book.deals)) add({ key: `transfer:${transfer.id}`, label: "Settle the share that moved", href: tab(deal, "Capital Routing"), deal, since: transfer.on, priority: 9 });
+  for (const deal of book.deals) {
+    for (const call of openDrawCalls(deal)) {
+      const partner = book.partners.find((item) => item.id === call.partnerId)?.name ?? "A partner";
+      add({ key: `drawcall:${call.id}`, label: call.sent ? `Confirm ${partner}'s draw share arrived` : `${partner}'s draw share is due ${call.dueOn < today ? "and late" : `by ${call.dueOn.slice(5).replace("-", "/")}`}`, href: "/admin/capital", deal, since: call.calledOn, priority: call.dueOn < today && !call.sent ? 4 : 10 });
+    }
   }
   // Partner lenders, loan buyers and brokerages with a possible sanctions match: nothing moves with them until it's reviewed.
   for (const [kind, firms, href] of [["partner", book.partners, "/admin/partners"], ["buyer", book.buyers, "/admin/partners"], ["broker", book.brokers, "/admin/brokers"]] as const) {

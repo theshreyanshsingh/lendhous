@@ -1494,3 +1494,57 @@ describe("storm watch and flood maps", () => {
     expect((await readBook()).book.deals.find((item) => item.id === "flood-loan")!.floodMap?.at).toBe(deal.floodMap!.at);
   });
 });
+
+describe("partners' money between loans", () => {
+  it("keeps a payoff's money with the partner's choice, rolls it into the next loan, and moves a share to the day", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const { demoBook } = await import("@/lib/book");
+    const { readBook, runAction } = await import("@/lib/book-store");
+    const { sendAlerts } = await import("@/lib/book-alerts");
+    const { creditOf } = await import("@/lib/capital-moves");
+    const { payoffOn } = await import("@/lib/loan-exits");
+    const firm = await prisma.organization.create({ data: { name: "Roll Capital", type: "PARTNER_LENDER" } });
+    const other = await prisma.organization.create({ data: { name: "Taker Capital", type: "PARTNER_LENDER" } });
+    await prisma.user.create({ data: { email: "rhea.roll@example.com", name: "Rhea Roll", passwordHash: "x", accountStatus: "APPROVED", organizationId: firm.id, roles: { create: [{ role: "PARTNER_LENDER" }] } } });
+    const demo = demoBook();
+    const d11 = demo.deals.find((deal) => deal.id === "d11")!;
+    const screening = demo.partners[0].screening;
+    const bid = (id: string, dealId: string, partnerId: string, status: string) => ({ id, dealId, partnerId, pct: 50, lenderRate: 9.25, lenderPoints: 0.5, conditions: "", status, type: "bid", at: "2026-06-20T14:00:00Z" });
+    await prisma.bookRecord.createMany({ data: [
+      { id: "deals:roll-loan", kind: "deals", data: JSON.parse(JSON.stringify({ ...d11, id: "roll-loan", loanNumber: "LH-7201", teaserSentTo: [firm.id], partnerFunding: { ...d11.partnerFunding!, partnerId: firm.id }, allocations: [{ sourceId: `partner:${firm.id}`, amount: 232_500 }, { sourceId: "gt-main", amount: 232_500 }] })) },
+      { id: "deals:move-loan", kind: "deals", data: JSON.parse(JSON.stringify({ ...d11, id: "move-loan", loanNumber: "LH-7202", teaserSentTo: [firm.id], partnerFunding: { ...d11.partnerFunding!, partnerId: firm.id }, allocations: [{ sourceId: `partner:${firm.id}`, amount: 232_500 }, { sourceId: "gt-main", amount: 232_500 }] })) },
+      { id: "bids:roll-bid", kind: "bids", data: bid("roll-bid", "roll-loan", firm.id, "accepted") },
+      { id: "bids:move-bid", kind: "bids", data: bid("move-bid", "move-loan", firm.id, "accepted") },
+      { id: `partners:${firm.id}`, kind: "partners", data: JSON.parse(JSON.stringify({ id: firm.id, name: "Roll Capital", ndaSigned: true, buyBox: demo.partners[0].buyBox, screening: { ...screening, subjects: [{ role: "firm", name: "Roll Capital", hits: [] }] } })) },
+      { id: `partners:${other.id}`, kind: "partners", data: JSON.parse(JSON.stringify({ id: other.id, name: "Taker Capital", ndaSigned: true, buyBox: demo.partners[0].buyBox, screening: { ...screening, checkedAt: new Date().toISOString(), subjects: [{ role: "firm", name: "Taker Capital", hits: [] }] } })) },
+    ] });
+    const staff = { id: "staff-cap", name: "Cara Capital", roleCodes: ["ADMIN_OWNER" as const] };
+    const partner = { id: "rhea", name: "Rhea Roll", roleCodes: ["PARTNER_LENDER" as const], organizationId: firm.id };
+    const act = async (viewer: typeof staff | typeof partner, action: Parameters<typeof runAction>[1]) => {
+      const result = await runAction(viewer, action);
+      if ("error" in result) throw new Error(result.error);
+      await sendAlerts(result.before, result.after, result.action);
+      return result.after;
+    };
+    await act(partner, { t: "setRollover", partnerId: firm.id, choice: "all", by: "" });
+    const today = new Date().toISOString().slice(0, 10);
+    const loan = (await readBook()).book.deals.find((deal) => deal.id === "roll-loan")!;
+    await act(staff, { t: "recordPayoff", dealId: "roll-loan", amount: payoffOn(loan, today).quote.total, receivedOn: today, method: "wire", reference: "PO-1", by: "" });
+    let book = (await readBook()).book;
+    const [proceeds] = book.partners.find((item) => item.id === firm.id)!.proceeds!;
+    expect(proceeds).toMatchObject({ dealId: "roll-loan", choice: "all", toSend: 0 });
+    expect(creditOf(book, firm.id)).toBe(proceeds.rolled);
+    expect(await prisma.notification.count({ where: { toEmail: "rhea.roll@example.com", eventCode: "investor.paid_off" } })).toBe(1);
+
+    // Its share of the other loan moves to another partner a week ago; payments from then on are the new holder's.
+    const on = new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10);
+    await act(staff, { t: "transferShare", dealId: "move-loan", from: firm.id, to: other.id, on, by: "" });
+    book = (await readBook()).book;
+    const moved = book.deals.find((deal) => deal.id === "move-loan")!;
+    expect(moved.transfers?.[0]).toMatchObject({ from: firm.id, to: other.id, on });
+    expect(book.bids.find((item) => item.id === "move-bid")).toMatchObject({ until: on });
+    expect(book.bids.find((item) => item.partnerId === other.id && item.dealId === "move-loan")).toMatchObject({ status: "accepted", type: "transfer", since: on });
+    expect(await prisma.notification.count({ where: { toEmail: "rhea.roll@example.com", eventCode: "investor.transfer" } })).toBe(1);
+    vi.restoreAllMocks();
+  });
+});

@@ -29,6 +29,7 @@ import { InsurancePanel } from "@/components/loan/InsurancePanel";
 import { BudgetControls } from "@/components/loan/BudgetControls";
 import { InvestorUpdates } from "@/components/loan/InvestorUpdates";
 import { RiskChecks } from "@/components/loan/RiskChecks";
+import { ShareTransfers } from "@/components/loan/ShareTransfers";
 import { INSURED } from "@/lib/insurance";
 import { PropertyPhotos } from "@/components/loan/PropertyPhotos";
 import { LoanTeam } from "@/components/loan/LoanTeam";
@@ -245,6 +246,7 @@ export default function DealWorkspace() {
           <div className="min-w-0 space-y-4">
             <BrokerFee deal={d} />
             <ReferralBonus deal={d} />
+            <ShareTransfers deal={d} />
             <Section title="Recommendation">
               <div className="flex flex-wrap items-center gap-2" data-testid="route-rec"><Badge tone={rec.route === "IN_HOUSE" ? "green" : rec.route === "SPLIT" ? "violet" : "amber"}>{rec.route.replace(/_/g, " ")}</Badge><span className="text-sm text-muted-foreground">because: {rec.reasons.join("; ")}</span></div>
               <p className="mt-1 text-[11px] text-faint">First matching rule wins. A human always confirms.</p>

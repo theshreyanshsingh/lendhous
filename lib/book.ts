@@ -21,7 +21,8 @@ import { insuranceChecks, insuranceFileOf, policiesOf, policyProblem, policyWord
 import { addProblem, changeProblem, DEFAULT_LIBRARY, fromTemplate, libraryOf, missingStandard, templateProblem, templatesFor, type ConditionInput } from "./conditions";
 import { chosenTerms, draftSheet, exceptionDecisionProblem, exceptionReasons, exceptionRequestProblem, issueProblem as sheetProblem, latestSheet, matrixOf, pricedApp, respondProblem, startingTerms, termSheetChecks, type Prepay } from "./term-sheets";
 import { optionAt } from "./buy-down";
-import { DEMO_TEAM, seedDeals, seedBids, seedDraws, seedLoanSales, seedLoanOffers, seedMessages, seedPhotoRequests, DEMO_SPONSORS, capitalSources, partners as seedPartners, brokers as seedBrokers, loanBuyers, BORROWER_ID, DEMO_PARTNER_ID, DEMO_BUYER_ID, DEMO_BROKER_ID, type Broker, type ClosingAgent, type Closure, type Deal, type DefaultKind, type Bid, type DrawRequest, type DrawRequestLine, type DrawPhoto, type FloodMap, type LoanExtension, type LoanMessage, type Screening, type WireInstruction, type Partner, type PayoffChannel, type PayoffLetter, type PayoffRequest, type NoticeToOwner, type LienWaiver, type ConditionTemplate, type LoanCondition, type DocStatus, type CapitalSource, type LoanBuyer, type LoanOffer, type LoanSale, type LoanPayment, type LoanStatus, type TeamMember, type PaymentMethod, type PhotoRequest, type RequestPhoto, type ScopeLine, type Sponsor, type StageEntry, type PolicyKind, type InsurancePolicy, type InsuranceRenewal, type ChangeOrder } from "./mockData";
+import { DEMO_TEAM, seedDeals, seedBids, seedDraws, seedLoanSales, seedLoanOffers, seedMessages, seedPhotoRequests, DEMO_SPONSORS, capitalSources, partners as seedPartners, brokers as seedBrokers, loanBuyers, BORROWER_ID, DEMO_PARTNER_ID, DEMO_BUYER_ID, DEMO_BROKER_ID, type Broker, type ClosingAgent, type Closure, type Deal, type DefaultKind, type Bid, type DrawRequest, type DrawRequestLine, type DrawPhoto, type DrawCall, type FloodMap, type RolloverChoice, type ShareTransfer, type LoanExtension, type LoanMessage, type Screening, type WireInstruction, type Partner, type PayoffChannel, type PayoffLetter, type PayoffRequest, type NoticeToOwner, type LienWaiver, type ConditionTemplate, type LoanCondition, type DocStatus, type CapitalSource, type LoanBuyer, type LoanOffer, type LoanSale, type LoanPayment, type LoanStatus, type TeamMember, type PaymentMethod, type PhotoRequest, type RequestPhoto, type ScopeLine, type Sponsor, type StageEntry, type PolicyKind, type InsurancePolicy, type InsuranceRenewal, type ChangeOrder } from "./mockData";
+import { closingShare, creditOf, currentBids, drawCallsFor, moveShare, payoffProceeds, ROLLOVER, transferProblem, transferQuote } from "./capital-moves";
 import { applyFloodMap, withFloodFollowUps } from "./flood-zones";
 import { afterCheck, freshInspectionNeeded, type StormCheck, type StormWatch } from "./storms";
 import { BASE_VERSION, currentPricing, type PricingPayload } from "./pricing-versions";
@@ -81,6 +82,14 @@ export type BookAction =
   /** The property's last recorded sale, for the price-jump check (lib/risk.ts). */
   /** The property's place on the map, found by the server (lib/geocode.ts). */
   | { t: "placeProperty"; dealId: string; lat: number; lng: number }
+  /** The capital side's moves (lib/capital-moves.ts): payoff money rolled or sent, a share moved mid-loan, draws funded as released. */
+  | { t: "setRollover"; partnerId: string; choice: RolloverChoice; by: string }
+  | { t: "sendProceeds"; partnerId: string; proceedsId: string; on: string; reference: string; by: string }
+  | { t: "setFundsDraws"; partnerId: string; on: boolean }
+  | { t: "transferShare"; dealId: string; from: string; to: string; on: string; rate?: number; by: string }
+  | { t: "settleTransfer"; dealId: string; transferId: string; on: string; reference: string; by: string }
+  | { t: "drawCallSent"; dealId: string; callId: string; on: string; reference: string; by: string }
+  | { t: "drawCallReceived"; dealId: string; callId: string; on: string; by: string }
   /** FEMA's flood map at the property's point. Only the server asks FEMA (lib/property-facts.ts). */
   | { t: "recordFloodMap"; dealId: string; map: FloodMap }
   /** What NHC's latest forecast cones cover. Only the server reads NHC's files, or a demo seat its sample storm. */
@@ -568,6 +577,31 @@ function apply(s: Book, a: BookAction): Book {
       return { ...s, deals: upd(a.dealId, (d) => ({ ...d, friendReferral: { referrerId: a.referrerId, referrerName, on: a.on, bonus: round2(Math.max(0, a.bonus)) } })), audit: log(`${deal.loanNumber}: referred by ${referrerName}, a LendHous borrower`) };
     }
     case "placeProperty": return { ...s, deals: upd(a.dealId, (d) => ({ ...d, geo: { lat: a.lat, lng: a.lng, at: now() } })) };
+    case "setRollover": return { ...s, partners: s.partners.map((p) => (p.id === a.partnerId ? { ...p, rollover: { choice: a.choice, by: a.by, at: now() } } : p)), audit: log(`${s.partners.find((p) => p.id === a.partnerId)?.name ?? a.partnerId}: payoff money ${ROLLOVER[a.choice].label.toLowerCase()}`) };
+    case "sendProceeds": {
+      const partner = s.partners.find((p) => p.id === a.partnerId)!;
+      const item = partner.proceeds?.find((x) => x.id === a.proceedsId);
+      if (!item || item.sent) return s;
+      return { ...s, partners: s.partners.map((p) => (p.id === a.partnerId ? { ...p, proceeds: p.proceeds!.map((x) => (x.id === a.proceedsId ? { ...x, sent: { on: a.on, reference: a.reference.trim(), by: a.by, at: now() } } : x)) } : p)), audit: log(`${item.loanNumber}: ${money(item.toSend)} of payoff money sent to ${partner.name}`) };
+    }
+    case "setFundsDraws": return { ...s, partners: s.partners.map((p) => (p.id === a.partnerId ? { ...p, fundsDraws: a.on } : p)), audit: log(`${s.partners.find((p) => p.id === a.partnerId)?.name ?? a.partnerId} ${a.on ? "sends its share of each draw as it's released" : "funds its whole share at closing"}`) };
+    case "transferShare": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const old = currentBids(s, deal.id).find((bid) => bid.partnerId === a.from);
+      if (!old || transferProblem(s, deal, a.from, a.to, a.on, serviceDay(s))) return s;
+      const transfer: ShareTransfer = { id: `tr${uid()}`, from: a.from, to: a.to, pct: old.pct, on: a.on, ...transferQuote(deal, old, a.on), rate: a.rate ?? old.lenderRate, by: a.by, at: now() };
+      const name = (id: string) => (id === "gt-main" ? "LendHous" : s.partners.find((p) => p.id === id)?.name ?? id);
+      return { ...s, ...moveShare(s, deal, transfer, `bid${uid()}`), audit: log(`${deal.loanNumber}: ${name(a.from)}'s ${old.pct}% share moved to ${name(a.to)} on ${a.on} for ${money(transfer.price)}`) };
+    }
+    case "settleTransfer": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, transfers: d.transfers?.map((x) => (x.id === a.transferId && !x.settled ? { ...x, settled: { on: a.on, reference: a.reference.trim(), by: a.by, at: now() } } : x)) })), audit: log(`${deal.loanNumber}: share transfer settled ${a.on}`) };
+    }
+    case "drawCallSent": case "drawCallReceived": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const mark = (call: DrawCall): DrawCall => (call.id !== a.callId ? call : a.t === "drawCallSent" ? (call.sent ? call : { ...call, sent: { on: a.on, reference: a.reference.trim(), by: a.by, at: now() } }) : (call.received ? call : { ...call, received: { on: a.on, by: a.by, at: now() } }));
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, drawCalls: d.drawCalls?.map(mark) })), audit: log(`${deal.loanNumber}: partner's share of a draw ${a.t === "drawCallSent" ? "sent" : "received"} ${a.on}`) };
+    }
     case "recordFloodMap": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
       return { ...s, deals: upd(a.dealId, (d) => applyFloodMap(d, a.map, serviceDay(s))), audit: log(`${deal.loanNumber}: FEMA flood map ${a.map.mapped ? `shows zone ${a.map.zone}${a.map.sfha ? ", a special flood hazard area" : ""}` : "has no flood zone here (not mapped)"}`) };
@@ -847,7 +881,8 @@ function apply(s: Book, a: BookAction): Book {
       return { ...s,
         draws: s.draws.map((d) => (d.id === a.drawId ? { ...d, status: "funded", fundedAt: now() } : d)),
         // Brought up to today first, so the payments already due keep the amount they owed before this draw.
-        deals: upd(deal.id, (d) => ({ ...settle(d, serviceDay(s)), disbursedDraws: (d.disbursedDraws ?? 0) + draw.approved!, scope: releaseToScope(d.scope ?? [], d, draw) })),
+        // Partners that fund draws as they're released are asked for their share; LendHous has paid the borrower already.
+        deals: upd(deal.id, (d) => ({ ...settle(d, serviceDay(s)), disbursedDraws: (d.disbursedDraws ?? 0) + draw.approved!, scope: releaseToScope(d.scope ?? [], d, draw), ...(d.partnerFunding?.drawsAsReleased ? { drawCalls: [...(d.drawCalls ?? []), ...drawCallsFor(s, d, draw.id, draw.approved!, serviceDay(s), (n) => `dc${uid()}${n}`)] } : {}) })),
         audit: log(`${deal.loanNumber}: draw of $${draw.approved.toLocaleString()} released`) };
     }
     case "requestChangeOrder": {
@@ -1082,8 +1117,11 @@ function apply(s: Book, a: BookAction): Book {
       const owed = payoffOn(deal, a.receivedOn).quote.total;
       const paidOff = { amount: Math.round(a.amount * 100) / 100, receivedOn: a.receivedOn, method: a.method, reference: a.reference, by: a.by, at: now(), owed, ...(letter ? { letter: { payoffId: a.onLetter!.payoffId, number: letter.number, total: letter.total, shortfall: Math.max(0, Math.round((owed - a.amount) * 100) / 100) } } : {}) };
       const closing = new Set(s.sales.filter((x) => x.dealId === deal.id && x.status === "listed").map((x) => x.id));
+      // Each partner's part of the payoff, rolled into its next loan or owed to it, the way it chose (lib/capital-moves.ts).
+      const proceeds = payoffProceeds(s, { ...deal, paidOff }, (n) => `pp${uid()}${n}`);
       // The money is back, so the loan stops counting against capital, and nothing else can be drawn, sold or extended on it.
       return { ...s,
+        partners: proceeds.length ? s.partners.map((p) => { const mine = proceeds.filter((x) => x.partnerId === p.id).map((x) => x.proceeds); return mine.length ? { ...p, proceeds: [...(p.proceeds ?? []), ...mine] } : p; }) : s.partners,
         deals: upd(deal.id, () => ({ ...deal, status: "paid_off", daysInStage: 0, paidOff, allocations: [], nextPaymentDue: undefined, paymentsLate: 0, extensions: deal.extensions?.map((x) => (x.status === "requested" || x.status === "approved" ? { ...x, status: "declined" as const, declined: { by: a.by, at: now(), reason: "The loan was paid off" } } : x)) })),
         payoffs: s.payoffs.map((p) => (p.dealId === deal.id && p.status !== "paid" ? { ...p, status: "paid" } : p)),
         draws: s.draws.map((d) => (d.dealId === deal.id && d.status !== "funded" && d.status !== "rejected" ? { ...d, status: "rejected", reason: "The loan was paid off" } : d)),
@@ -1190,11 +1228,16 @@ function apply(s: Book, a: BookAction): Book {
     case "acceptBid": {
       const b = s.bids.find((x) => x.id === a.bidId)!; const deal = s.deals.find((d) => d.id === b.dealId)!; const L = evaluate(deal.app).noteAmount;
       const partnerAmt = Math.round((L * b.pct) / 100);
+      // A partner that funds draws as they're released wires only its share of the rest at closing, and any money it
+      // rolled over from a loan that paid off goes in first (lib/capital-moves.ts).
+      const fundsDraws = Boolean(s.partners.find((p) => p.id === b.partnerId)?.fundsDraws);
+      const atClosing = closingShare(deal, b.pct, fundsDraws);
+      const fromCredit = Math.min(atClosing, creditOf(s, b.partnerId, deal.id));
       const inHouse = L - partnerAmt;
       const allocations = [{ sourceId: `partner:${b.partnerId}`, amount: partnerAmt }, ...(inHouse > 0 ? [{ sourceId: "gt-main", amount: inHouse }] : [])];
       return { ...s,
         bids: s.bids.map((x) => (x.id === b.id ? { ...x, status: "accepted" } : x.dealId === b.dealId && x.status === "submitted" ? { ...x, status: "declined" } : x)),
-        deals: upd(b.dealId, (d) => ({ ...d, allocations, route: inHouse > 0 ? "split" : "partner", capitalStatus: "reserved", partnerFunding: { partnerId: b.partnerId, amount: partnerAmt } })),
+        deals: upd(b.dealId, (d) => ({ ...d, allocations, route: inHouse > 0 ? "split" : "partner", capitalStatus: "reserved", partnerFunding: { partnerId: b.partnerId, amount: atClosing, ...(fromCredit > 0 ? { fromCredit } : {}), ...(fundsDraws ? { drawsAsReleased: true } : {}) } })),
         audit: log(`${deal.loanNumber}: bid from ${b.partnerId} accepted; partner commitment issued; other bids declined`) };
     }
     case "commit": return { ...s, deals: upd(a.dealId, (d) => ({ ...d, capitalStatus: "committed" })), audit: log(`Capital committed (required before clear to close)`) };

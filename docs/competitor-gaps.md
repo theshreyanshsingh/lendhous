@@ -24,7 +24,7 @@ The market is ahead on four things:
 1. **Products we advertise or get asked for but can't originate.** Portfolio and blanket rental loans, short-term rental DSCR and lines of credit for repeat flippers.
 2. **Growth loops.** A cash referral program, published loyalty perks and broker comp options (YSP, white label).
 3. **Insurance and construction-budget controls**, which matter more in Florida than anywhere.
-4. **The capital side.** Screening investors, rollovers, swapping a partner mid-loan.
+4. **The capital side.** Screening investors, rollovers, swapping a partner mid-loan (all built 2026-11-07 and 2026-11-08).
 
 ## 1. Build now: no vendor and no outside decision needed
 
@@ -207,7 +207,7 @@ Ranked by money and risk to LendHous, against the effort.
 
 ### 1.9 The capital side
 
-**Partly built 2026-11-07** (`lib/investor-updates.ts`): plain statuses, workouts and team updates on partners' and buyers' portfolios, and the late-fee split in Settings. Still to come: rollover choices, partner substitution and pro-rata draws.
+**Built 2026-11-07 and 2026-11-08** (`lib/investor-updates.ts`, `lib/capital-moves.ts`): plain statuses, workouts and team updates on partners' and buyers' portfolios, the late-fee split in Settings, rollover choices at payoff with the rolled money applied to the partner's next loan, moving a partner's share mid-loan at par plus interest to the day, and partners who send their share of each draw as it's released.
 
 - **Today:**
   - Partners bid loan by loan and wire their share at closing.

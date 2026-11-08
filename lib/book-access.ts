@@ -31,6 +31,7 @@ import { optionAt } from "./buy-down";
 import { brandProblem } from "./broker-program";
 import { surveyProblem } from "./surveys";
 import { updateProblem, workoutProblem } from "./investor-updates";
+import { transferProblem } from "./capital-moves";
 import { changeOrderProblem, CONTINGENCY_ID, openChanges, reservePaymentProblem } from "./budget";
 
 export type Viewer = MemberAccess & { id: string; name: string; roleCodes: RoleCode[]; organizationId?: string | null };
@@ -85,7 +86,7 @@ const quietPayoff = (payoff: PayoffRequest): PayoffRequest => ({
 
 /** Removes what identifies the borrower, for a partner or buyer who hasn't closed on the loan. */
 function blind(deal: Deal): Deal {
-  return { ...deal, insurance: undefined, friendReferral: undefined, surveys: undefined, investorUpdates: undefined, workout: undefined, lastSale: undefined, geo: undefined, stormHold: undefined, borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined, closure: undefined, defaults: undefined, extensions: undefined, paidOff: undefined, closing: undefined, wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, termSheets: undefined, pricingException: undefined, conditions: undefined, lienFile: undefined, completed: undefined, revenue: undefined, adverseAction: undefined, legalHold: undefined, propertyPhotos: undefined, partnerFunding: undefined, agents: undefined, ...quietPayments(deal, false) };
+  return { ...deal, insurance: undefined, friendReferral: undefined, surveys: undefined, investorUpdates: undefined, workout: undefined, lastSale: undefined, geo: undefined, stormHold: undefined, transfers: undefined, drawCalls: undefined, borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined, closure: undefined, defaults: undefined, extensions: undefined, paidOff: undefined, closing: undefined, wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, termSheets: undefined, pricingException: undefined, conditions: undefined, lienFile: undefined, completed: undefined, revenue: undefined, adverseAction: undefined, legalHold: undefined, propertyPhotos: undefined, partnerFunding: undefined, agents: undefined, ...quietPayments(deal, false) };
 }
 
 /** The conditions that are the borrower's to meet (Spec B17), without who on the team handled them or why one was waived. */
@@ -119,11 +120,18 @@ const clientInsurance = (deal: Deal): Partial<Deal> => ({
 
 /** What only the team sees on a loan it shares with a client. Wire instructions never leave the team: a client who sees them is a client who can be sent fake ones. */
 function forClient(deal: Deal): Deal {
-  return { ...deal, ...latestForClient(deal), ...clientConditions(deal), ...clientRecords(deal), ...clientAgents(deal), ...clientInsurance(deal), partnerFunding: undefined, allocations: [], teaserSentTo: [], route: undefined, capitalStatus: "not_started", contractorIsGtAffiliate: undefined, source: "", fundingApprovers: undefined, creditReview: undefined, ...quietPayments(deal, true), ...quietExits(deal), wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, friendReferral: undefined, surveys: undefined, investorUpdates: undefined, workout: undefined, lastSale: undefined };
+  return { ...deal, ...latestForClient(deal), ...clientConditions(deal), ...clientRecords(deal), ...clientAgents(deal), ...clientInsurance(deal), partnerFunding: undefined, transfers: undefined, drawCalls: undefined, allocations: [], teaserSentTo: [], route: undefined, capitalStatus: "not_started", contractorIsGtAffiliate: undefined, source: "", fundingApprovers: undefined, creditReview: undefined, ...quietPayments(deal, true), ...quietExits(deal), wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, friendReferral: undefined, surveys: undefined, investorUpdates: undefined, workout: undefined, lastSale: undefined };
 }
 
 /** What a partner or buyer that holds a loan also sees: the team's updates for its investors and any workout. */
 const forHolder = (deal: Deal): Deal => ({ ...forClient(deal), investorUpdates: deal.investorUpdates, workout: deal.workout });
+
+/** A partner's own draw shares, and the share transfers it was part of, on a loan it holds or held. */
+const ownMoves = (deal: Deal, partnerId: string) => {
+  const calls = deal.drawCalls?.filter((call) => call.partnerId === partnerId);
+  const transfers = deal.transfers?.filter((item) => item.from === partnerId || item.to === partnerId);
+  return { drawCalls: calls?.length ? calls : undefined, transfers: transfers?.length ? transfers : undefined };
+};
 
 /** The part of the book this account may see. Nothing else leaves the server. */
 export function scopeBook(book: Book, viewer: Viewer): Book {
@@ -159,7 +167,7 @@ function scopeRecords(book: Book, viewer: Viewer): Book {
     const deals = book.deals.filter((deal) => deal.teaserSentTo.includes(me.id));
     // Someone else's accepted bid only says the deal is gone: no firm, no price.
     const taken = book.bids.filter((bid) => bid.partnerId !== me.id && bid.status === "accepted" && deals.some((deal) => deal.id === bid.dealId)).map((bid) => ({ ...bid, partnerId: "", pct: 0, lenderRate: 0, lenderPoints: 0, conditions: "" }));
-    return { ...empty, partnerId: me.id, partners: [ownRecord(me)], bids: [...mine, ...taken], deals: deals.map((deal) => (won.has(deal.id) ? { ...forHolder(deal), teaserSentTo: [me.id], contractorIsGtAffiliate: deal.contractorIsGtAffiliate, partnerFunding: deal.partnerFunding?.partnerId === me.id ? { ...deal.partnerFunding, sendTo: sendToFor(deal) } : undefined } : { ...blind(deal), teaserSentTo: [me.id] })) };
+    return { ...empty, partnerId: me.id, partners: [ownRecord(me)], bids: [...mine, ...taken], deals: deals.map((deal) => (won.has(deal.id) ? { ...forHolder(deal), teaserSentTo: [me.id], contractorIsGtAffiliate: deal.contractorIsGtAffiliate, partnerFunding: deal.partnerFunding?.partnerId === me.id ? { ...deal.partnerFunding, sendTo: sendToFor(deal) } : undefined, ...ownMoves(deal, me.id) } : { ...blind(deal), teaserSentTo: [me.id] })) };
   }
 
   if (view === "buyer") {
@@ -555,8 +563,55 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       return staffOnly("route_capital", "manage_capital");
     case "saveSource": case "removeSource":
       return staffOnly("manage_capital");
-    case "saveFirm":
+    case "saveFirm": case "setFundsDraws":
+      if (action.t === "setFundsDraws" && !book.partners.some((partner) => partner.id === action.partnerId)) return no(GONE);
       return staffOnly("route_capital", "manage_capital");
+
+    // A partner says what happens to its money when a loan pays off; the team can record it on the partner's word.
+    case "setRollover": {
+      if (!book.partners.some((partner) => partner.id === action.partnerId)) return no(GONE);
+      const own = view === "partner" && firm === action.partnerId;
+      if (!own && !staffOnlyAllowed("route_capital", "manage_capital")) return no(NOT_ALLOWED);
+      return ok({ ...action, by: viewer.name });
+    }
+    case "sendProceeds": {
+      const item = book.partners.find((partner) => partner.id === action.partnerId)?.proceeds?.find((x) => x.id === action.proceedsId);
+      if (!item) return no(GONE);
+      if (!staffOnlyAllowed("route_capital", "manage_capital")) return no(NOT_ALLOWED);
+      if (item.sent) return no("That's already marked sent.");
+      if (item.toSend <= 0) return no("Nothing from that payoff is owed: it was all rolled over.");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(action.on) || action.on > serviceDay(book) || action.on < item.on) return no("Choose the day it was sent, from the payoff to today.");
+      const held = firmOfacBlocker(book.partners.find((partner) => partner.id === action.partnerId), serviceDay(book));
+      return held ? no(`${held}.`) : ok({ ...action, by: viewer.name });
+    }
+    case "transferShare": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      if (!staffOnlyAllowed("route_capital")) return no(NOT_ALLOWED);
+      if (action.rate !== undefined && !(action.rate > 0 && action.rate <= 25)) return no("The new holder's rate is a percent above 0 and at most 25.");
+      const problem = transferProblem(book, deal, action.from, action.to, action.on, serviceDay(book));
+      return problem ? no(problem) : ok({ ...action, by: viewer.name });
+    }
+    case "settleTransfer": {
+      const transfer = dealOf(action.dealId)?.transfers?.find((item) => item.id === action.transferId);
+      if (!transfer) return no(GONE);
+      if (!staffOnlyAllowed("route_capital", "manage_capital")) return no(NOT_ALLOWED);
+      if (transfer.settled) return no("That transfer is already settled.");
+      if (action.on > serviceDay(book) || action.on < transfer.on) return no("Choose the day it settled, from the transfer to today.");
+      return ok({ ...action, by: viewer.name });
+    }
+    case "drawCallSent": case "drawCallReceived": {
+      const call = dealOf(action.dealId)?.drawCalls?.find((item) => item.id === action.callId);
+      if (!call) return no(GONE);
+      if (action.t === "drawCallSent" ? !(view === "partner" && firm === call.partnerId) : !staffOnlyAllowed("route_capital", "manage_capital")) return no(NOT_ALLOWED);
+      if (action.t === "drawCallSent" ? call.sent || call.received : call.received) return no("That's already recorded.");
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(action.on) || action.on > serviceDay(book) || action.on < call.calledOn) return no("Choose a day from when it was asked for to today.");
+      if (action.t === "drawCallReceived") {
+        const held = firmOfacBlocker(book.partners.find((partner) => partner.id === call.partnerId), serviceDay(book));
+        if (held) return no(`${held}.`);
+      }
+      return ok({ ...action, by: viewer.name });
+    }
 
     case "bid": {
       const me = book.partners.find((partner) => partner.id === firm);

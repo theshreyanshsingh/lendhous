@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useState } from "react";
 import type { CapitalSource } from "@/lib/mockData";
 import { useStore, est, capitalSummary } from "@/lib/store";
+import { CapitalDesk } from "@/components/CapitalDesk";
 import { PageIntro } from "@/components/page-intro";
 import { Section, Stat, usd, k, pct, productLabel, statusLabel, Badge } from "@/components/ui";
 
@@ -30,6 +31,7 @@ export default function Capital() {
         <table className="stack-table w-full"><thead><tr><th>Source</th><th className="text-right">Commitment</th><th className="text-right">Reserved</th><th className="text-right">Committed</th><th className="text-right">Deployed</th><th className="text-right">Unfunded</th><th className="text-right">Available</th><th><span className="sr-only">Actions</span></th></tr></thead>
           <tbody className="divide-y divide-border">{rows.length === 0 && <tr><td colSpan={8} className="py-8 text-center text-muted-foreground">No capital sources yet. Add your fund so loans can be routed against it.</td></tr>}{rows.map((r) => <tr key={r.source.id}><td className="font-medium">{r.source.name}{r.source.lineUndrawn !== undefined && <div className="text-[11px] text-faint">capped by undrawn line {usd(r.source.lineUndrawn)}</div>}</td><td data-label="Commitment" className="text-right">{usd(r.source.commitment)}</td><td data-label="Reserved" className="text-right">{usd(r.reserved)}</td><td data-label="Committed" className="text-right">{usd(r.committed)}</td><td data-label="Deployed" className="text-right">{usd(r.deployed)}</td><td data-label="Unfunded" className="text-right">{usd(r.unfunded)}</td><td data-label="Available" className="text-right font-semibold text-good">{usd(r.available)}</td><td className="text-right lg:whitespace-nowrap"><button type="button" className="text-xs text-link underline max-sm:py-2.5" data-testid="edit-source" onClick={() => setEditing(r.source)}>Edit</button>{!inUse(r.source.id) && <button type="button" className="ml-3 text-xs text-bad underline max-sm:py-2.5" data-testid="remove-source" onClick={() => void dispatch({ t: "removeSource", id: r.source.id })}>Remove</button>}</td></tr>)}</tbody></table>
       </Section>
+      <CapitalDesk />
       <div className="grid gap-4 md:grid-cols-2">
         <Section title="Routing mix ($)">
           {(["in_house", "partner", "split"] as const).map((r) => <div key={r} className="mb-2"><div className="flex justify-between text-sm"><span>{r === "in_house" ? "In-house" : r === "partner" ? "Partner" : "Split"}</span><b>{usd(mix[r])} · {pct(mix[r] / mixTot, 0)}</b></div><div className="h-2 rounded-full bg-muted"><div className="h-2 rounded-full bg-primary" style={{ width: `${(mix[r] / mixTot) * 100}%` }} /></div></div>)}

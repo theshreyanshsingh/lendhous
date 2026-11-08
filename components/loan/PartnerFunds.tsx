@@ -4,7 +4,7 @@ import { Badge, Section, usd } from "@/components/ui";
 import { shortDay } from "@/lib/format";
 import { maskAccount } from "@/lib/closing";
 import type { Deal } from "@/lib/mockData";
-import { FUNDING_STAGES } from "@/lib/partner-funding";
+import { FUNDING_STAGES, toWire } from "@/lib/partner-funding";
 import { useStore } from "@/lib/store";
 import { useServiceDay } from "./use-service-day";
 
@@ -28,9 +28,11 @@ export function PartnerFunds({ deal, side }: { deal: Deal; side: "partner" | "te
     return (
       <Section title="Fund your share" right={status}>
         <div className="space-y-3 text-sm" data-testid="partner-funding">
-          <p>Your share for closing is <b data-testid="partner-funding-amount">{usd(funding.amount)}</b>.</p>
+          <p>Your share for closing is <b data-testid="partner-funding-amount">{usd(funding.amount)}</b>.{funding.drawsAsReleased ? " Your share of the holdback comes draw by draw, as each is released." : ""}</p>
+          {funding.fromCredit ? <p data-testid="partner-funding-credit">{usd(funding.fromCredit, 2)} of it comes from money rolled over from a loan that paid off, so {toWire(funding) > 0 ? <>send <b>{usd(toWire(funding), 2)}</b>.</> : "there's nothing to send."}</p> : null}
           {funding.received ? <p className="text-muted-foreground">LendHous confirmed it arrived in escrow on {shortDay(funding.received.on)}.</p>
             : funding.sent ? <p className="text-muted-foreground">You sent it on {shortDay(funding.sent.on)}{funding.sent.reference ? ` (reference ${funding.sent.reference})` : ""}. LendHous will confirm when it arrives.</p>
+            : toWire(funding) <= 0 ? null
             : !ready ? <p className="text-muted-foreground">Where to send it appears here once the loan is clear to close.</p>
             : !to ? <p className="text-muted-foreground">LendHous is verifying the title company&apos;s escrow account by phone. Where to send it appears here once that&apos;s done.</p>
             : (
@@ -58,7 +60,7 @@ export function PartnerFunds({ deal, side }: { deal: Deal; side: "partner" | "te
   return (
     <Section title="Partner's share" right={status}>
       <div className="space-y-2 text-sm" data-testid="team-partner-funding">
-        <p>{partner} funds <b>{usd(funding.amount)}</b> of this loan.{funding.sent ? ` They sent it on ${shortDay(funding.sent.on)}${funding.sent.reference ? ` (reference ${funding.sent.reference})` : ""}.` : ready ? " They see the verified escrow wire on their loan page and say here when it's sent." : ""}</p>
+        <p>{partner} funds <b>{usd(funding.amount)}</b> of this loan{funding.drawsAsReleased ? " at closing, and its share of each draw as it's released" : ""}.{funding.fromCredit ? ` ${usd(funding.fromCredit, 2)} comes from its rolled-over money, so it wires ${usd(toWire(funding), 2)}.` : ""}{funding.sent ? ` They sent it on ${shortDay(funding.sent.on)}${funding.sent.reference ? ` (reference ${funding.sent.reference})` : ""}.` : ready ? " They see the verified escrow wire on their loan page and say here when it's sent." : ""}</p>
         {funding.received ? <p className="text-muted-foreground">Confirmed in escrow on {shortDay(funding.received.on)} by {funding.received.by}.</p> : ready && (
           <div className="flex flex-wrap items-end gap-2">
             <label className="block"><span className="label">Arrived in escrow on</span><input type="date" className="desk-input w-auto!" data-testid="partner-received-on" max={today} value={on || today} onChange={(event) => setOn(event.target.value)} /></label>

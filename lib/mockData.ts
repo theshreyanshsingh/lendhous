@@ -41,6 +41,10 @@ export interface Allocation { sourceId: string; amount: number }
 /** A partner lender's share of a loan and its money for closing (Spec P7, lib/partner-funding.ts). */
 export interface PartnerFunding {
   partnerId: string; amount: number;
+  /** Of that, what comes from the partner's money rolled over from loans that paid off, so it isn't wired again. */
+  fromCredit?: number;
+  /** The partner sends its share of the holdback draw by draw, as each is released, rather than all of it at closing. */
+  drawsAsReleased?: boolean;
   sent?: { on: string; reference: string; by: string; at: string };
   received?: { on: string; by: string; at: string };
   /** Where to send it: the verified escrow wire. Only in the winning partner's own copy of the loan, never stored. */
@@ -129,6 +133,9 @@ export interface Deal {
   lastSale?: { price: number; on: string; by: string; at: string };
   /** What FEMA's flood map says at the property's point (lib/flood-zones.ts). Not mapped isn't the same as no risk. */
   floodMap?: FloodMap;
+  /** Partners' shares moved partway through the loan, and partners' shares of draws as they're released (lib/capital-moves.ts). */
+  transfers?: ShareTransfer[];
+  drawCalls?: DrawCall[];
   /** A storm whose forecast cone covered the property passed then: draws need an inspection from after it (lib/storms.ts). */
   stormHold?: { stormId: string; name: string; passedAt: string };
   /** The team's updates on the loan for the partners and buyers who hold it, and a workout it declared (lib/investor-updates.ts). */
@@ -415,8 +422,23 @@ export interface InvestorChecks {
   principals?: string[];
   screening?: Screening;
 }
-export interface Partner extends InvestorChecks { id: string; name: string; ndaSigned: boolean; buyBox: BuyBox }
-export interface Bid { id: string; dealId: string; partnerId: string; pct: number; lenderRate: number; lenderPoints: number; conditions: string; status: "submitted" | "accepted" | "declined" | "withdrawn"; type: "bid" | "accept_as_offered"; at: string }
+/** What a partner wants done with its money when a loan it holds pays off (lib/capital-moves.ts). */
+export type RolloverChoice = "send" | "principal" | "all";
+/** A partner's money from a loan that paid off: what's rolled into its next loan, and what LendHous sends it. */
+export interface PayoffProceeds { id: string; dealId: string; loanNumber: string; on: string; principal: number; interest: number; choice: RolloverChoice; rolled: number; toSend: number; sent?: { on: string; reference: string; by: string; at: string } }
+export interface Partner extends InvestorChecks {
+  id: string; name: string; ndaSigned: boolean; buyBox: BuyBox;
+  rollover?: { choice: RolloverChoice; by: string; at: string };
+  proceeds?: PayoffProceeds[];
+  /** Sends its share of each draw as it's released (set by the team, per its participation agreement). */
+  fundsDraws?: boolean;
+}
+/** since and until: the days a partner took over a share from another, or handed its own on (lib/capital-moves.ts). */
+export interface Bid { id: string; dealId: string; partnerId: string; pct: number; lenderRate: number; lenderPoints: number; conditions: string; status: "submitted" | "accepted" | "declined" | "withdrawn"; type: "bid" | "accept_as_offered" | "transfer"; at: string; since?: string; until?: string }
+/** A partner's share moved to another partner, or back to LendHous, partway through a loan, at par plus interest to the day. */
+export interface ShareTransfer { id: string; from: string; to: string; pct: number; on: string; principal: number; holdback: number; accrued: number; perDiem: number; price: number; rate: number; by: string; at: string; settled?: { on: string; reference: string; by: string; at: string } }
+/** A partner's share of a released draw, which LendHous paid out and the partner sends in. */
+export interface DrawCall { id: string; drawId: string; partnerId: string; amount: number; calledOn: string; dueOn: string; sent?: { on: string; reference: string; by: string; at: string }; received?: { on: string; by: string; at: string } }
 /** A firm that buys funded loans from LendHous. Partner lenders fund deals before closing; these buy them after. */
 export interface LoanBuyer extends InvestorChecks { id: string; name: string; ndaSigned: boolean; buyBox: BuyBox }
 /** A funded loan LendHous has put up for sale. Prices are a percent of the unpaid balance (100 = par). */

@@ -1,12 +1,14 @@
 "use client";
 import Link from "next/link";
 import { InvestorStatements } from "@/components/InvestorStatements";
+import { PartnerMoney } from "@/components/PartnerMoney";
 import { PortfolioCharts } from "@/components/charts/PortfolioCharts";
 import { PageIntro } from "@/components/page-intro";
 import { Badge, Section, Stat, k, productLabel, shortDate, usd } from "@/components/ui";
 import { INVESTOR_STATUS, investorStatus, latestUpdate, STATUS_TONE } from "@/lib/investor-updates";
 import { evaluate } from "@/lib/engine";
 import { holdingsOf, splitOf } from "@/lib/investor-statements";
+import { shortDay } from "@/lib/format";
 import { balanceOf, ledger } from "@/lib/servicing";
 import { useStore } from "@/lib/store";
 
@@ -16,7 +18,8 @@ export default function PartnerPortfolio() {
   const me = s.partners.find((partner) => partner.id === s.partnerId);
   if (!me) return <div className="glass mx-auto max-w-xl p-6 text-center" data-testid="no-partner-org">Your organization isn&apos;t connected yet.</div>;
   const rows = holdingsOf(s, { type: "partner", id: me.id }).map((holding) => {
-    const paidOff = holding.deal.status === "paid_off";
+    // A share handed on to another holder earns nothing more after that day.
+    const paidOff = holding.deal.status === "paid_off" || Boolean(holding.until);
     const balance = paidOff ? 0 : holding.share * balanceOf(holding.deal);
     return { holding, balance, funded: holding.share * evaluate(holding.deal.app).noteAmount, drawn: holding.share * (holding.deal.disbursedDraws ?? 0), received: splitOf(holding, () => true), monthly: (balance * holding.investorRate) / 100 / 12, late: paidOff ? 0 : ledger(holding.deal).daysPastDue, paidOff };
   });
@@ -39,8 +42,10 @@ export default function PartnerPortfolio() {
               <Link href={`/admin/partner/teasers/${row.holding.deal.id}`} className="block hover:bg-hover/60">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="min-w-0 font-medium">{row.holding.deal.loanNumber} · {productLabel[row.holding.deal.app.product]} · {row.holding.deal.address}, {row.holding.deal.city}</span>
-                  <span className="flex flex-wrap items-center gap-2">{row.late > 0 && !row.paidOff && <span className="text-xs text-bad">{row.late} days late</span>}<Badge tone={STATUS_TONE[investorStatus(row.holding.deal)]}>{INVESTOR_STATUS[investorStatus(row.holding.deal)]}</Badge></span>
+                  <span className="flex flex-wrap items-center gap-2">{row.late > 0 && !row.paidOff && <span className="text-xs text-bad">{row.late} days late</span>}{row.holding.until ? <span data-testid="portfolio-moved"><Badge tone="slate">Moved on {shortDay(row.holding.until)}</Badge></span> : <Badge tone={STATUS_TONE[investorStatus(row.holding.deal)]}>{INVESTOR_STATUS[investorStatus(row.holding.deal)]}</Badge>}</span>
                 </div>
+                {row.holding.since && <p className="mt-1 text-xs text-muted-foreground" data-testid="portfolio-took-over">You took over this share on {shortDay(row.holding.since)}.</p>}
+                {(() => { const moved = row.holding.until ? row.holding.deal.transfers?.find((item) => item.from === me.id && item.on === row.holding.until) : undefined; return moved ? <p className="mt-1 text-xs text-muted-foreground">Your share moved on {shortDay(moved.on)} for {usd(moved.price, 2)}{moved.settled ? `, settled ${shortDay(moved.settled.on)}` : ", to be settled"}.</p> : null; })()}
                 {latestUpdate(row.holding.deal) && <p className="mt-1 text-sm text-muted-foreground" data-testid="portfolio-update">Update {shortDate(latestUpdate(row.holding.deal)!.at)}: {latestUpdate(row.holding.deal)!.text}</p>}
                 <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-5">
                   <Stat label="Your share" value={`${Math.round(row.holding.share * 100)}%`} sub={`${row.holding.investorRate.toFixed(2)}% to you`} />
@@ -54,6 +59,7 @@ export default function PartnerPortfolio() {
           ))}
         </ul>
       </Section>
+      <PartnerMoney partnerId={me.id} />
       <InvestorStatements investor={{ type: "partner", id: me.id }} />
     </div>
   );

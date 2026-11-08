@@ -12,6 +12,7 @@ import { policiesOf, policyWord } from "@/lib/insurance";
 import { bonusOf, PAY_WITHIN_BUSINESS_DAYS } from "@/lib/referrals";
 import { budgetBalance } from "@/lib/budget";
 import { FLOOD_CONDITION } from "@/lib/flood-zones";
+import { currentBids, ROLLOVER, rolloverOf } from "@/lib/capital-moves";
 import { afterCheck, exposureLines } from "@/lib/storms";
 import { dueOf, fromThirdParty, letterChanges, receivedOf, requesterLine, staleLetter } from "@/lib/payoffs";
 import { prisma } from "@/lib/prisma";
@@ -268,6 +269,27 @@ function actionAlerts(before: Book, after: Book, action: BookAction): Alert[] {
       return action.status === "rejected" ? [{ to: "borrower", dealId: action.dealId, subject: `A document needs another look: ${number(action.dealId)}`, body: "One of your documents wasn't accepted. Sign in to see which one and upload a new copy.", event: "doc.rejected" }] : [];
     case "addDocRequest":
       return [{ to: "borrower", dealId: action.dealId, subject: `We need a document: ${number(action.dealId)}`, body: `Please upload: ${action.name}.`, event: "doc.requested" }];
+    case "transferShare": {
+      const deal = after.deals.find((item) => item.id === action.dealId);
+      const transfer = deal?.transfers?.find((item) => !before.deals.find((old) => old.id === deal.id)?.transfers?.some((old) => old.id === item.id));
+      if (!deal || !transfer) return [];
+      const name = (id: string) => (id === "gt-main" ? "LendHous" : after.partners.find((partner) => partner.id === id)?.name ?? "another partner");
+      const parts = `${dollars(transfer.principal)} of principal${transfer.holdback ? `, ${dollars(transfer.holdback)} held for draws` : ""} and ${dollars(transfer.accrued)} of interest to the day`;
+      return [
+        { to: "partner", firmId: transfer.from, subject: `Your share of ${deal.loanNumber} moved`, body: `Your ${transfer.pct}% share of ${deal.loanNumber} moved to ${name(transfer.to)} on ${longDate(transfer.on)}. You're owed ${dollars(transfer.price)}: ${parts}. Payments from that day on go to the new holder.`, event: "investor.transfer" },
+        ...(transfer.to === "gt-main" ? [] : [{ to: "partner" as const, firmId: transfer.to, subject: `You took over a share of ${deal.loanNumber}`, body: `You took over a ${transfer.pct}% share of ${deal.loanNumber} on ${longDate(transfer.on)} for ${dollars(transfer.price)} (${parts}), at ${transfer.rate.toFixed(2)}% a year to you. Payments from that day on are yours. Sign in to see the loan.`, event: "investor.transfer" }]),
+        { to: "team", subject: `Share moved: ${deal.loanNumber}`, body: `${name(transfer.from)}'s ${transfer.pct}% share moved to ${name(transfer.to)} on ${longDate(transfer.on)} for ${dollars(transfer.price)}. Mark it settled on the loan's Capital Routing tab once the money has moved.`, event: "investor.transfer" },
+      ];
+    }
+    case "drawCallSent": {
+      const deal = after.deals.find((item) => item.id === action.dealId);
+      const call = deal?.drawCalls?.find((item) => item.id === action.callId);
+      return deal && call ? [{ to: "team", subject: `Partner's draw share sent: ${deal.loanNumber}`, body: `${after.partners.find((partner) => partner.id === call.partnerId)?.name ?? "The partner"} says it sent its ${dollars(call.amount)} share of the draw on ${longDate(action.on)}${action.reference.trim() ? ` (${action.reference.trim()})` : ""}. Mark it received on the Capital page once it arrives.`, event: "investor.draw_call_sent" }] : [];
+    }
+    case "sendProceeds": {
+      const item = after.partners.find((partner) => partner.id === action.partnerId)?.proceeds?.find((x) => x.id === action.proceedsId);
+      return item?.sent ? [{ to: "partner", firmId: action.partnerId, subject: `Your payoff money is on its way: ${item.loanNumber}`, body: `LendHous sent you ${dollars(item.toSend)} from the payoff of ${item.loanNumber} on ${longDate(item.sent.on)}${item.sent.reference ? ` (reference ${item.sent.reference})` : ""}.`, event: "investor.proceeds_sent" }] : [];
+    }
     case "recordFloodMap": {
       const was = before.deals.find((item) => item.id === action.dealId);
       const deal = after.deals.find((item) => item.id === action.dealId);
@@ -311,7 +333,9 @@ function actionAlerts(before: Book, after: Book, action: BookAction): Alert[] {
     case "rejectDraw": case "releaseDraw": {
       const draw = after.draws.find((item) => item.id === action.drawId);
       if (!draw) return [];
-      return [{ to: "borrower", dealId: draw.dealId, subject: `Update on your draw: ${number(draw.dealId)}`, body: action.t === "releaseDraw" ? `Your draw of $${(draw.approved ?? 0).toLocaleString("en-US")} was released.` : `Your draw wasn't approved: ${draw.reason}`, event: `draw.${action.t === "releaseDraw" ? "released" : "rejected"}` }];
+      const calls = (after.deals.find((item) => item.id === draw.dealId)?.drawCalls ?? []).filter((call) => call.drawId === draw.id && !(before.deals.find((item) => item.id === draw.dealId)?.drawCalls ?? []).some((old) => old.id === call.id));
+      return [
+        ...calls.map((call): Alert => ({ to: "partner", firmId: call.partnerId, subject: `Your share of a draw: ${number(draw.dealId)}`, body: `LendHous released a draw of ${dollars(draw.approved ?? 0)} on ${number(draw.dealId)}. Your share is ${dollars(call.amount)}, due by ${longDate(call.dueOn)}. Where to send it is on your portfolio page; confirm it by phone before you first send money.`, event: "investor.draw_call" })),{ to: "borrower", dealId: draw.dealId, subject: `Update on your draw: ${number(draw.dealId)}`, body: action.t === "releaseDraw" ? `Your draw of $${(draw.approved ?? 0).toLocaleString("en-US")} was released.` : `Your draw wasn't approved: ${draw.reason}`, event: `draw.${action.t === "releaseDraw" ? "released" : "rejected"}` }];
     }
     case "recordPayment": {
       const deal = loan(action.dealId);
@@ -339,6 +363,8 @@ function actionAlerts(before: Book, after: Book, action: BookAction): Alert[] {
       const check = payoff.check?.status === "pending" ? ` First: ${payoff.check.note.replace(/\.$/, "")}.` : "";
       const alerts: Alert[] = [{ to: "team", subject: `Payoff letter requested: ${deal.loanNumber}`, body: `${who} asked for a payoff letter good through ${longDate(payoff.goodThrough)}. Florida law gives us until ${longDate(dueOf(payoff))} to send it (received ${longDate(receivedOf(payoff))}).${check}`, event: "payoff.requested" }];
       // The borrower is told whenever someone else asks (Fla. Stat. 701.04(1)(a)), which also catches a request they never authorized.
+      // A partner holding the loan hears it may pay off soon, and what will happen to its money (lib/capital-moves.ts).
+      for (const bid of currentBids(after, deal.id)) alerts.push({ to: "partner", firmId: bid.partnerId, subject: `A loan you hold may pay off soon: ${deal.loanNumber}`, body: `A payoff letter good through ${longDate(payoff.goodThrough)} was asked for on ${deal.loanNumber}. If it pays off, your share will be handled as you chose: ${ROLLOVER[rolloverOf(after.partners.find((partner) => partner.id === bid.partnerId))].label.toLowerCase()}. Change that on your portfolio page before then.`, event: "investor.payoff_coming" });
       if (fromThirdParty(payoff)) alerts.push({ to: "borrower", dealId: deal.id, subject: `Payoff letter requested: ${deal.loanNumber}`, body: `${who} asked us for a payoff letter on your loan for ${deal.address}, ${deal.city}. If you didn't authorize this, call your LendHous servicing team right away.`, event: "payoff.third_party" });
       return alerts;
     }
@@ -410,8 +436,9 @@ function actionAlerts(before: Book, after: Book, action: BookAction): Alert[] {
           ? { to: "borrower", dealId: deal.id, subject: `Payoff received: ${deal.loanNumber}`, body: `We received your payoff of ${dollars(amount)} on ${longDate(receivedOn)}, as our payoff letter stated. We'll send the satisfaction of your mortgage to be recorded. Our letter left out ${dollars(short)} that's still owed on the loan; your LendHous team will be in touch about it.`, event: "loan.paid_off" }
           : { to: "borrower", dealId: deal.id, subject: `Paid in full: ${deal.loanNumber}`, body: `We received your payoff of ${dollars(amount)} on ${longDate(receivedOn)}. Your loan is paid in full. We'll send the satisfaction of your mortgage to be recorded.${over}`, event: "loan.paid_off" },
         { to: "team", subject: `Paid off: ${deal.loanNumber}`, body: `${deal.borrowerName} paid off the loan with ${dollars(amount)} received ${longDate(receivedOn)} (${dollars(owed)} owed).${short ? ` It was paid on payoff letter ${letter!.number}, which came to ${dollars(letter!.total)}: ${dollars(short)} is still owed by the borrower and guarantors, but the mortgage has to be released anyway.` : ""} Get the satisfaction of mortgage out within ${currentPricing().lienReleaseDays} days.`, event: "loan.paid_off" },
-        // The allocations are gone once it's paid off, so who held it comes from before.
-        ...holdersOf(before.deals.find((item) => item.id === deal.id)).map((holder) => ({ ...holder, subject: `A loan you hold was paid off: ${deal.loanNumber}`, body: `${deal.loanNumber} was paid off on ${longDate(receivedOn)}. Your share follows under your agreement.`, event: "loan.paid_off" })),
+        // The allocations are gone once it's paid off, so who held it comes from before. Partners hear what's theirs.
+        ...holdersOf(before.deals.find((item) => item.id === deal.id)).filter((holder) => holder.to !== "partner").map((holder) => ({ ...holder, subject: `A loan you hold was paid off: ${deal.loanNumber}`, body: `${deal.loanNumber} was paid off on ${longDate(receivedOn)}. Your share follows under your agreement.`, event: "loan.paid_off" })),
+        ...after.partners.flatMap((partner) => (partner.proceeds ?? []).filter((item) => item.dealId === deal.id && !before.partners.find((old) => old.id === partner.id)?.proceeds?.some((old) => old.id === item.id)).map((item): Alert => ({ to: "partner", firmId: partner.id, subject: `A loan you hold was paid off: ${deal.loanNumber}`, body: `${deal.loanNumber} was paid off on ${longDate(receivedOn)}. Your share is ${dollars(item.principal)} of principal and ${dollars(item.interest)} of interest after servicing. ${item.choice === "send" ? "LendHous will send it to you." : item.choice === "principal" ? `The ${dollars(item.rolled)} of principal waits for your next LendHous loan, and the ${dollars(item.toSend)} of interest will be sent to you.` : `All ${dollars(item.rolled)} waits for your next LendHous loan, so you won't wire it again.`}`, event: "investor.paid_off" }))),
       ];
     }
     case "recordLienRelease": {

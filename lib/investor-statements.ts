@@ -8,8 +8,11 @@ import type { Deal } from "./mockData";
 import { amortizedBalance, balanceOf, ledger, SERVICED } from "./servicing";
 
 export type Investor = { type: "partner" | "buyer"; id: string };
-/** A loan an investor holds: its share of the loan, the rate it earns, and the day it started holding it. */
-export type Holding = { deal: Deal; share: number; investorRate: number; noteRate: number; since?: string };
+/**
+ * A loan an investor holds: its share of the loan, the rate it earns, the day it started holding it, and the day it handed
+ * the share on to someone else (lib/capital-moves.ts). Payments from `since` on are its; from `until` on they aren't.
+ */
+export type Holding = { deal: Deal; share: number; investorRate: number; noteRate: number; since?: string; until?: string };
 
 /**
  * Who keeps the late fees: LendHous as servicer (the PLACEHOLDER default, until the participation and sale agreements say
@@ -29,7 +32,7 @@ export function holdingsOf(book: Book, investor: Investor): Holding[] {
   if (investor.type === "partner") {
     return book.bids.filter((bid) => bid.partnerId === investor.id && bid.status === "accepted").flatMap((bid) => {
       const deal = held(bid.dealId);
-      return deal ? [{ deal, share: bid.pct / 100, investorRate: bid.lenderRate, noteRate: evaluate(deal.app).rate }] : [];
+      return deal ? [{ deal, share: bid.pct / 100, investorRate: bid.lenderRate, noteRate: evaluate(deal.app).rate, ...(bid.since ? { since: bid.since } : {}), ...(bid.until ? { until: bid.until } : {}) }] : [];
     });
   }
   return book.sales.filter((sale) => sale.status === "sold" && sale.soldTo === investor.id).flatMap((sale) => {
@@ -38,6 +41,20 @@ export function holdingsOf(book: Book, investor: Investor): Holding[] {
     const rate = evaluate(deal.app).rate;
     return [{ deal, share: 1, investorRate: Math.max(0, rate - SERVICING_STRIP_PCT), noteRate: rate, since: sale.soldAt?.slice(0, 10) }];
   });
+}
+
+/** What a payoff paid back: the principal owed, and the interest in the rest of what was owed. Fees go to whoever keeps them. */
+export function payoffParts(deal: Deal) {
+  const principal = deal.paidOff ? balanceOf(deal) : 0;
+  return { principal, interest: deal.paidOff ? Math.max(0, deal.paidOff.owed - principal) : 0 };
+}
+
+/** One investor's part of a payoff: its share of the principal, and of the interest at its own rate, after servicing. */
+export function payoffShare(holding: Holding) {
+  const paid = payoffParts(holding.deal);
+  const gross = holding.share * paid.interest;
+  const net = holding.noteRate > 0 ? gross * (holding.investorRate / holding.noteRate) : gross;
+  return { principal: round2(holding.share * paid.principal), interest: round2(net) };
 }
 
 export type Split = { interest: number; principal: number; servicingFee: number; lateFees: number; net: number; payments: number };
@@ -51,7 +68,7 @@ export function splitOf(holding: Holding, counts: (day: string) => boolean): Spl
   const { deal, share } = holding;
   const e = evaluate(deal.app);
   const l = ledger(deal);
-  const take = (day: string | undefined) => Boolean(day && counts(day) && (!holding.since || day >= holding.since));
+  const take = (day: string | undefined) => Boolean(day && counts(day) && (!holding.since || day >= holding.since) && (!holding.until || day < holding.until));
   let interest = 0, principal = 0, lateFees = 0, payments = 0;
   l.rows.forEach((row, index) => {
     if (!take(row.paidOn)) return;
@@ -64,9 +81,9 @@ export function splitOf(holding: Holding, counts: (day: string) => boolean): Spl
     } else interest += row.amount;
   });
   if (deal.paidOff && take(deal.paidOff.receivedOn)) {
-    const owedPrincipal = balanceOf(deal);
-    principal += owedPrincipal;
-    interest += Math.max(0, deal.paidOff.owed - owedPrincipal);
+    const paid = payoffParts(deal);
+    principal += paid.principal;
+    interest += paid.interest;
     payments++;
   }
   const gross = share * interest;
@@ -87,7 +104,8 @@ export function statementFor(book: Book, investor: Investor, month: string): Sta
     .filter((holding) => holding.deal.closingDate <= lastDay && (!holding.since || holding.since <= lastDay))
     .map((holding): StatementLine => {
       const split = splitOf(holding, (day) => day.slice(0, 7) === month);
-      const paidOff = holding.deal.status === "paid_off";
+      // A share handed on by the month's end, or a loan paid off, leaves nothing outstanding.
+      const paidOff = holding.deal.status === "paid_off" || Boolean(holding.until && holding.until <= lastDay);
       return { ...split, dealId: holding.deal.id, loanNumber: holding.deal.loanNumber, product: holding.deal.app.product, share: holding.share, investorRate: holding.investorRate, balance: paidOff ? 0 : round2(holding.share * balanceOf(holding.deal)), daysPastDue: paidOff ? 0 : ledger(holding.deal).daysPastDue, status: holding.deal.status };
     })
     // A loan paid off before the month has nothing left to say.

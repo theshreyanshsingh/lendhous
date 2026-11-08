@@ -1099,6 +1099,22 @@ ok("a payment after the letter flags it as out of date", await seen(page.getByTe
 await page.getByTestId("payoff-requests").getByTestId("issue-payoff-letter").click();
 ok("a corrected letter replaces it", (await seen(page.getByTestId("letter-row").getByText("(corrected)"))) && (await page.getByTestId("payoff-stale").count()) === 0);
 
+// Moving a partner's share mid-loan: the demo partner's half of d11 goes to another partner, at par plus interest to the day.
+await page.goto(BASE + "/admin/deals/d11?tab=Capital%20Routing");
+await seen(page.getByTestId("share-transfers"));
+await page.getByTestId("transfer-to").selectOption({ label: "Sample Bridge Fund B (FAKE)" });
+ok("moving a partner's share is priced at par plus interest to the day", (await page.getByTestId("transfer-quote").innerText()).includes("Interest to the day") && (await page.getByTestId("transfer-price").innerText()).startsWith("$"));
+await page.getByTestId("transfer-rate").fill("9.5");
+await shot(page, "19g-admin-move-share.png");
+await page.getByTestId("transfer-save").click();
+ok("and the move is listed on the loan, to settle", (await seen(page.getByTestId("transfer-row"))) && (await page.getByTestId("transfer-row").innerText()).includes("to Sample Bridge Fund B (FAKE)"));
+await page.goto(BASE + "/admin/capital");
+ok("the capital page lists the share to settle", await seen(page.getByTestId("transfer-due").filter({ hasText: "LH-DEMO-1011" })));
+await page.goto(BASE + "/admin/deals/d11?tab=Capital%20Routing");
+await page.getByTestId("transfer-reference").fill("FED REF (FAKE)");
+await page.getByTestId("transfer-settle").click();
+ok("and the team marks it settled", await seen(page.getByTestId("transfer-row").getByText(/^Settled/)));
+
 // Paying a loan off: a short amount is refused, the payoff closes the loan, then the mortgage release is tracked.
 await page.goto(BASE + "/admin/servicing");
 const capitalBeforePayoff = await capitalNow();
@@ -1124,6 +1140,17 @@ ok("a release can't be recorded without where", await page.getByTestId("save-lie
 await page.getByTestId("lien-reference").fill("OR Book 1234 Page 56 (FAKE)");
 await page.getByTestId("save-lien").click();
 ok("the release of the mortgage is recorded", await seen(page.getByTestId("lien-recorded")));
+// The partner holding d11 when it paid off is owed its part of the money; the team sends it.
+await page.goto(BASE + "/admin/capital");
+const owedPartner = page.getByTestId("proceeds-due").filter({ hasText: "LH-DEMO-1011" });
+ok("the payoff money owed to the partner holding the loan is on the capital page", (await seen(owedPartner)) && (await owedPartner.innerText()).includes("Sample Bridge Fund B (FAKE)"));
+await owedPartner.getByTestId("proceeds-reference").fill("FED OUT (FAKE)");
+await owedPartner.getByTestId("mark-proceeds-sent").click();
+ok("and the team records sending it", await owedPartner.waitFor({ state: "detached", timeout: 5000 }).then(() => true, () => false));
+await page.goto(BASE + "/admin/partners");
+const drawsBox = page.getByTestId("firm-row").filter({ hasText: "Demo Partner Capital A (FAKE)" }).getByTestId("funds-draws").locator("input");
+await drawsBox.check();
+ok("a partner can be set to send its share of each draw as it's released", await drawsBox.isChecked());
 
 // Pricing: the owner can try a change and see what it does to applications in review, but a demo seat can't publish it.
 await page.goto(BASE + "/admin/pricing");
@@ -1437,6 +1464,18 @@ await page.getByTestId("tab-Capital Routing").click();
 ok("a funded loan's broker fee waits to be recorded paid", (await page.getByTestId("broker-fee").innerText()).includes("Demo Brokerage (FAKE)") && (await page.getByTestId("broker-paid-save").isEnabled()));
 await page.getByTestId("broker-paid-save").click();
 ok("the team records the broker's fee paid", await seen(page.getByTestId("broker-fee-paid")));
+
+// 10b. A partner's money between loans: its share moved on, and what happens to its money when a loan pays off.
+await actAs(SEATS.partner);
+await page.goto(BASE + "/admin/partner/portfolio");
+const movedLoan = page.getByTestId("portfolio-loan").filter({ hasText: "LH-DEMO-1011" });
+ok("the partner sees its share moved on, for how much, and settled", (await seen(movedLoan.getByTestId("portfolio-moved"))) && (await movedLoan.innerText()).includes("settled"));
+await page.getByTestId("rollover-all").check();
+await page.getByTestId("save-rollover").click();
+ok("a partner chooses to roll all of a payoff into its next loan", await seen(page.getByTestId("rollover-saved")));
+ok("and sees nothing rolled over is waiting yet", (await page.getByTestId("rollover-credit").innerText()).includes("Nothing rolled over"));
+await shot(page, "26-partner-money.png");
+await actAs(SEATS.staff);
 
 // 11. Real records: the audit log, notifications, and a forgotten password
 await page.goto(BASE + "/admin/audit");
