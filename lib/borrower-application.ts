@@ -6,7 +6,7 @@ import { DECLARATIONS } from "./credit";
 import type { AddressValue } from "./places";
 import type { Application } from "./engine";
 import type { Declarations, Guarantor, Sponsor, TrackDeal } from "./mockData";
-import { LOAN_TYPES, PRICED, type LoanType } from "./quote";
+import { LOAN_TYPES, PRICED, productFor, type LoanType } from "./quote";
 
 export const STEPS = ["Loan & contact", "Property", "Loan details", "Vesting & guarantors", "Review & sign"] as const;
 /** How long a link works after it's sent. */
@@ -233,7 +233,7 @@ const name = (g: { firstName: string; lastName: string }) => `${g.firstName.trim
 
 /** The application as the loan book needs it: what underwriting prices on, and the borrower's profile. */
 export function toLoan(draft: AppDraft) {
-  const product = PRICED[draft.loanType] ?? "bridge";
+  const product = productFor(draft.loanType) ?? "bridge";
   const l = draft.loan;
   const purchase = num(l.purchasePrice) ?? 0;
   const value = l.purpose === "purchase" ? purchase : num(l.asIsValue) ?? purchase;

@@ -69,7 +69,7 @@ export const insideCone = (point: { lat: number; lng: number }, cone: Cone) => c
 export const watched = (deal: Pick<Deal, "status">) => SERVICED.includes(deal.status);
 
 /** The watched loans whose property is inside a cone. Loans not yet on the map can't be checked: the job places them first. */
-export const loansInCone = (deals: Deal[], cone: Cone) => deals.filter((deal) => watched(deal) && deal.geo && insideCone(deal.geo, cone)).map((deal) => deal.id);
+export const loansInCone = (deals: Deal[], cone: Cone) => deals.filter((deal) => watched(deal) && [deal.geo, ...(deal.properties ?? []).filter((property) => !property.released).map((property) => property.geo)].some((point) => point && insideCone(point, cone))).map((deal) => deal.id);
 
 /** A storm whose cone has covered LendHous properties, as the book keeps it. */
 export interface StormWatch {

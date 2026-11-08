@@ -30,6 +30,8 @@ import { BudgetControls } from "@/components/loan/BudgetControls";
 import { InvestorUpdates } from "@/components/loan/InvestorUpdates";
 import { RiskChecks } from "@/components/loan/RiskChecks";
 import { ShareTransfers } from "@/components/loan/ShareTransfers";
+import { PropertySchedule } from "@/components/loan/PropertySchedule";
+import { ReleaseProperty } from "@/components/loan/ReleaseProperty";
 import { INSURED } from "@/lib/insurance";
 import { PropertyPhotos } from "@/components/loan/PropertyPhotos";
 import { LoanTeam } from "@/components/loan/LoanTeam";
@@ -98,9 +100,11 @@ export default function DealWorkspace() {
   const bids = s.bids.filter((b) => b.dealId === d.id);
   const teaser = teaserOf(d);
   const matches = s.partners.map((p) => ({ p, m: matchPartner(p.buyBox, { product: d.app.product, state: d.app.state, noteAmount: e.noteAmount, ltarv: e.ratios.find((r) => r.key === "ltarv")?.actual, ltv: e.ratios.find((r) => r.key === "ltv")?.actual, fico: d.app.fico, tier: e.tier, rate: e.rate }) })).sort((a, b) => b.m.match - a.m.match);
+  // A portfolio loan's values, rents and costs are its properties' added up: they're changed on the property schedule.
+  const fromSchedule = (key: keyof Application) => Boolean(d.properties?.length) && ["purchasePrice", "arv", "monthlyRent", "taxesAnnual", "insuranceAnnual", "hoaMonthly"].includes(key);
   const num = (key: keyof Application, label: string) => (
-    <label className="block"><span className="label">{label}</span>
-      <input className="desk-input" inputMode="numeric" value={uwApp[key] || !label.includes("optional") ? Number(uwApp[key] ?? 0).toLocaleString("en-US") : ""} placeholder="Not given" onChange={(ev) => setOv({ ...ov, [key]: Number(ev.target.value.replace(/[^0-9.]/g, "") || 0) })} />
+    <label className="block"><span className="label">{label}{fromSchedule(key) ? " (from the properties)" : ""}</span>
+      <input className="desk-input" inputMode="numeric" readOnly={fromSchedule(key)} value={uwApp[key] || !label.includes("optional") ? Number(uwApp[key] ?? 0).toLocaleString("en-US") : ""} placeholder="Not given" onChange={(ev) => setOv({ ...ov, [key]: Number(ev.target.value.replace(/[^0-9.]/g, "") || 0) })} />
       {ov[key] !== undefined && ov[key] !== d.app[key] && <span className="text-[11px] text-warn">borrower said {Number(d.app[key] ?? 0).toLocaleString()}</span>}
     </label>);
   const holdMonths = pricingConfig.assumptions.holdMonths;
@@ -224,6 +228,7 @@ export default function DealWorkspace() {
               </Section>}
             </div>
           </div>
+          {d.app.product === "dscr" && <div className="lg:col-span-2"><PropertySchedule deal={d} side="team" /></div>}
         </div>
       )}
 
@@ -297,6 +302,7 @@ export default function DealWorkspace() {
       {tab === "Credit review" && <div className="space-y-4"><ApplicationRecord deal={d} /><ApplicationOnFile deal={d} /><OfacPanel deal={d} /><CreditReview deal={d} /></div>}
       {tab === "Closing" && <div className="space-y-4"><ClosingPanel deal={d} />{INSURED.includes(d.status) && <InsurancePanel deal={d} />}{(d.app.product === "fix_flip" || d.app.product === "ground_up" || d.lienFile) && <LienProtection deal={d} />}<OfacPanel deal={d} /></div>}
       {tab === "Servicing" && (SERVICED.includes(d.status) || d.status === "paid_off") && <LoanLedger deal={d} />}
+      {tab === "Servicing" && SERVICED.includes(d.status) && d.properties?.length ? <ReleaseProperty deal={d} /> : null}
       {tab === "Servicing" && SERVICED.includes(d.status) && <BudgetControls deal={d} side="team" />}
       {tab === "Servicing" && (SERVICED.includes(d.status) || d.status === "paid_off") && <InvestorUpdates deal={d} />}
       {tab === "Servicing" && SERVICED.includes(d.status) && <InsurancePanel deal={d} />}

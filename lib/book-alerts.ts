@@ -269,6 +269,18 @@ function actionAlerts(before: Book, after: Book, action: BookAction): Alert[] {
       return action.status === "rejected" ? [{ to: "borrower", dealId: action.dealId, subject: `A document needs another look: ${number(action.dealId)}`, body: "One of your documents wasn't accepted. Sign in to see which one and upload a new copy.", event: "doc.rejected" }] : [];
     case "addDocRequest":
       return [{ to: "borrower", dealId: action.dealId, subject: `We need a document: ${number(action.dealId)}`, body: `Please upload: ${action.name}.`, event: "doc.requested" }];
+    case "releaseProperty": {
+      const deal = after.deals.find((item) => item.id === action.dealId);
+      const release = deal?.releases?.find((item) => !before.deals.find((old) => old.id === deal.id)?.releases?.some((old) => old.id === item.id));
+      const property = deal?.properties?.find((item) => item.id === release?.propertyId);
+      if (!deal || !release || !property) return [];
+      const left = deal.properties!.filter((item) => !item.released).length;
+      return [
+        { to: "borrower", dealId: deal.id, subject: `Property released: ${deal.loanNumber}`, body: `We received ${dollars(release.principal + release.interest)} on ${longDate(release.on)} to release ${property.address}, ${property.city} from your loan. ${dollars(release.principal)} went to principal and ${dollars(release.interest)} to interest. ${left} propert${left === 1 ? "y stays" : "ies stay"} on the loan, and your monthly payment is now ${dollars(release.newPayment)}. We'll send the partial release of the mortgage to be recorded.`, event: "loan.property_released" },
+        { to: "broker", dealId: deal.id, subject: `Property released: ${deal.loanNumber}`, body: `${property.address}, ${property.city} was released from your client's portfolio loan on ${longDate(release.on)}.`, event: "loan.property_released" },
+        ...holdersOf(deal).map((holder) => ({ ...holder, subject: `A property was released: ${deal.loanNumber}`, body: `A property was released from ${deal.loanNumber} on ${longDate(release.on)}: ${dollars(release.principal)} paid the principal down, with ${dollars(release.interest)} of interest. Your share follows under your agreement.`, event: "loan.property_released" })),
+      ];
+    }
     case "transferShare": {
       const deal = after.deals.find((item) => item.id === action.dealId);
       const transfer = deal?.transfers?.find((item) => !before.deals.find((old) => old.id === deal.id)?.transfers?.some((old) => old.id === item.id));

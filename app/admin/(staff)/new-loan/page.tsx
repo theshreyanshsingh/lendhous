@@ -3,7 +3,7 @@ import { requirePermission } from "@/lib/auth";
 import type { Product } from "@/lib/engine";
 import { q } from "@/lib/format";
 import { openLead, openQuote } from "@/lib/lead-store";
-import { PRICED } from "@/lib/quote";
+import { productFor } from "@/lib/quote";
 import { notDeleted, prisma } from "@/lib/prisma";
 
 export const metadata = { title: "New loan" };
@@ -24,7 +24,7 @@ export default async function NewLoan({ searchParams }: { searchParams: Promise<
         leadId: lead.id,
         name: request ? `${request.borrower.firstName} ${request.borrower.lastName}` : lead.name,
         email: request ? request.borrower.email : lead.email,
-        product: (request && PRICED[request.loanType]) || (PRODUCT_FOR[lead.strategy] ?? "fix_flip"),
+        product: (request && productFor(request.loanType)) || (PRODUCT_FOR[lead.strategy] ?? "fix_flip"),
         city: lead.city,
         state: lead.state.trim().toUpperCase(),
         address: request?.address.street,

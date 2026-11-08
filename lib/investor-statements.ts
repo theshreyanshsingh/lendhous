@@ -5,7 +5,7 @@ import type { Book } from "./book";
 import { evaluate } from "./engine";
 import { SERVICING_STRIP_PCT } from "./loan-sale";
 import type { Deal } from "./mockData";
-import { amortizedBalance, balanceOf, ledger, SERVICED } from "./servicing";
+import { balanceOf, ledger, rentalBalance, SERVICED } from "./servicing";
 
 export type Investor = { type: "partner" | "buyer"; id: string };
 /**
@@ -75,11 +75,18 @@ export function splitOf(holding: Holding, counts: (day: string) => boolean): Spl
     payments++;
     lateFees += row.feePaid;
     if (deal.app.product === "dscr") {
-      const paidDown = amortizedBalance(e.noteAmount, e.rate, e.monthlyPayment, index) - amortizedBalance(e.noteAmount, e.rate, e.monthlyPayment, index + 1);
+      const paidDown = rentalBalance(deal, index) - rentalBalance(deal, index + 1);
       principal += paidDown;
       interest += row.amount - paidDown;
     } else interest += row.amount;
   });
+  // A portfolio loan's release: its price is principal, and the interest on it to the day is interest (lib/portfolio.ts).
+  for (const release of deal.releases ?? []) {
+    if (!take(release.on)) continue;
+    principal += release.principal;
+    interest += release.interest;
+    payments++;
+  }
   if (deal.paidOff && take(deal.paidOff.receivedOn)) {
     const paid = payoffParts(deal);
     principal += paid.principal;

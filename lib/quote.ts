@@ -10,6 +10,7 @@ export const LOAN_TYPES = {
   fix_flip: "Fix & flip",
   bridge: "Stabilized bridge",
   dscr: "DSCR rental (1–4 units)",
+  dscr_portfolio: "DSCR rental portfolio (2–20 homes)",
   ground_up: "New construction",
   dscr_5plus: "DSCR 5+ unit multifamily",
   second: "DSCR 2nd position",
@@ -18,6 +19,8 @@ export const LOAN_TYPES = {
 export type LoanType = keyof typeof LOAN_TYPES;
 /** The loan types the pricing engine prices. The rest go to the team for a manual look. */
 export const PRICED: Partial<Record<LoanType, Product>> = { fix_flip: "fix_flip", bridge: "bridge", dscr: "dscr", ground_up: "ground_up" };
+/** The product a loan type starts as. A rental portfolio is priced by hand on the quote, then starts as a rental loan whose properties the team adds (lib/portfolio.ts). */
+export const productFor = (type: LoanType): Product | undefined => PRICED[type] ?? (type === "dscr_portfolio" ? "dscr" : undefined);
 
 export const CREDIT_BANDS = { "760+": 770, "720-759": 740, "680-719": 700, "640-679": 660, "600-639": 620, "under-600": 580 } as const;
 export const CREDIT_LABEL: Record<keyof typeof CREDIT_BANDS, string> = { "760+": "760 or higher", "720-759": "720–759", "680-719": "680–719", "640-679": "640–679", "600-639": "600–639", "under-600": "Below 600" };

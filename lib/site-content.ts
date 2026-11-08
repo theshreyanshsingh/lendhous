@@ -65,9 +65,9 @@ export const PROGRAMS: Program[] = [
     summary: "Evaluate financing across multiple investment properties with a consistent view of rent, expenses, debt, and your long-term plan.",
     homeSummary: "Financing across multiple investment properties, with one view of rent, expenses, and debt.",
     audience: "Investors managing or acquiring multiple income-producing properties.",
-    structure: "Review whether separate loans or a combined structure fit your goals. Cross-collateralization, release provisions, and individual property performance need careful attention.",
+    structure: "One 30-year rental loan across 2 to 20 homes, condos or townhomes in Florida, sized on their values and rents added up. Each property has its own share of the loan and a release price, so you can sell one and keep the rest: the release price goes to principal and your payment is worked out again on what's left.",
     prepare: ["Property schedule and ownership entities", "Rent roll, leases, and operating expenses", "Existing loans and maturity dates", "Portfolio valuation, reserves, and acquisition plans"],
-    consider: "Confirm eligibility and collateral requirements. A combined structure may affect your ability to sell or refinance individual properties.",
+    consider: "The properties secure the loan together, so selling one means paying its release price, at least its share of the loan plus a premium and more if the rest would go past the loan's limits. Ask for the figure before you sign a sale contract.",
   },
 ];
 

@@ -21,7 +21,7 @@ LendHous is ahead where the law and money controls are:
 
 The market is ahead on four things:
 
-1. **Products we advertise or get asked for but can't originate.** Portfolio and blanket rental loans, short-term rental DSCR and lines of credit for repeat flippers.
+1. **Products we advertise or get asked for but can't originate.** Portfolio and blanket rental loans (built 2026-11-08), short-term rental DSCR (built 2026-11-07) and lines of credit for repeat flippers.
 2. **Growth loops.** A cash referral program, published loyalty perks and broker comp options (YSP, white label).
 3. **Insurance and construction-budget controls**, which matter more in Florida than anywhere.
 4. **The capital side.** Screening investors, rollovers, swapping a partner mid-loan (all built 2026-11-07 and 2026-11-08).
@@ -86,6 +86,8 @@ Ranked by money and risk to LendHous, against the effort.
 - **Ask the CPA:** referral payments of $600+ likely need a 1099-MISC.
 
 ### 1.4 Several properties on one loan (portfolio and blanket rental loans)
+
+**Built 2026-11-08** (`lib/portfolio.ts`): a schedule of 2 to 20 properties on a rental loan, sized on their totals, each property's share of the loan and coverage, release prices with leverage and coverage re-tested, partial releases that recast the payment, and flood zones and storm checks per property. Still to come: insurance policies per property, photos per property, and pricing the portfolio on the quote itself.
 
 - **Today:**
   - `/programs/portfolio` advertises "Rental portfolio" (`lib/site-content.ts:62`), but every loan holds one property.

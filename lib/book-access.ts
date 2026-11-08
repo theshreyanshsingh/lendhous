@@ -32,6 +32,7 @@ import { brandProblem } from "./broker-program";
 import { surveyProblem } from "./surveys";
 import { updateProblem, workoutProblem } from "./investor-updates";
 import { transferProblem } from "./capital-moves";
+import { releaseQuote, scheduleProblem } from "./portfolio";
 import { changeOrderProblem, CONTINGENCY_ID, openChanges, reservePaymentProblem } from "./budget";
 
 export type Viewer = MemberAccess & { id: string; name: string; roleCodes: RoleCode[]; organizationId?: string | null };
@@ -53,6 +54,7 @@ const ownRecord = <T extends InvestorChecks>(firm: T): T => { const { screening:
 const FIRM_HELD = "LendHous needs to finish a check on your firm first. Your contact at LendHous can tell you more.";
 
 const FUNDED = ["funded", "servicing_current", "servicing_delinquent", "matured", "default"];
+const money = (amount: number) => `$${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const BEFORE_CLOSING = ["submitted", "initial_review", "underwriting", "term_sheet_issued", "term_sheet_accepted", "conditions"];
 // Until a term sheet goes out, the borrower's profile and the credit review can still change.
 const IN_REVIEW = ["submitted", "initial_review", "underwriting"];
@@ -86,7 +88,7 @@ const quietPayoff = (payoff: PayoffRequest): PayoffRequest => ({
 
 /** Removes what identifies the borrower, for a partner or buyer who hasn't closed on the loan. */
 function blind(deal: Deal): Deal {
-  return { ...deal, insurance: undefined, friendReferral: undefined, surveys: undefined, investorUpdates: undefined, workout: undefined, lastSale: undefined, geo: undefined, stormHold: undefined, transfers: undefined, drawCalls: undefined, borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined, closure: undefined, defaults: undefined, extensions: undefined, paidOff: undefined, closing: undefined, wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, termSheets: undefined, pricingException: undefined, conditions: undefined, lienFile: undefined, completed: undefined, revenue: undefined, adverseAction: undefined, legalHold: undefined, propertyPhotos: undefined, partnerFunding: undefined, agents: undefined, ...quietPayments(deal, false) };
+  return { ...deal, insurance: undefined, friendReferral: undefined, surveys: undefined, investorUpdates: undefined, workout: undefined, lastSale: undefined, geo: undefined, stormHold: undefined, transfers: undefined, drawCalls: undefined, releases: undefined, properties: deal.properties?.map(({ id, county, zip, propertyType, value, monthlyRent, taxesAnnual, insuranceAnnual, hoaMonthly, released }) => ({ id, address: "", city: "", zip: `${zip.slice(0, 3)}xx`, county, propertyType, value, monthlyRent, taxesAnnual, insuranceAnnual, hoaMonthly, released })), borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined, closure: undefined, defaults: undefined, extensions: undefined, paidOff: undefined, closing: undefined, wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, termSheets: undefined, pricingException: undefined, conditions: undefined, lienFile: undefined, completed: undefined, revenue: undefined, adverseAction: undefined, legalHold: undefined, propertyPhotos: undefined, partnerFunding: undefined, agents: undefined, ...quietPayments(deal, false) };
 }
 
 /** The conditions that are the borrower's to meet (Spec B17), without who on the team handled them or why one was waived. */
@@ -335,7 +337,30 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       const deal = dealOf(action.dealId);
       if (!deal) return no(GONE);
       if (!staff || !allowed("issue_term_sheet")) return no(NOT_ALLOWED);
+      if (deal.properties?.length && (["purchasePrice", "arv", "monthlyRent", "taxesAnnual", "insuranceAnnual", "hoaMonthly"] as const).some((key) => key in action.changes && action.changes[key] !== deal.app[key])) return no("A portfolio loan's values, rents and costs come from its properties: change them on the property schedule.");
       return BEFORE_CLOSING.includes(deal.status) ? ok() : no("This loan's numbers are locked once it clears to close.");
+    }
+    case "saveProperties": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      if (!staff || !allowed("issue_term_sheet")) return no(NOT_ALLOWED);
+      if (!BEFORE_CLOSING.includes(deal.status)) return no("A loan's properties are set once it clears to close.");
+      if (deal.app.product !== "dscr") return no("Portfolio loans are rental (DSCR) loans.");
+      if (action.properties.some((property) => property.propertyType !== "sfr" && property.propertyType !== "2_4" && property.propertyType !== "condo" && property.propertyType !== "townhome")) return no("Each property is a 1-4 unit home, condo or townhome.");
+      const problem = scheduleProblem(action.properties);
+      return problem ? no(problem) : ok({ ...action, by: viewer.name });
+    }
+    case "releaseProperty": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      if (!staff || !allowed("service_loans")) return no(NOT_ALLOWED);
+      const today = serviceDay(book);
+      if (action.on > today) return no("The day the release price arrived can't be in the future.");
+      const quote = releaseQuote(deal, action.propertyId, action.on);
+      if ("problem" in quote) return no(quote.problem);
+      if (action.amount + 0.005 < quote.total) return no(`The release takes ${money(quote.total)}: ${money(quote.price)} to principal and ${money(quote.interest)} of interest to the day.`);
+      const blocked = ofacBlocker(deal, today);
+      return blocked ? no(`${blocked}.`) : ok({ ...action, by: viewer.name });
     }
     case "addDocRequest":
       if (!dealOf(action.dealId)) return no(GONE);

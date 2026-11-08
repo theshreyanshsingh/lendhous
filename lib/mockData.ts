@@ -133,6 +133,12 @@ export interface Deal {
   lastSale?: { price: number; on: string; by: string; at: string };
   /** What FEMA's flood map says at the property's point (lib/flood-zones.ts). Not mapped isn't the same as no risk. */
   floodMap?: FloodMap;
+  /**
+   * A rental portfolio loan's properties (lib/portfolio.ts): the loan is sized on their values, rents and costs added
+   * up, and the first one's address stands for the loan on lists. Releases are properties let go as the loan is paid down.
+   */
+  properties?: PortfolioProperty[];
+  releases?: PropertyRelease[];
   /** Partners' shares moved partway through the loan, and partners' shares of draws as they're released (lib/capital-moves.ts). */
   transfers?: ShareTransfer[];
   drawCalls?: DrawCall[];
@@ -271,6 +277,15 @@ export interface LienFile {
   /** Where the one policy lived before every loan had its own insurance file. Read by policiesOf, moved out on the next save or nightly check. */
   insurance?: { kind: "builders_risk" | "hazard"; carrier: string; policy: string; expiresOn: string; by: string; at: string; remindedOn?: string; lapseNoticeOn?: string };
 }
+/** One property on a rental portfolio loan. */
+export interface PortfolioProperty {
+  id: string; address: string; city: string; zip: string; county: string; propertyType: "sfr" | "2_4" | "condo" | "townhome";
+  value: number; monthlyRent: number; taxesAnnual: number; insuranceAnnual: number; hoaMonthly?: number;
+  geo?: { lat: number; lng: number; at: string }; floodMap?: FloodMap;
+  released?: { on: string; releaseId: string };
+}
+/** A property let go from a portfolio loan: the release price paid to principal, interest on it to the day, and the new payment. */
+export interface PropertyRelease { id: string; propertyId: string; on: string; principal: number; interest: number; afterPayments: number; newPayment: number; reference: string; by: string; at: string }
 export interface FloodMap { mapped: boolean; zone: string; sfha: boolean; subtype?: string; at: string }
 export type PolicyKind = "hazard" | "windstorm" | "flood" | "builders_risk";
 /** One policy on the property, the newest of its kind. */

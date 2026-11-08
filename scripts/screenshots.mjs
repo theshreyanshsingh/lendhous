@@ -1477,6 +1477,30 @@ ok("and sees nothing rolled over is waiting yet", (await page.getByTestId("rollo
 await shot(page, "26-partner-money.png");
 await actAs(SEATS.staff);
 
+// 10c. Portfolio loans: a rental loan becomes a portfolio of two, and the funded one in Coral Springs releases a property.
+await page.goto(BASE + "/admin/deals/d4");
+await page.getByTestId("edit-properties").click();
+ok("a rental loan becomes a portfolio starting from its own property", (await page.getByTestId("property-address-0").inputValue()) !== "" && (await page.getByTestId("save-properties").isDisabled()));
+await page.getByTestId("property-address-1").fill("88 Sample Grove Rd");
+await page.getByTestId("property-city-1").fill("Hollywood");
+await page.getByTestId("property-zip-1").fill("33021");
+await page.getByTestId("property-value-1").fill("280000");
+await page.getByTestId("property-monthlyRent-1").fill("2400");
+await page.getByTestId("property-taxesAnnual-1").fill("4800");
+await page.getByTestId("property-insuranceAnnual-1").fill("3600");
+await page.getByTestId("save-properties").click();
+ok("and is sized on both properties, each with its share of the loan and release price", (await page.getByTestId("property-row").count()) === 2 && (await seen(page.getByTestId("portfolio-totals"))) && (await page.getByTestId("property-release-price").first().innerText()).startsWith("$"));
+await shot(page, "27-admin-portfolio.png");
+await page.goto(BASE + "/admin/deals/d10?tab=Servicing");
+await page.getByTestId("release-which").selectOption({ label: "12 Sample Lake Dr, Parkland" });
+ok("releasing a property quotes its price, interest to the day and the new payment", (await seen(page.getByTestId("release-quote"))) && (await page.getByTestId("release-why").innerText()).includes("loan to value"));
+await page.getByTestId("release-reference").fill("TITLE-REL (FAKE)");
+await shot(page, "27b-admin-release.png");
+await page.getByTestId("record-release").click();
+ok("and recording it pays the loan down with a lower payment", (await seen(page.getByTestId("release-row"))) && (await page.getByTestId("release-row").innerText()).includes("12 Sample Lake Dr released"));
+await page.getByTestId("tab-Numbers & Ratios").click();
+ok("the schedule shows the property released", (await page.getByTestId("property-row").filter({ hasText: "12 Sample Lake Dr" }).innerText()).includes("Released"));
+
 // 11. Real records: the audit log, notifications, and a forgotten password
 await page.goto(BASE + "/admin/audit");
 ok("the owner can read the audit log", (await page.getByTestId("audit-row").count()) > 0);

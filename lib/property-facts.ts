@@ -35,6 +35,17 @@ export async function mapProperty(dealId: string, options: { again?: boolean; ac
     if ("error" in result) return { placed: false, flood: null, error: result.error };
     book = result.after; deal = book.deals.find((item) => item.id === dealId)!; placed = true;
   }
+  // A portfolio loan's other properties each get their own place and flood zone.
+  for (const property of (deal.properties ?? []).slice(1).filter((item) => !item.released && (options.again || !item.geo || !item.floodMap))) {
+    const point = property.geo ?? (await geocode(property, fetcher));
+    if (!point) continue;
+    if (!property.geo) { const result = await runAction(actor, { t: "placeProperty", dealId, propertyId: property.id, lat: point.lat, lng: point.lng }, { trusted: true }); if (!("error" in result)) book = result.after; }
+    const answer = await floodAt(point, fetcher);
+    if ("error" in answer) continue;
+    const result = await runAction(actor, { t: "recordFloodMap", dealId, propertyId: property.id, map: answer.mapped ? { mapped: true, zone: answer.zone, sfha: answer.sfha, ...(answer.subtype ? { subtype: answer.subtype } : {}), at: new Date().toISOString() } : { mapped: false, zone: "", sfha: false, at: new Date().toISOString() } }, { trusted: true });
+    if (!("error" in result)) { await sendAlerts(result.before, result.after, result.action); book = result.after; }
+  }
+  deal = book.deals.find((item) => item.id === dealId)!;
   if (deal.floodMap && !options.again) return { placed, flood: null, after: book };
   const flood = await floodAt(deal.geo!, fetcher);
   if ("error" in flood) return { placed, flood, after: book, error: flood.error };
@@ -48,7 +59,7 @@ export async function mapProperty(dealId: string, options: { again?: boolean; ac
 /** The nightly pass: open and funded loans not yet on the map or without a flood zone, a few a night so neither service is hammered. */
 export async function mapMissing(limit = 25, fetcher: typeof fetch = fetch) {
   const { book } = await readBook();
-  const open = book.deals.filter((deal) => (PRE_FUNDING.includes(deal.status) || SERVICED.includes(deal.status)) && (!deal.geo || !deal.floodMap)).slice(0, limit);
+  const open = book.deals.filter((deal) => (PRE_FUNDING.includes(deal.status) || SERVICED.includes(deal.status)) && (!deal.geo || !deal.floodMap || (deal.properties ?? []).some((property) => !property.released && (!property.geo || !property.floodMap)))).slice(0, limit);
   let placed = 0; let mapped = 0; let failed = 0;
   for (const deal of open) {
     const result = await mapProperty(deal.id, { fetcher });

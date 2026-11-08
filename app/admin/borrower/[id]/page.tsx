@@ -31,6 +31,7 @@ import { ExitPlanCard } from "@/components/loan/ExitPlanCard";
 import { BorrowerDocuments } from "@/components/loan/BorrowerDocuments";
 import { YourAgents } from "@/components/loan/YourAgents";
 import { InsuranceCard } from "@/components/loan/InsuranceCard";
+import { PropertySchedule } from "@/components/loan/PropertySchedule";
 import { interestBasis, PLAIN_RATIO } from "@/lib/status-words";
 import { Badge, Section, Stat, usd, pct, productLabel, statusLabel } from "@/components/ui";
 import { shortDay } from "@/lib/format";
@@ -95,6 +96,7 @@ export default function BorrowerLoan() {
           {funded && <BudgetControls deal={d} side="client" />}
           {funded && <ExitPlanCard deal={d} side="client" />}
           {(funded || d.status === "paid_off") && <LoanMoney deal={d} />}
+          {d.properties?.length ? <PropertySchedule deal={d} side="borrower" /> : null}
           {funded && <InsuranceCard deal={d} />}
           {funded && <div id="payments"><PaymentsPanel deal={d} /></div>}
           {funded && <div id="extensions"><Extensions deal={d} side="borrower" /></div>}

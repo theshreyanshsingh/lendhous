@@ -1548,3 +1548,38 @@ describe("partners' money between loans", () => {
     vi.restoreAllMocks();
   });
 });
+
+describe("portfolio loans", () => {
+  it("keep their properties, and a release pays principal down and lowers the payment", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const { demoBook, serviceDay } = await import("@/lib/book");
+    const { readBook, runAction } = await import("@/lib/book-store");
+    const { releaseQuote } = await import("@/lib/portfolio");
+    const { balanceOf } = await import("@/lib/servicing");
+    const demo = demoBook();
+    const d10 = demo.deals.find((deal) => deal.id === "d10")!;
+    const d4 = demo.deals.find((deal) => deal.id === "d4")!;
+    await prisma.bookRecord.createMany({ data: [
+      // Screened today, since nothing goes out or comes in on a screening more than a few days old.
+      { id: "deals:pf-held", kind: "deals", data: JSON.parse(JSON.stringify({ ...d10, id: "pf-held", loanNumber: "LH-7301", screenings: d10.screenings?.map((item) => ({ ...item, at: new Date().toISOString(), checkedAt: new Date().toISOString() })) })) },
+      { id: "deals:pf-new", kind: "deals", data: JSON.parse(JSON.stringify({ ...d4, id: "pf-new", loanNumber: "LH-7302" })) },
+    ] });
+    const staff = { id: "staff-pf", name: "Polly Portfolio", roleCodes: ["ADMIN_OWNER" as const] };
+    const home = (n: number) => ({ id: `pf-${n}`, address: `${n} Grove St`, city: "Tampa", zip: "33602", county: "Hillsborough", propertyType: "sfr" as const, value: 210_000, monthlyRent: 2_000, taxesAnnual: 3_500, insuranceAnnual: 2_900 });
+    const saved = await runAction(staff, { t: "saveProperties", dealId: "pf-new", properties: [home(1), home(2), home(3)], by: "" });
+    if ("error" in saved) throw new Error(saved.error);
+    let book = (await readBook()).book;
+    expect(book.deals.find((deal) => deal.id === "pf-new")).toMatchObject({ address: "1 Grove St", app: { purchasePrice: 630_000, monthlyRent: 6_000 } });
+    const held = book.deals.find((deal) => deal.id === "pf-held")!;
+    const today = serviceDay(book);
+    const quote = releaseQuote(held, held.properties![1].id, today);
+    if ("problem" in quote) throw new Error(quote.problem);
+    const released = await runAction(staff, { t: "releaseProperty", dealId: "pf-held", propertyId: held.properties![1].id, on: today, amount: quote.total, reference: "PR-1", by: "" });
+    if ("error" in released) throw new Error(released.error);
+    book = (await readBook()).book;
+    const after = book.deals.find((deal) => deal.id === "pf-held")!;
+    expect(after.releases?.[0]).toMatchObject({ principal: quote.price, reference: "PR-1" });
+    expect(balanceOf(after)).toBeCloseTo(balanceOf(held) - quote.price, 2);
+    vi.restoreAllMocks();
+  });
+});

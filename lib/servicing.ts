@@ -87,7 +87,10 @@ export function ledgerOf(deal: Deal, asOf: string): Ledger {
   const e = evaluate(deal.app);
   const rules = servicingTermsOf(deal);
   const maturity = maturityOf(deal);
-  const current = fundedBalances(e, deal.app, deal.disbursedDraws).nextPayment;
+  // A portfolio loan's release changes what each payment due after it is; one due before keeps what it was.
+  const original = fundedBalances(e, deal.app, deal.disbursedDraws).nextPayment;
+  const releases = [...(deal.releases ?? [])].sort((a, b) => a.on.localeCompare(b.on) || a.at.localeCompare(b.at));
+  const paymentFor = (due: string) => releases.reduce((payment, release) => (release.on < due ? release.newPayment : payment), original);
   const boarded = boardedFrom(deal);
   const billed = new Map((deal.bills ?? []).map((bill) => [bill.due, bill.amount]));
   const waived = new Set((deal.waivedFees ?? []).map((item) => item.due));
@@ -98,7 +101,7 @@ export function ledgerOf(deal: Deal, asOf: string): Ledger {
   type Working = Omit<BillRow, "status"> & { boarded: boolean };
   const rows: Working[] = [];
   for (let due = firstDueDate(deal.closingDate); due <= maturity; due = addMonths(due, 1)) {
-    rows.push({ due, amount: billed.get(due) ?? current, lateOn: addDays(billedOn(due), rules.graceDays + 1), late: false, fee: 0, feePaid: 0, waived: waived.has(due), boarded: due < boarded });
+    rows.push({ due, amount: billed.get(due) ?? paymentFor(due), lateOn: addDays(billedOn(due), rules.graceDays + 1), late: false, fee: 0, feePaid: 0, waived: waived.has(due), boarded: due < boarded });
   }
   const payments = (deal.payments ?? []).filter((payment) => !payment.reversed && payment.receivedOn <= asOf).sort((a, b) => a.receivedOn.localeCompare(b.receivedOn) || a.at.localeCompare(b.at));
 
@@ -193,10 +196,35 @@ export function settle(deal: Deal, asOf: string): Deal {
 
 export const paymentsMade = (deal: Deal) => ledger(deal).paymentsMade;
 
-/** The principal owed today: what has been lent out, less what a rental loan's payments have paid down. */
+/**
+ * A rental loan's principal after a number of monthly payments. A portfolio loan's release (lib/portfolio.ts) pays principal
+ * down between payments, and the payment after it is worked out again on what's left over the months left.
+ */
+export function rentalBalance(deal: Pick<Deal, "app" | "releases">, payments: number) {
+  const e = evaluate(deal.app);
+  let balance = e.noteAmount; let payment = e.monthlyPayment; let done = 0;
+  for (const release of [...(deal.releases ?? [])].sort((a, b) => a.afterPayments - b.afterPayments || a.on.localeCompare(b.on))) {
+    if (release.afterPayments > payments) break;
+    balance = Math.max(0, amortizedBalance(balance, e.rate, payment, release.afterPayments - done) - release.principal);
+    done = release.afterPayments; payment = release.newPayment;
+  }
+  return amortizedBalance(balance, e.rate, payment, payments - done);
+}
+
+/** A rental loan's monthly payment on what's owed over the months left: after a release, or as quoted. */
+export function recastPayment(deal: Pick<Deal, "app">, balance: number, paymentsMade: number) {
+  const e = evaluate(deal.app);
+  const dscr = pricingFor(deal.app.pricingVersion).dscr;
+  const months = Math.max(1, dscr.amortizationMonths - paymentsMade);
+  const r = e.rate / 100 / 12;
+  const payment = dscr.qualifyOn === "io" || r === 0 ? (dscr.qualifyOn === "io" ? (balance * e.rate) / 100 / 12 : balance / months) : (balance * r) / (1 - Math.pow(1 + r, -months));
+  return round2(payment);
+}
+
+/** The principal owed today: what has been lent out, less what a rental loan's payments and releases have paid down. */
 export function balanceOf(deal: Deal) {
   const e = evaluate(deal.app);
-  const amount = deal.app.product === "dscr" ? amortizedBalance(e.noteAmount, e.rate, e.monthlyPayment, paymentsMade(deal)) : fundedBalances(e, deal.app, deal.disbursedDraws).disbursed;
+  const amount = deal.app.product === "dscr" ? rentalBalance(deal, paymentsMade(deal)) : fundedBalances(e, deal.app, deal.disbursedDraws).disbursed;
   return Math.round(amount * 100) / 100;
 }
 

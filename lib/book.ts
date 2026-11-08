@@ -21,13 +21,14 @@ import { insuranceChecks, insuranceFileOf, policiesOf, policyProblem, policyWord
 import { addProblem, changeProblem, DEFAULT_LIBRARY, fromTemplate, libraryOf, missingStandard, templateProblem, templatesFor, type ConditionInput } from "./conditions";
 import { chosenTerms, draftSheet, exceptionDecisionProblem, exceptionReasons, exceptionRequestProblem, issueProblem as sheetProblem, latestSheet, matrixOf, pricedApp, respondProblem, startingTerms, termSheetChecks, type Prepay } from "./term-sheets";
 import { optionAt } from "./buy-down";
-import { DEMO_TEAM, seedDeals, seedBids, seedDraws, seedLoanSales, seedLoanOffers, seedMessages, seedPhotoRequests, DEMO_SPONSORS, capitalSources, partners as seedPartners, brokers as seedBrokers, loanBuyers, BORROWER_ID, DEMO_PARTNER_ID, DEMO_BUYER_ID, DEMO_BROKER_ID, type Broker, type ClosingAgent, type Closure, type Deal, type DefaultKind, type Bid, type DrawRequest, type DrawRequestLine, type DrawPhoto, type DrawCall, type FloodMap, type RolloverChoice, type ShareTransfer, type LoanExtension, type LoanMessage, type Screening, type WireInstruction, type Partner, type PayoffChannel, type PayoffLetter, type PayoffRequest, type NoticeToOwner, type LienWaiver, type ConditionTemplate, type LoanCondition, type DocStatus, type CapitalSource, type LoanBuyer, type LoanOffer, type LoanSale, type LoanPayment, type LoanStatus, type TeamMember, type PaymentMethod, type PhotoRequest, type RequestPhoto, type ScopeLine, type Sponsor, type StageEntry, type PolicyKind, type InsurancePolicy, type InsuranceRenewal, type ChangeOrder } from "./mockData";
+import { DEMO_TEAM, seedDeals, seedBids, seedDraws, seedLoanSales, seedLoanOffers, seedMessages, seedPhotoRequests, DEMO_SPONSORS, capitalSources, partners as seedPartners, brokers as seedBrokers, loanBuyers, BORROWER_ID, DEMO_PARTNER_ID, DEMO_BUYER_ID, DEMO_BROKER_ID, type Broker, type ClosingAgent, type Closure, type Deal, type DefaultKind, type Bid, type DrawRequest, type DrawRequestLine, type DrawPhoto, type DrawCall, type FloodMap, type PortfolioProperty, type PropertyRelease, type RolloverChoice, type ShareTransfer, type LoanExtension, type LoanMessage, type Screening, type WireInstruction, type Partner, type PayoffChannel, type PayoffLetter, type PayoffRequest, type NoticeToOwner, type LienWaiver, type ConditionTemplate, type LoanCondition, type DocStatus, type CapitalSource, type LoanBuyer, type LoanOffer, type LoanSale, type LoanPayment, type LoanStatus, type TeamMember, type PaymentMethod, type PhotoRequest, type RequestPhoto, type ScopeLine, type Sponsor, type StageEntry, type PolicyKind, type InsurancePolicy, type InsuranceRenewal, type ChangeOrder } from "./mockData";
 import { closingShare, creditOf, currentBids, drawCallsFor, moveShare, payoffProceeds, ROLLOVER, transferProblem, transferQuote } from "./capital-moves";
+import { portfolioApp, releaseQuote, scheduleProblem } from "./portfolio";
 import { applyFloodMap, withFloodFollowUps } from "./flood-zones";
 import { afterCheck, freshInspectionNeeded, type StormCheck, type StormWatch } from "./storms";
 import { BASE_VERSION, currentPricing, type PricingPayload } from "./pricing-versions";
 import { TEAM_ROLE_LABEL, type TeamRole } from "./loan-team";
-import { addDays, DEMO_SERVICING_DAY, firstDueDate, ledger, maturityOf, payoffFor, SERVICED, servicingDate, settle } from "./servicing";
+import { addDays, balanceOf, DEMO_SERVICING_DAY, firstDueDate, ledger, maturityOf, paymentsMade, payoffFor, recastPayment, SERVICED, servicingDate, settle } from "./servicing";
 
 export interface Book { partnerId: string; buyerId: string; brokerId: string; borrowerId: string; loanPrefix: string; deals: Deal[]; bids: Bid[]; partners: Partner[]; buyers: LoanBuyer[]; brokers: Broker[]; sales: LoanSale[]; offers: LoanOffer[]; draws: DrawRequest[]; photoRequests: PhotoRequest[]; payoffs: PayoffRequest[]; messages: LoanMessage[]; sources: CapitalSource[]; conditionLibrary: ConditionTemplate[]; /** Storms whose forecast cone has covered funded loans (lib/storms.ts). Staff only. */ storms: StormWatch[]; audit: { at: string; text: string }[]; sample?: boolean; /** A borrower's own referrals, summed up for them: friends' loans are never in their book (lib/referrals.ts). */ myReferrals?: MyReferral[]; /** The pricing its loans use, as sent to a browser. Not part of the records. */ pricing?: PricingPayload }
 
@@ -81,7 +82,10 @@ export type BookAction =
   /** An update on a funded loan for its investors, and a workout declared or lifted (lib/investor-updates.ts). */
   /** The property's last recorded sale, for the price-jump check (lib/risk.ts). */
   /** The property's place on the map, found by the server (lib/geocode.ts). */
-  | { t: "placeProperty"; dealId: string; lat: number; lng: number }
+  | { t: "placeProperty"; dealId: string; lat: number; lng: number; propertyId?: string }
+  /** A rental portfolio loan's properties (lib/portfolio.ts), and letting one go by paying its release price. */
+  | { t: "saveProperties"; dealId: string; properties: Omit<PortfolioProperty, "geo" | "floodMap" | "released">[]; by: string }
+  | { t: "releaseProperty"; dealId: string; propertyId: string; on: string; amount: number; reference: string; by: string }
   /** The capital side's moves (lib/capital-moves.ts): payoff money rolled or sent, a share moved mid-loan, draws funded as released. */
   | { t: "setRollover"; partnerId: string; choice: RolloverChoice; by: string }
   | { t: "sendProceeds"; partnerId: string; proceedsId: string; on: string; reference: string; by: string }
@@ -91,7 +95,7 @@ export type BookAction =
   | { t: "drawCallSent"; dealId: string; callId: string; on: string; reference: string; by: string }
   | { t: "drawCallReceived"; dealId: string; callId: string; on: string; by: string }
   /** FEMA's flood map at the property's point. Only the server asks FEMA (lib/property-facts.ts). */
-  | { t: "recordFloodMap"; dealId: string; map: FloodMap }
+  | { t: "recordFloodMap"; dealId: string; map: FloodMap; propertyId?: string }
   /** What NHC's latest forecast cones cover. Only the server reads NHC's files, or a demo seat its sample storm. */
   | { t: "recordStormCheck"; at: string; storms: StormCheck[] }
   | { t: "saveLastSale"; dealId: string; price: number; on: string; by: string }
@@ -346,6 +350,11 @@ export function demoBook(): Book {
       if (separate) policies.push({ kind: "windstorm", carrier: "Coastal Wind Pool (FAKE)", policy: `CW-${d.loanNumber.slice(-4)}`, expiresOn: "2027-05-31", mortgagee: true, by: "Pat Processor (FAKE)", at }, { kind: "flood", carrier: "Sample Flood (FAKE)", policy: `SF-${d.loanNumber.slice(-4)}`, expiresOn: "2027-03-01", coverage: 250_000, mortgagee: true, by: "Pat Processor (FAKE)", at });
       deals[i] = { ...deals[i], insurance: { policies, flood: { sfha: separate, zone: separate ? "AE" : "X", by: "Pat Processor (FAKE)", at } } };
     }
+    // The Coral Springs rental loan is a portfolio of two: its values, rents and costs add up to the loan's own numbers.
+    if (d.id === "d10") deals[i] = { ...deals[i], properties: [
+      { id: "prop-d10-1", address: d.address, city: d.city, zip: d.zip, county: "Broward", propertyType: "sfr", value: 240_000, monthlyRent: 2_200, taxesAnnual: 4_100, insuranceAnnual: 3_000, geo: { lat: 26.2712, lng: -80.2706, at: "2026-10-20T10:00:00Z" }, floodMap: { mapped: true, zone: "AE", sfha: true, at: "2026-10-20T10:00:00Z" } },
+      { id: "prop-d10-2", address: "12 Sample Lake Dr", city: "Parkland", zip: "33067", county: "Broward", propertyType: "sfr", value: 180_000, monthlyRent: 1_700, taxesAnnual: 3_100, insuranceAnnual: 2_400, geo: { lat: 26.31, lng: -80.237, at: "2026-10-20T10:00:00Z" }, floodMap: { mapped: true, zone: "X", sfha: false, at: "2026-10-20T10:00:00Z" } },
+    ] };
     // The newest application bought from a seller who paid far less five months ago: the price-jump check flags it.
     if (d.id === "d16") deals[i] = { ...deals[i], lastSale: { price: Math.round(d.app.purchasePrice / 1.45 / 1000) * 1000, on: "2026-06-02", by: "Pat Processor (FAKE)", at: "2026-10-31T15:00:00Z" } };
     // The loans the demo partner and buyer hold have an update from the team.
@@ -576,7 +585,32 @@ function apply(s: Book, a: BookAction): Book {
       const referrerName = s.deals.find((item) => item.borrowerId === a.referrerId)?.borrowerName ?? "A borrower";
       return { ...s, deals: upd(a.dealId, (d) => ({ ...d, friendReferral: { referrerId: a.referrerId, referrerName, on: a.on, bonus: round2(Math.max(0, a.bonus)) } })), audit: log(`${deal.loanNumber}: referred by ${referrerName}, a LendHous borrower`) };
     }
-    case "placeProperty": return { ...s, deals: upd(a.dealId, (d) => ({ ...d, geo: { lat: a.lat, lng: a.lng, at: now() } })) };
+    case "placeProperty": {
+      const geo = { lat: a.lat, lng: a.lng, at: now() };
+      // On a portfolio loan each property has its own place; the first stands for the loan.
+      return { ...s, deals: upd(a.dealId, (d) => (a.propertyId ? { ...d, properties: d.properties?.map((p) => (p.id === a.propertyId ? { ...p, geo } : p)), ...(d.properties?.[0]?.id === a.propertyId && !d.geo ? { geo } : {}) } : { ...d, geo })) };
+    }
+    case "saveProperties": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (scheduleProblem(a.properties)) return s;
+      if (!a.properties.length) return { ...s, deals: upd(a.dealId, (d) => ({ ...d, properties: undefined })), audit: log(`${deal.loanNumber}: back to a single property`) };
+      // A property kept on the schedule keeps where it is and its flood zone.
+      const properties: PortfolioProperty[] = a.properties.map((p) => { const old = deal.properties?.find((x) => x.id === p.id); return { ...p, address: p.address.trim(), city: p.city.trim(), zip: p.zip.trim(), ...(old?.geo ? { geo: old.geo } : {}), ...(old?.floodMap ? { floodMap: old.floodMap } : {}) }; });
+      const first = properties[0];
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, properties, app: portfolioApp(d.app, properties), address: first.address, city: first.city, zip: first.zip, ...(deal.properties?.[0]?.id === first.id ? {} : { geo: first.geo, floodMap: first.floodMap }) })), audit: log(`${deal.loanNumber}: portfolio of ${properties.length} properties saved`) };
+    }
+    case "releaseProperty": {
+      const today = serviceDay(s);
+      // Brought up to today first, so payments already due keep what they owed before the release.
+      const deal = settle(s.deals.find((d) => d.id === a.dealId)!, a.on > today ? a.on : today);
+      const quote = releaseQuote(deal, a.propertyId, a.on);
+      if ("problem" in quote || a.amount + 0.005 < quote.total) return s;
+      // Anything paid over the figure goes to principal too.
+      const principal = round2(quote.price + (a.amount - quote.total));
+      const made = paymentsMade(deal);
+      const release: PropertyRelease = { id: `rel${uid()}`, propertyId: a.propertyId, on: a.on, principal, interest: quote.interest, afterPayments: made, newPayment: recastPayment(deal, Math.max(0, balanceOf(deal) - principal), made), reference: a.reference.trim(), by: a.by, at: now() };
+      return { ...s, deals: upd(deal.id, () => ({ ...deal, releases: [...(deal.releases ?? []), release], properties: deal.properties!.map((p) => (p.id === a.propertyId ? { ...p, released: { on: a.on, releaseId: release.id } } : p)) })), audit: log(`${deal.loanNumber}: ${quote.property.address} released for ${money(a.amount)}`) };
+    }
     case "setRollover": return { ...s, partners: s.partners.map((p) => (p.id === a.partnerId ? { ...p, rollover: { choice: a.choice, by: a.by, at: now() } } : p)), audit: log(`${s.partners.find((p) => p.id === a.partnerId)?.name ?? a.partnerId}: payoff money ${ROLLOVER[a.choice].label.toLowerCase()}`) };
     case "sendProceeds": {
       const partner = s.partners.find((p) => p.id === a.partnerId)!;
@@ -604,6 +638,8 @@ function apply(s: Book, a: BookAction): Book {
     }
     case "recordFloodMap": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
+      // A portfolio property's zone is its own; a special flood hazard area anywhere on the loan needs flood insurance.
+      if (a.propertyId) return { ...s, deals: upd(a.dealId, (d) => withFloodFollowUps({ ...d, properties: d.properties?.map((p) => (p.id === a.propertyId ? { ...p, floodMap: a.map } : p)) }, a.map.mapped && a.map.sfha, serviceDay(s), a.map.at)), audit: log(`${deal.loanNumber}: FEMA flood map for ${deal.properties?.find((p) => p.id === a.propertyId)?.address ?? "a property"} ${a.map.mapped ? `shows zone ${a.map.zone}` : "has no flood zone (not mapped)"}`) };
       return { ...s, deals: upd(a.dealId, (d) => applyFloodMap(d, a.map, serviceDay(s))), audit: log(`${deal.loanNumber}: FEMA flood map ${a.map.mapped ? `shows zone ${a.map.zone}${a.map.sfha ? ", a special flood hazard area" : ""}` : "has no flood zone here (not mapped)"}`) };
     }
     case "recordStormCheck": {
