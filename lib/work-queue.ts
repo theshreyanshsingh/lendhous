@@ -14,10 +14,12 @@ import { bonusOf } from "./referrals";
 import { budgetBalance, openChanges } from "./budget";
 import { brokerStanding, PRIORITY_TIERS } from "./broker-program";
 import { openDrawCalls, proceedsToSend, unsettledTransfers } from "./capital-moves";
+import { claimDueOn, latestPromise, nextAction, openBankruptcy, promiseState, stageOf } from "./collections";
+import { openModification } from "./modifications";
 
 const SERVICED_STATUSES = new Set(SERVICED);
 import { clockOf, SLA_TARGETS, type Clock, type Targets } from "./sla";
-import { SERVICED, servicingDate } from "./servicing";
+import { openDefault, SERVICED, servicingDate } from "./servicing";
 
 export type QueueItem = {
   key: string; label: string; href: string;
@@ -68,12 +70,29 @@ export function workQueue(book: Book, viewer: { id: string; email?: string }, no
     if (screening === "review" || screening === "match") add({ key: `ofac:${deal.id}`, label: "Review a possible sanctions match", href: tab(deal, "Score & Flags"), deal, priority: 2 });
     if (activeWire(deal) && !wireVerified(deal) && PRE_FUNDING.includes(deal.status)) add({ key: `wire:${deal.id}`, label: "Verify the wire instructions by phone", href: tab(deal, "Closing"), deal, priority: 3 });
     if (deal.status === "closing" && (deal.fundingApprovers?.length ?? 0) < 2) add({ key: `funding:${deal.id}`, label: "Approve the funding", href: tab(deal), deal, priority: 4 });
-    if (deal.paymentsLate) add({ key: `late:${deal.id}`, label: "Payment past due", href: tab(deal, "Servicing"), deal, priority: 5 });
+    // Collections (lib/collections.ts). While a bankruptcy's automatic stay is on, the only thing to do is the claim.
+    const bankruptcy = openBankruptcy(deal);
+    if (bankruptcy && !bankruptcy.claimFiledOn) add({ key: `claim:${deal.id}`, label: "File the proof of claim in the bankruptcy", href: tab(deal, "Servicing"), deal, due: claimDueOn(bankruptcy), priority: 2 });
+    if (deal.paymentsLate && !bankruptcy) add({ key: `late:${deal.id}`, label: "Payment past due", href: tab(deal, "Servicing"), deal, priority: 5 });
+    const stage = stageOf(deal, today);
+    const promise = latestPromise(deal);
+    if (stage && !bankruptcy && promise && promiseState(deal, promise, today).state === "broken") add({ key: `promise:${deal.id}`, label: "Promise to pay broken: call again", href: tab(deal, "Servicing"), deal, since: promise.dueBy, priority: 5 });
+    const notices = deal.notices ?? [];
+    if (stage && notices.some((notice) => notice.returned && !notices.some((later) => later.kind === notice.kind && later.sentOn > notice.sentOn))) add({ key: `returned:${deal.id}`, label: "A notice came back: send it another way", href: tab(deal, "Servicing"), deal, priority: 5 });
+    if (stage === "default") {
+      const next = nextAction(deal, today);
+      if (/^(Send the notice|Confirm the notice|Cure period over)/.test(next)) add({ key: `default-step:${deal.id}`, label: next, href: tab(deal, "Servicing"), deal, since: openDefault(deal)?.effectiveOn, priority: 6 });
+    }
+    if (stage === "foreclosure" && deal.foreclosure?.judgment && !deal.foreclosure.sale) add({ key: `sale:${deal.id}`, label: "Foreclosure sale: record who won", href: tab(deal, "Servicing"), deal, due: deal.foreclosure.judgment.saleOn, priority: 6 });
+    else if (stage === "foreclosure" && deal.foreclosure?.sale) add({ key: `title:${deal.id}`, label: deal.foreclosure.sale.winner === "third_party" ? "Record the sale money from the clerk" : "Record the certificate of title", href: tab(deal, "Servicing"), deal, since: deal.foreclosure.sale.on, priority: 8 });
+    if (stage === "reo" && !deal.reo?.listed) add({ key: `reo:${deal.id}`, label: "List the bank-owned property for sale", href: tab(deal, "Servicing"), deal, since: deal.reo?.since, priority: 9 });
+    const modification = openModification(deal);
+    if (modification) add({ key: `modification:${deal.id}`, label: modification.status === "proposed" ? "Decide the loan modification" : "Get the loan modification signed", href: tab(deal, "Servicing"), deal, since: modification.proposedAt, priority: 7 });
     if (insuranceLapsed(deal, today)) add({ key: `insurance:${deal.id}`, label: "Insurance lapsed: get the renewal", href: tab(deal, "Servicing"), deal, priority: 5 });
     const renewals = openRenewals(deal);
     if (renewals.length) add({ key: `renewal:${deal.id}`, label: `Check ${renewals.length === 1 ? "an insurance renewal" : `${renewals.length} insurance renewals`}`, href: tab(deal, "Servicing"), deal, since: oldest(renewals.map((item) => item.at)), priority: 12 });
-    if (deal.status === "matured") add({ key: `matured:${deal.id}`, label: "Past maturity", href: tab(deal, "Servicing"), deal, priority: 6 });
-    else if (needsExitAnswer(deal)) add({ key: `exit:${deal.id}`, label: "Call about the exit plan: no answer yet", href: tab(deal, "Servicing"), deal, priority: 6 });
+    if (deal.status === "matured" && !bankruptcy) add({ key: `matured:${deal.id}`, label: "Past maturity", href: tab(deal, "Servicing"), deal, priority: 6 });
+    else if (!bankruptcy && needsExitAnswer(deal)) add({ key: `exit:${deal.id}`, label: "Call about the exit plan: no answer yet", href: tab(deal, "Servicing"), deal, priority: 6 });
     if (openExtension(deal)) add({ key: `extension:${deal.id}`, label: "Decide the extension request", href: tab(deal, "Servicing"), deal, priority: 7 });
     if (lienReleaseOpen(deal)) add({ key: `release:${deal.id}`, label: "Record the mortgage release", href: tab(deal, "Servicing"), deal, priority: 8 });
     if (deal.pricingException?.status === "pending") add({ key: `exception:${deal.id}`, label: "Decide the pricing exception", href: tab(deal, "Term sheet"), deal, since: deal.pricingException.requestedAt, priority: 9 });

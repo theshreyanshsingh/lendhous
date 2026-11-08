@@ -10,7 +10,7 @@ import { assignProblem } from "./loan-team";
 import { receivedProblem, sendToFor, sentProblem } from "./partner-funding";
 import { sponsorProblem, withSponsor } from "./credit";
 import { scopeError } from "./draws";
-import { cureError, defaultError, DECLINE_REASONS, executeError, extensionRequestError, isClosedApplication, payoffError, PRE_FUNDING, WITHDRAW_REASONS } from "./loan-exits";
+import { cureError, defaultError, DECLINE_REASONS, executeError, extensionRequestError, isClosedApplication, payoffError, payoffOn, PRE_FUNDING, WITHDRAW_REASONS } from "./loan-exits";
 import { goodThroughProblem, issueProblem } from "./payoffs";
 import { addProblem, changeProblem, libraryOf, templateProblem } from "./conditions";
 import { drawHolds, lienFileProblem, unreleasedHolds, waiverCheckProblem } from "./lien-law";
@@ -23,7 +23,10 @@ import { exitPlanProblem } from "./exit-plans";
 import { agentProblem, OWN_DOC_ID, ownDocProblem } from "./borrower-docs";
 import type { Broker, Deal, Doc, InvestorChecks, LoanPayment, LoanSale, PayoffRequest } from "./mockData";
 import { currentPricing, pricingPayload } from "./pricing-versions";
-import { ledger, servicingDate } from "./servicing";
+import { shortDay } from "./format";
+import { addDays, advancesOwed, ledger, ledgerOf, openDefault, SERVICED, servicingDate } from "./servicing";
+import { proposalProblem, signProblem } from "./modifications";
+import { COLLECTIONS, defaultNotice, inBankruptcy, openBankruptcy, stayProblem, stepProblem } from "./collections";
 import { viewFor, type MemberAccess, type Permission } from "./permissions";
 import { approveProblem, canSendDeals, feePaidProblem } from "./brokers";
 import { bonusPaidProblem, referralProblem, referralsBy } from "./referrals";
@@ -88,7 +91,7 @@ const quietPayoff = (payoff: PayoffRequest): PayoffRequest => ({
 
 /** Removes what identifies the borrower, for a partner or buyer who hasn't closed on the loan. */
 function blind(deal: Deal): Deal {
-  return { ...deal, insurance: undefined, friendReferral: undefined, surveys: undefined, investorUpdates: undefined, workout: undefined, lastSale: undefined, geo: undefined, stormHold: undefined, transfers: undefined, drawCalls: undefined, releases: undefined, properties: deal.properties?.map(({ id, county, zip, propertyType, value, monthlyRent, taxesAnnual, insuranceAnnual, hoaMonthly, released }) => ({ id, address: "", city: "", zip: `${zip.slice(0, 3)}xx`, county, propertyType, value, monthlyRent, taxesAnnual, insuranceAnnual, hoaMonthly, released })), borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined, closure: undefined, defaults: undefined, extensions: undefined, paidOff: undefined, closing: undefined, wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, termSheets: undefined, pricingException: undefined, conditions: undefined, lienFile: undefined, completed: undefined, revenue: undefined, adverseAction: undefined, legalHold: undefined, propertyPhotos: undefined, partnerFunding: undefined, agents: undefined, ...quietPayments(deal, false) };
+  return { ...deal, insurance: undefined, friendReferral: undefined, surveys: undefined, investorUpdates: undefined, workout: undefined, lastSale: undefined, geo: undefined, stormHold: undefined, transfers: undefined, drawCalls: undefined, releases: undefined, properties: deal.properties?.map(({ id, county, zip, propertyType, value, monthlyRent, taxesAnnual, insuranceAnnual, hoaMonthly, released }) => ({ id, address: "", city: "", zip: `${zip.slice(0, 3)}xx`, county, propertyType, value, monthlyRent, taxesAnnual, insuranceAnnual, hoaMonthly, released })), borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined, closure: undefined, defaults: undefined, extensions: undefined, modifications: undefined, contacts: undefined, promises: undefined, notices: undefined, bankruptcies: undefined, advances: undefined, advancesRepaid: undefined, foreclosure: undefined, reo: undefined, paidOff: undefined, closing: undefined, wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, termSheets: undefined, pricingException: undefined, conditions: undefined, lienFile: undefined, completed: undefined, revenue: undefined, adverseAction: undefined, legalHold: undefined, propertyPhotos: undefined, partnerFunding: undefined, agents: undefined, ...quietPayments(deal, false) };
 }
 
 /** The conditions that are the borrower's to meet (Spec B17), without who on the team handled them or why one was waived. */
@@ -110,6 +113,17 @@ const latestForClient = (deal: Deal): Partial<Deal> => {
   return { termSheets: sheet ? [{ ...sheet, issuedBy: "", matrix: { rate: [0, 0], points: [0, 0] }, exception: undefined }] : undefined, pricingException: undefined };
 };
 
+/**
+ * Collections as the borrower and broker see them: the terms a modification set and costs owed, without the team's calls,
+ * promises, notices, the bankruptcy and foreclosure files, a proposal still being decided, or who did what.
+ */
+const clientCollections = (deal: Deal): Partial<Deal> => ({
+  contacts: undefined, promises: undefined, notices: undefined, bankruptcies: undefined, foreclosure: undefined, reo: undefined,
+  modifications: deal.modifications?.filter((item) => item.status === "approved" || item.status === "executed").map((item) => ({ ...item, reason: "", proposedBy: "", approvers: [], executed: item.executed && { ...item.executed, by: "" } })),
+  advances: deal.advances?.filter((item) => !deal.reo || item.on < deal.reo.since).map((item) => ({ ...item, note: "", by: "" })),
+  advancesRepaid: deal.advancesRepaid?.map((item) => ({ ...item, by: "" })),
+});
+
 /** The borrower's agents without who wrote them down, which may be someone on the team. */
 const clientAgents = (deal: Deal): Partial<Deal> => ({
   agents: deal.agents && Object.fromEntries(Object.entries(deal.agents).map(([role, contact]) => [role, contact && { ...contact, by: "" }])),
@@ -122,11 +136,14 @@ const clientInsurance = (deal: Deal): Partial<Deal> => ({
 
 /** What only the team sees on a loan it shares with a client. Wire instructions never leave the team: a client who sees them is a client who can be sent fake ones. */
 function forClient(deal: Deal): Deal {
-  return { ...deal, ...latestForClient(deal), ...clientConditions(deal), ...clientRecords(deal), ...clientAgents(deal), ...clientInsurance(deal), partnerFunding: undefined, transfers: undefined, drawCalls: undefined, allocations: [], teaserSentTo: [], route: undefined, capitalStatus: "not_started", contractorIsGtAffiliate: undefined, source: "", fundingApprovers: undefined, creditReview: undefined, ...quietPayments(deal, true), ...quietExits(deal), wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, friendReferral: undefined, surveys: undefined, investorUpdates: undefined, workout: undefined, lastSale: undefined };
+  return { ...deal, ...latestForClient(deal), ...clientConditions(deal), ...clientRecords(deal), ...clientAgents(deal), ...clientInsurance(deal), ...clientCollections(deal), partnerFunding: undefined, transfers: undefined, drawCalls: undefined, allocations: [], teaserSentTo: [], route: undefined, capitalStatus: "not_started", contractorIsGtAffiliate: undefined, source: "", fundingApprovers: undefined, creditReview: undefined, ...quietPayments(deal, true), ...quietExits(deal), wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, friendReferral: undefined, surveys: undefined, investorUpdates: undefined, workout: undefined, lastSale: undefined };
 }
 
-/** What a partner or buyer that holds a loan also sees: the team's updates for its investors and any workout. */
-const forHolder = (deal: Deal): Deal => ({ ...forClient(deal), investorUpdates: deal.investorUpdates, workout: deal.workout });
+/**
+ * What a partner or buyer that holds a loan also sees: the team's updates for its investors, any workout, the foreclosure's
+ * steps and the bank-owned property's sale, which its statements follow. Not the team's calls, notices or notes.
+ */
+const forHolder = (deal: Deal): Deal => ({ ...forClient(deal), investorUpdates: deal.investorUpdates, workout: deal.workout, bankruptcies: deal.bankruptcies?.map((item) => ({ ...item, debtor: "", caseNumber: "", court: "", by: "", ended: item.ended && { ...item.ended, by: "" } })), advances: deal.advances?.map((item) => ({ ...item, note: "", by: "" })), foreclosure: deal.foreclosure && { ...deal.foreclosure, by: "", steps: deal.foreclosure.steps.map((step) => ({ ...step, note: "", by: "" })), stopped: deal.foreclosure.stopped && { ...deal.foreclosure.stopped, note: "", by: "" } }, reo: deal.reo && { ...deal.reo, by: "", listed: deal.reo.listed && { ...deal.reo.listed, by: "" }, sold: deal.reo.sold && { ...deal.reo.sold, by: "" } } });
 
 /** A partner's own draw shares, and the share transfers it was part of, on a loan it holds or held. */
 const ownMoves = (deal: Deal, partnerId: string) => {
@@ -1039,6 +1056,45 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       return extension.approvers.includes(viewer.name) ? no("A second, different approver is required.") : ok({ ...action, by: viewer.name });
     }
 
+    case "proposeModification": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      if (!staff || !allowed("service_loans")) return no(NOT_ALLOWED);
+      if (!action.reason.trim()) return no("Say why the loan is being modified.");
+      const today = serviceDay(book);
+      const problem = proposalProblem(deal, { rate: action.rate, capitalize: action.capitalize, waiveFees: action.waiveFees, months: action.months }, today, inBankruptcy(deal));
+      return problem ? no(problem) : ok({ ...action, reason: action.reason.trim().slice(0, 500), by: viewer.name });
+    }
+    case "approveModification": case "declineModification": case "signModification": {
+      const deal = dealOf(action.dealId);
+      const modification = deal?.modifications?.find((item) => item.id === action.modificationId);
+      if (!deal || !modification) return no(GONE);
+      if (action.t === "signModification") {
+        if (!staff || !allowed("service_loans")) return no(NOT_ALLOWED);
+        if (!action.reference.trim()) return no("Enter the signed agreement's reference.");
+        const problem = signProblem(deal, modification, action.on, serviceDay(book), inBankruptcy(deal));
+        return problem ? no(problem) : ok({ ...action, by: viewer.name });
+      }
+      if (!staff || !allowed("approve_extension")) return no(NOT_ALLOWED);
+      if (action.t === "declineModification") return !action.reason.trim() ? no("Say why it's declined.") : modification.status === "proposed" || modification.status === "approved" ? ok({ ...action, by: viewer.name }) : no("That modification is already decided.");
+      if (modification.status !== "proposed") return no("That modification is already decided.");
+      return modification.approvers.includes(viewer.name) ? no("A second, different approver is required.") : ok({ ...action, by: viewer.name });
+    }
+    case "logContact": case "recordPromise": case "cancelPromise": case "logNotice": case "noticeOutcome": case "recordBankruptcy": case "bankruptcyClaimFiled": case "endBankruptcy": case "recordAdvance": case "advancesRepaid": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      if (!staff || !allowed("service_loans")) return no(NOT_ALLOWED);
+      const problem = collectionProblem(deal, action, serviceDay(book));
+      return problem ? no(problem) : ok({ ...action, by: viewer.name });
+    }
+    case "referForeclosure": case "foreclosureStep": case "stopForeclosure": case "saleProceeds": case "listReo": case "sellReo": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      if (!staff || !allowed("declare_default")) return no(NOT_ALLOWED);
+      const problem = foreclosureProblem(deal, action, serviceDay(book));
+      return problem ? no(problem) : ok({ ...action, by: viewer.name });
+    }
+
     case "sendMessage": {
       const deal = dealOf(action.dealId);
       if (!deal) return no(GONE);
@@ -1046,6 +1102,115 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       if (ownsDeal(deal)) return ok({ ...action, from: viewer.name, side: view === "broker" ? "broker" : "borrower" });
       return no(NOT_ALLOWED);
     }
+  }
+}
+
+type CollectionAction = Extract<BookAction, { t: "logContact" | "recordPromise" | "cancelPromise" | "logNotice" | "noticeOutcome" | "recordBankruptcy" | "bankruptcyClaimFiled" | "endBankruptcy" | "recordAdvance" | "advancesRepaid" }>;
+/** Why a collections record can't be kept as asked, or null (lib/collections.ts). */
+function collectionProblem(deal: Deal, action: CollectionAction, today: string): string | null {
+  const live = SERVICED.includes(deal.status);
+  const dated = (on: string, what: string) => (on > today ? `${what} can't be in the future.` : on < deal.closingDate ? `${what} is before the loan closed.` : null);
+  switch (action.t) {
+    case "logContact":
+      if (!live) return "This loan isn't being serviced.";
+      if (!action.with.trim()) return "Say who you spoke to or tried.";
+      return dated(action.on, "The date");
+    case "recordPromise": {
+      if (!live) return "This loan isn't being serviced.";
+      const stayed = stayProblem(deal, "A promise to pay");
+      if (stayed) return stayed;
+      if (!(action.amount > 0)) return "Enter the amount promised.";
+      if (action.dueBy < today) return "The day it's promised by can't be past.";
+      return action.dueBy > addDays(today, COLLECTIONS.promiseDays) ? `A promise is for the next ${COLLECTIONS.promiseDays} days; for longer, work out a modification.` : null;
+    }
+    case "cancelPromise": {
+      const promise = deal.promises?.find((item) => item.id === action.promiseId);
+      if (!promise || promise.cancelled) return GONE;
+      return action.reason.trim() ? null : "Say why it's withdrawn.";
+    }
+    case "logNotice": {
+      if (!live) return "This loan isn't being serviced.";
+      const stayed = stayProblem(deal, "Sending a notice");
+      if (stayed) return stayed;
+      if (!action.to.trim()) return "Enter who it went to and where.";
+      if ((action.method === "certified_mail" || action.method === "overnight") && !action.tracking.trim()) return "Enter the tracking number.";
+      if (!(action.amount >= 0)) return "Enter the amount the notice states.";
+      const l = ledgerOf(deal, today);
+      if (action.kind === "late" && !l.paymentsLate && l.feesOwed < 0.005) return "No payment is late.";
+      if ((action.kind === "default" || action.kind === "acceleration") && !openDefault(deal)) return "Declare the default first.";
+      if (action.kind === "acceleration" && !defaultNotice(deal)) return "Send the notice of default before accelerating.";
+      if (action.kind === "maturity_demand" && !l.matured) return "The loan hasn't matured.";
+      if (action.cureBy && action.cureBy <= action.sentOn) return "The cure date has to be after the notice is sent.";
+      return dated(action.sentOn, "The day it was sent");
+    }
+    case "noticeOutcome": {
+      const notice = deal.notices?.find((item) => item.id === action.noticeId);
+      if (!notice) return GONE;
+      if (notice.delivered || notice.returned) return "That notice's delivery is already recorded.";
+      if (!action.detail.trim()) return action.outcome === "delivered" ? "Enter the proof: the signed receipt, the tracking confirmation or who took it." : "Say why it came back.";
+      return action.on < notice.sentOn ? "That's before it was sent." : action.on > today ? "The date can't be in the future." : null;
+    }
+    case "recordBankruptcy":
+      if (!live) return "This loan isn't being serviced.";
+      if (openBankruptcy(deal)) return "A bankruptcy case is already open on this loan.";
+      if (![7, 11, 13].includes(action.chapter)) return "Choose the chapter.";
+      if (!action.debtor.trim() || !action.caseNumber.trim() || !action.court.trim()) return "Enter who filed, the case number and the court.";
+      return action.filedOn > today ? "The filing date can't be in the future." : null;
+    case "bankruptcyClaimFiled": case "endBankruptcy": {
+      const bankruptcy = deal.bankruptcies?.find((item) => item.id === action.bankruptcyId);
+      if (!bankruptcy || bankruptcy.ended) return "That case isn't open.";
+      if (action.t === "bankruptcyClaimFiled" && bankruptcy.claimFiledOn) return "The proof of claim is already recorded.";
+      return action.on < bankruptcy.filedOn ? "That's before the case was filed." : action.on > today ? "The date can't be in the future." : null;
+    }
+    case "recordAdvance":
+      if (!live && !(deal.status === "reo" && !deal.reo?.sold)) return "Costs are recorded on a loan being serviced or a property LendHous owns.";
+      if (!(action.amount > 0)) return "Enter the amount paid.";
+      return action.on > today ? "The date can't be in the future." : deal.reo && action.on < deal.reo.since ? "That's before LendHous took the property: record it on the loan before then." : null;
+    case "advancesRepaid":
+      if (!live) return "This loan isn't being serviced.";
+      if (!(action.amount > 0)) return "Enter the amount repaid.";
+      if (action.amount > advancesOwed(deal) + 0.005) return `Only ${money(advancesOwed(deal))} of costs is owed.`;
+      if (!action.reference.trim()) return "Enter the payment's reference.";
+      return dated(action.on, "The date");
+  }
+}
+
+type ForeclosureAction = Extract<BookAction, { t: "referForeclosure" | "foreclosureStep" | "stopForeclosure" | "saleProceeds" | "listReo" | "sellReo" }>;
+/** Why a foreclosure or REO step can't be recorded, or null (lib/collections.ts). */
+function foreclosureProblem(deal: Deal, action: ForeclosureAction, today: string): string | null {
+  if (action.on > today) return "The date can't be in the future.";
+  switch (action.t) {
+    case "referForeclosure": {
+      if (!openDefault(deal)) return "Declare the default first.";
+      if (deal.foreclosure && !deal.foreclosure.stopped) return "The loan is already with the foreclosure attorney.";
+      const stayed = stayProblem(deal, "A foreclosure");
+      if (stayed) return stayed;
+      if (!action.attorney.trim()) return "Enter the attorney or firm.";
+      const sent = defaultNotice(deal);
+      if (!sent) return "Send the notice of default first: the loan documents give the borrower time to cure.";
+      return sent.cureEnds >= action.on ? `The notice of default's cure period runs to ${shortDay(sent.cureEnds)}.` : null;
+    }
+    case "foreclosureStep":
+      return stepProblem(deal, action.step, action.on, today, action);
+    case "stopForeclosure":
+      if (!deal.foreclosure || deal.foreclosure.stopped) return "No foreclosure is open.";
+      if (action.why === "deed_in_lieu") { const stayed = stayProblem(deal, "Taking the deed"); if (stayed) return stayed; }
+      return action.on < deal.foreclosure.referredOn ? "That's before it was referred." : null;
+    case "saleProceeds": {
+      const sale = deal.foreclosure?.sale;
+      if (sale?.winner !== "third_party" || deal.paidOff) return "Only a sale a third party won pays the loan this way.";
+      if (!(action.amount > 0)) return "Enter the amount the clerk paid.";
+      if (!action.reference.trim()) return "Enter the payment's reference.";
+      const owed = payoffOn(deal, action.on).quote.total;
+      if (action.amount > owed + 0.005) return `The clerk pays LendHous up to the ${money(owed)} owed; any surplus goes to the owner through the court.`;
+      return action.on < sale.on ? "That's before the sale." : null;
+    }
+    case "listReo": case "sellReo":
+      if (deal.status !== "reo" || !deal.reo || deal.reo.sold) return "This isn't a bank-owned property for sale.";
+      if (!(action.price > 0)) return "Enter the price.";
+      if (action.on < deal.reo.since) return "That's before LendHous took the property.";
+      if (action.t === "sellReo" && !(action.closingCosts >= 0 && action.closingCosts < action.price)) return "Enter the sale's closing costs.";
+      return action.t === "sellReo" && !action.reference.trim() ? "Enter the closing's reference." : null;
   }
 }
 

@@ -2,6 +2,7 @@
 // Times and Helvetica, and only characters those fonts cover.
 import PDFDocument from "pdfkit";
 import type { BorrowerStatement } from "./borrower-statements";
+import { BANKRUPTCY_NOTE } from "./collections";
 import { shortDay } from "./format";
 import { monthName } from "./investor-statements";
 
@@ -33,6 +34,7 @@ export function borrowerStatementPdf(statement: BorrowerStatement, lender: strin
     doc.font("Helvetica").fontSize(9).fillColor(MUTED).text(`Loan statement for ${monthName(statement.month)} · dated ${shortDay(statement.statementDate)}`);
     rule(SAGE, 1.25);
     if (sample) { doc.font("Helvetica-Bold").fontSize(10).fillColor(BAD).text("SAMPLE ONLY. These are made-up figures."); doc.moveDown(0.4); }
+    if (statement.bankruptcy) { doc.font("Helvetica-Bold").fontSize(9.5).fillColor(INK).text(BANKRUPTCY_NOTE, left, doc.y, { width }); doc.moveDown(0.4); }
     doc.font("Helvetica-Bold").fontSize(11).fillColor(INK).text(`${statement.loanNumber} · ${statement.property}`);
     doc.font("Helvetica").fontSize(10).fillColor(MUTED).text([statement.borrowerName, statement.entityName].filter(Boolean).join(" · "));
 

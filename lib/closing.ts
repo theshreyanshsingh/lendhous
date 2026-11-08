@@ -62,7 +62,7 @@ export const isTitleDoc = (docId: string) => CLOSING_ITEMS.some((item) => item.i
 /** How long a title link works. A new one can be sent at any time, which turns the old one off. */
 export const TITLE_LINK_DAYS = 30;
 // The link is about getting a loan closed and recorded, so it stops once the loan has ended.
-const ENDED = ["declined", "withdrawn", "paid_off"];
+const ENDED = ["declined", "withdrawn", "paid_off", "reo"];
 
 /** Whether a title link can be used today. */
 export function titleLinkState(deal: Pick<Deal, "titleLink" | "status"> | undefined, now = new Date()): "open" | "expired" | "off" | "closed" {

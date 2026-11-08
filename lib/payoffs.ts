@@ -8,7 +8,7 @@ import { z } from "zod";
 import { evaluate } from "./engine";
 import type { Deal, PayoffChannel, PayoffLetter, PayoffRequest } from "./mockData";
 import { currentPricing } from "./pricing-versions";
-import { addDays, daysBetween, defaultInterestFrom, defaultRateOf, ledgerOf, maturityOf, payoffFor, SERVICED } from "./servicing";
+import { addDays, daysBetween, defaultInterestFrom, defaultRateOf, ledgerOf, maturityOf, noteRateOn, payoffFor, SERVICED } from "./servicing";
 
 /** The statute's 10 days. */
 export const LETTER_DAYS = 10;
@@ -74,7 +74,7 @@ export function letterFigures(deal: Deal, goodThrough: string, today: string): L
   const from = defaultInterestFrom(deal, l.maturity);
   const regularEnd = goodThrough < from ? goodThrough : from;
   const defaultFrom = l.paidThrough > from ? l.paidThrough : from;
-  const figures: LetterFigures = { issuedOn: today, goodThrough, principal: quote.principal, accrued: quote.accrued, defaultAccrued: quote.defaultAccrued, fees: quote.fees, credit: quote.credit, perDiem: quote.perDiem, total: quote.total, rate: evaluate(deal.app).rate, interestFrom: l.paidThrough, interestDays: Math.max(0, daysBetween(l.paidThrough, regularEnd)) };
+  const figures: LetterFigures = { issuedOn: today, goodThrough, principal: quote.principal, accrued: quote.accrued, defaultAccrued: quote.defaultAccrued, fees: quote.fees, credit: quote.credit, perDiem: quote.perDiem, total: quote.total, ...(quote.advances > 0 ? { advances: quote.advances } : {}), rate: noteRateOn(deal), interestFrom: l.paidThrough, interestDays: Math.max(0, daysBetween(l.paidThrough, regularEnd)) };
   return quote.defaultAccrued > 0 ? { ...figures, defaultRate: defaultRateOf(deal), defaultFrom, defaultDays: Math.max(0, daysBetween(defaultFrom, goodThrough)) } : figures;
 }
 
@@ -107,7 +107,7 @@ export const longDay = (day: string) => new Date(`${day}T12:00:00Z`).toLocaleDat
 
 /** What moved between a letter and today's figures, in words. */
 export function letterChanges(letter: LetterFigures, now: LetterFigures) {
-  const lines: [string, number, number][] = [["Principal", letter.principal, now.principal], ["Interest", letter.accrued, now.accrued], ["Default interest", letter.defaultAccrued, now.defaultAccrued], ["Late fees", letter.fees, now.fees], ["Credit held", letter.credit, now.credit]];
+  const lines: [string, number, number][] = [["Principal", letter.principal, now.principal], ["Interest", letter.accrued, now.accrued], ["Default interest", letter.defaultAccrued, now.defaultAccrued], ["Late fees", letter.fees, now.fees], ["Costs advanced", letter.advances ?? 0, now.advances ?? 0], ["Credit held", letter.credit, now.credit]];
   return lines.filter(([, then, today]) => Math.abs(then - today) >= 0.005).map(([label, then, today]) => `${label} ${money(then)} → ${money(today)}`);
 }
 
@@ -149,6 +149,7 @@ export function letterContent(deal: Deal, request: PayoffRequest, letter: Payoff
   rows.push({ label: `Interest at ${letter.rate.toFixed(2)}%`, detail: `${letter.interestDays} day${letter.interestDays === 1 ? "" : "s"} from ${longDay(letter.interestFrom)}`, amount: letter.accrued });
   if (letter.defaultAccrued > 0 && letter.defaultFrom) rows.push({ label: `Default interest at ${(letter.defaultRate ?? 0).toFixed(2)}%`, detail: `${letter.defaultDays} day${letter.defaultDays === 1 ? "" : "s"} from ${longDay(letter.defaultFrom)}`, amount: letter.defaultAccrued });
   if (letter.fees > 0) rows.push({ label: "Unpaid late fees", amount: letter.fees });
+  if ((letter.advances ?? 0) > 0) rows.push({ label: "Costs advanced", detail: "attorney's fees, court costs and other costs paid to protect the loan", amount: letter.advances! });
   if (letter.credit > 0) rows.push({ label: "Less credit held for the borrower", amount: -letter.credit });
   return {
     lender,

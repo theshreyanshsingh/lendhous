@@ -5,7 +5,7 @@ import type { Period } from "./reports";
 
 export const QUOTE_STEPS = ["started", "shown"] as const;
 export type QuoteStep = (typeof QUOTE_STEPS)[number];
-const FUNDED = ["funded", "servicing_current", "servicing_delinquent", "matured", "default", "paid_off"];
+const FUNDED = ["funded", "servicing_current", "servicing_delinquent", "matured", "default", "paid_off", "reo"];
 
 /** A site's short name in a widget's address (?site=wholesale): lowercase letters, digits and dashes. */
 export const siteSlug = (raw: unknown) => (typeof raw === "string" && /^[a-z0-9-]{1,24}$/.test(raw) ? raw : "");

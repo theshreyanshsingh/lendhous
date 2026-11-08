@@ -14,7 +14,7 @@ import { fundedBalances } from "@/lib/engine";
 import type { Deal } from "@/lib/mockData";
 import { dueOf, latestLetter, receivedOf, requesterLine, requestState, staleLetter } from "@/lib/payoffs";
 import { lienReleaseDaysLeft, lienReleaseDue, lienReleaseOpen, maturityAfter, openExtension } from "@/lib/loan-exits";
-import { addDays, balanceOf, ledger, SERVICED } from "@/lib/servicing";
+import { addDays, balanceOf, ledger, noteRateOn, SERVICED } from "@/lib/servicing";
 import { est, useStore } from "@/lib/store";
 import { shortDay } from "@/lib/format";
 
@@ -46,6 +46,7 @@ export default function Servicing() {
     <div className="space-y-4">
       <PageIntro eyebrow="Servicing" title="Loan servicing" lede="Every funded loan: what's due, what's late, what's maturing and who's paying off." />
       <p className="text-sm text-muted-foreground" data-testid="storm-link">Hurricane forecast cones are checked against these loans every six hours. <Link className="text-link underline underline-offset-2" href="/admin/storms">Storm watch</Link></p>
+      <p className="text-sm text-muted-foreground" data-testid="collections-link">Loans behind, in default, in bankruptcy or in foreclosure, with the calls, promises and notices on each. <Link className="text-link underline underline-offset-2" href="/admin/collections">Collections</Link></p>
       <MaturityDesk />
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <div className="glass p-4"><Stat label="Loans" value={loans.length} /></div>
@@ -113,7 +114,7 @@ export default function Servicing() {
           </ul>
         </Section>
       )}
-      <div className="flex justify-end"><button type="button" className="btn-ghost w-full sm:w-auto" data-testid="export-servicing" disabled={loans.length === 0} onClick={() => downloadCsv("lendhous-servicing.csv", loans.map((deal) => { const e = est(deal.app); const l = of(deal); return { Loan: deal.loanNumber, Borrower: deal.borrowerName, Product: productLabel[deal.app.product], Status: statusLabel(deal.status), Balance: balanceOf(deal), Rate: e.rate, Payment: fundedBalances(e, deal.app, deal.disbursedDraws).nextPayment, "Next due": l.nextDue ?? "", "Past due": deal.paymentsLate ?? 0, "Days past due": l.daysPastDue, "Due now": l.amountDue, "Late fees owed": l.feesOwed, "Credit held": l.credit, Maturity: l.maturity, "Checked through": deal.servicedThrough ?? "" }; }))}>Export CSV</button></div>
+      <div className="flex justify-end"><button type="button" className="btn-ghost w-full sm:w-auto" data-testid="export-servicing" disabled={loans.length === 0} onClick={() => downloadCsv("lendhous-servicing.csv", loans.map((deal) => { const e = est(deal.app); const l = of(deal); return { Loan: deal.loanNumber, Borrower: deal.borrowerName, Product: productLabel[deal.app.product], Status: statusLabel(deal.status), Balance: balanceOf(deal), Rate: noteRateOn(deal), Payment: l.rows.find((row) => row.due === l.nextDue)?.amount ?? fundedBalances(e, deal.app, deal.disbursedDraws).nextPayment, "Next due": l.nextDue ?? "", "Past due": deal.paymentsLate ?? 0, "Days past due": l.daysPastDue, "Due now": l.amountDue, "Late fees owed": l.feesOwed, "Credit held": l.credit, Maturity: l.maturity, "Checked through": deal.servicedThrough ?? "" }; }))}>Export CSV</button></div>
       <div className="glass overflow-hidden px-4 lg:px-0">
         <table className="stack-table w-full" data-testid="servicing-table">
           <thead><tr className="border-b border-rule"><th>Loan</th><th className="text-right">Balance</th><th className="text-right">Payment</th><th className="text-right">Due now</th><th>Next due</th><th>Matures</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr></thead>
@@ -124,7 +125,7 @@ export default function Servicing() {
               const l = of(deal);
               return (
                 <tr key={deal.id} className="border-b border-border last:border-0" data-testid="serviced-loan">
-                  <td><Link href={`/admin/deals/${deal.id}`} className="font-semibold text-link hover:underline">{deal.loanNumber}</Link><div className="text-xs text-muted-foreground">{deal.borrowerName} · {productLabel[deal.app.product]} · {e.rate.toFixed(2)}%</div></td>
+                  <td><Link href={`/admin/deals/${deal.id}`} className="font-semibold text-link hover:underline">{deal.loanNumber}</Link><div className="text-xs text-muted-foreground">{deal.borrowerName} · {productLabel[deal.app.product]} · {noteRateOn(deal).toFixed(2)}%</div></td>
                   <td data-label="Balance" className="text-right">{usd(balanceOf(deal))}</td>
                   <td data-label="Payment" className="text-right">{usd(fundedBalances(e, deal.app, deal.disbursedDraws).nextPayment)}</td>
                   <td data-label="Due now" className={`text-right ${l.amountDue ? "text-bad" : ""}`} data-testid="serviced-due">{usd(l.amountDue, 2)}</td>

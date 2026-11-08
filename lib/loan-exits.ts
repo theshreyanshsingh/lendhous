@@ -6,6 +6,7 @@ import { evaluate } from "./engine";
 import { shortDay } from "./format";
 import type { Closure, Deal, DefaultKind, LoanExtension, LoanStatus, PayoffLetter } from "./mockData";
 import { currentPricing, pricingFor } from "./pricing-versions";
+import { stayProblem } from "./collections";
 import { addDays, daysBetween, ledgerOf, maturityOf, openDefault, payoffFor, SERVICED, type Ledger } from "./servicing";
 
 const money = (amount: number) => `$${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -57,6 +58,8 @@ export const DEFAULT_KINDS: Record<DefaultKind, string> = {
 export function defaultError(deal: Deal, kind: DefaultKind, effectiveOn: string, today: string) {
   if (!SERVICED.includes(deal.status)) return "This loan isn't being serviced.";
   if (openDefault(deal)) return "This loan is already in default.";
+  const stayed = stayProblem(deal, "Declaring a default");
+  if (stayed) return stayed;
   if (effectiveOn > today) return "The effective date can't be in the future.";
   if (effectiveOn < deal.closingDate) return "That date is before the loan closed.";
   const l = ledgerOf(deal, today);
@@ -154,5 +157,5 @@ export function payoffError(deal: Deal, amount: number, receivedOn: string, toda
 /** The day the satisfaction of mortgage is due out, once a loan is paid off. */
 export const lienReleaseDue = (deal: Deal) => (deal.paidOff ? addDays(deal.paidOff.receivedOn, currentPricing().lienReleaseDays) : undefined);
 /** A paid-off loan whose mortgage release isn't recorded yet. */
-export const lienReleaseOpen = (deal: Deal) => deal.status === "paid_off" && Boolean(deal.paidOff) && !deal.paidOff?.release?.recordedOn;
+export const lienReleaseOpen = (deal: Deal) => deal.status === "paid_off" && Boolean(deal.paidOff) && !deal.paidOff?.foreclosureSale && !deal.paidOff?.release?.recordedOn;
 export const lienReleaseDaysLeft = (deal: Deal, today: string) => { const due = lienReleaseDue(deal); return due ? daysBetween(today, due) : 0; };

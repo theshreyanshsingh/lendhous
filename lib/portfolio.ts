@@ -8,7 +8,7 @@
 import { evaluate, type Application } from "./engine";
 import type { Deal, PortfolioProperty } from "./mockData";
 import { addressKey } from "./risk";
-import { balanceOf, daysBetween, ledger, paymentsMade, recastPayment, SERVICED } from "./servicing";
+import { balanceOf, daysBetween, ledger, noteRateOn, paymentsMade, recastPayment, SERVICED } from "./servicing";
 
 /** PLACEHOLDER program limits until GT sets them: how many properties, the least each is worth, and the release premium. */
 export const PORTFOLIO = { minProperties: 2, maxProperties: 20, minValue: 75_000, releasePremium: 1.15 };
@@ -110,8 +110,7 @@ export function releaseQuote(deal: Deal, propertyId: string, on: string): Releas
   const minimum = round2(Math.max(0, balance - supported(deal, rest, made)));
   const price = Math.min(balance, Math.max(line.releasePrice, Math.ceil(minimum / 100) * 100));
   if (price >= balance) return { problem: "Releasing it would take the whole balance: pay the loan off instead." };
-  const e = evaluate(deal.app);
-  const interest = round2(((price * e.rate) / 100 / 360) * Math.max(0, daysBetween(l.paidThrough, on)));
+  const interest = round2(((price * noteRateOn(deal)) / 100 / 360) * Math.max(0, daysBetween(l.paidThrough, on)));
   const left = round2(balance - price);
   const payment = recastPayment(deal, left, made);
   const value = sum(rest, (property) => property.value);

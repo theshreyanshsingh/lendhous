@@ -13,7 +13,7 @@ export const MISC_THRESHOLD = 600;
 /** What demo seats show, since their book never reaches the server's settings. */
 export const DEMO_BONUS = 500;
 
-const FUNDED = new Set([...SERVICED, "paid_off"]);
+const FUNDED = new Set([...SERVICED, "paid_off", "reo"]);
 const ENDED = new Set(["declined", "withdrawn"]);
 
 export type FriendReferral = NonNullable<Deal["friendReferral"]>;

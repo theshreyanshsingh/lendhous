@@ -29,7 +29,7 @@ export function countyTerms(county: County, config: PricingConfig) {
 
 /** Only shown from this many loans, so no figure points at one borrower's loan. */
 export const MIN_SHOWN = 3;
-const FUNDED = new Set(["funded", "servicing_current", "servicing_delinquent", "matured", "default", "paid_off"]);
+const FUNDED = new Set(["funded", "servicing_current", "servicing_delinquent", "matured", "default", "paid_off", "reo"]);
 
 /** LendHous's funded loans in a county: how many and how much, or null below MIN_SHOWN. */
 export function fundedIn(deals: Deal[], county: County) {

@@ -41,7 +41,7 @@ export const PERMISSIONS = {
   service_loans: "Record payments, statements and payoffs",
   waive_fee: "Waive fees (reason required)",
   declare_default: "Declare a loan in default, and cure it",
-  approve_extension: "Approve loan extensions (always one of two approvers)",
+  approve_extension: "Approve loan extensions and modifications (always one of two approvers)",
   clear_ofac: "Clear or confirm a possible sanctions (OFAC) match (reason required)",
   manage_users: "Invite users and assign roles",
   manage_roles: "Change the permission matrix",

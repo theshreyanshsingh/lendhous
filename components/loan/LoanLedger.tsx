@@ -5,7 +5,10 @@ import { BILL_LABEL, billTone, ledger, METHODS, servicingTermsOf, shownRows } fr
 import { useStore } from "@/lib/store";
 import { Badge, Section, Stat, shortDate, statGrid, usd } from "@/components/ui";
 import { Reveal } from "@/components/motion";
+import { CollectionsPanel } from "./CollectionsPanel";
 import { Extensions } from "./Extensions";
+import { ForeclosurePanel } from "./ForeclosurePanel";
+import { Modifications } from "./Modifications";
 import { LoanDefault } from "./LoanDefault";
 import { PaidOff } from "./PaidOff";
 import { PayoffRequests } from "./PayoffRequests";
@@ -53,7 +56,10 @@ export function LoanLedger({ deal }: { deal: Deal }) {
             <RecordPayment key={`${deal.payments?.length ?? 0}:${l.amountDue}`} deal={deal} />
           </Section>
           <Extensions deal={deal} side="team" />
+          <Modifications deal={deal} side="team" />
           <LoanDefault deal={deal} />
+          <CollectionsPanel deal={deal} />
+          <ForeclosurePanel deal={deal} />
           <PayoffRequests deal={deal} />
           <Section title="Payoff">
             {!payingOff && (

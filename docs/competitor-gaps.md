@@ -260,7 +260,7 @@ Ranked by money and risk to LendHous, against the effort.
 - **Webhooks and an API key** for Zapier and the like (Mortgage Automator, LendingWise, C).
 - **A per-loan email address** that files replies and attachments to the loan (LendingWise, C).
 - **Custom fields** on loans (LendingWise, C).
-- **Loan modification documents** that change the rate, principal or maturity (Lightning Docs, C). We only do extensions.
+- **Loan modifications** that change the rate, principal or maturity (Lightning Docs, C). **Built 2026-11-09** (`lib/modifications.ts`): a new rate, what's behind added to principal or the fees waived, and more months, approved by two people and signed; the ledger, payoff letters and investor statements follow. The agreement itself is still the attorney's template.
 - **A second look for declines:** offer declined borrowers to partner lenders for a referral fee (Lendflow, C). Reg B still applies to our own decline.
 
 ## 2. Needs a vendor (choose one, then build the adapter)

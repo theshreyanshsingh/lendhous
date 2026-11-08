@@ -14,6 +14,8 @@ import { DEMO_BONUS, type MyReferral } from "./referrals";
 import { surveyProblem } from "./surveys";
 import { cureError, defaultError, executeError, extensionFee, extensionRequestError, payoffError, payoffOn, PRE_FUNDING, reopenTo, closureReason, DEFAULT_KINDS } from "./loan-exits";
 import { canAdvance, nextStage } from "./loan-stages";
+import { modificationPreview, modificationWords, proposalProblem, signProblem } from "./modifications";
+import { ADVANCE_KINDS, BANKRUPTCY_ENDS, COLLECTIONS, DELIVERY_METHODS, inBankruptcy, NOTICE_KINDS, owedAtTitle, stepLabel, stepProblem } from "./collections";
 import { issueProblem, latestLetter, letterFigures, receivedOnFor } from "./payoffs";
 import { isLarge, noticeDueOn, noticeOwed, reasonsProblem, requestProblem, startAdverseAction, STATEMENT_DAYS } from "./adverse-action";
 import { defaultNocExpiry, drawHolds, lienFileProblem, partiesFor, unreleasedHolds, waiverCheckProblem } from "./lien-law";
@@ -21,14 +23,14 @@ import { insuranceChecks, insuranceFileOf, policiesOf, policyProblem, policyWord
 import { addProblem, changeProblem, DEFAULT_LIBRARY, fromTemplate, libraryOf, missingStandard, templateProblem, templatesFor, type ConditionInput } from "./conditions";
 import { chosenTerms, draftSheet, exceptionDecisionProblem, exceptionReasons, exceptionRequestProblem, issueProblem as sheetProblem, latestSheet, matrixOf, pricedApp, respondProblem, startingTerms, termSheetChecks, type Prepay } from "./term-sheets";
 import { optionAt } from "./buy-down";
-import { DEMO_TEAM, seedDeals, seedBids, seedDraws, seedLoanSales, seedLoanOffers, seedMessages, seedPhotoRequests, DEMO_SPONSORS, capitalSources, partners as seedPartners, brokers as seedBrokers, loanBuyers, BORROWER_ID, DEMO_PARTNER_ID, DEMO_BUYER_ID, DEMO_BROKER_ID, type Broker, type ClosingAgent, type Closure, type Deal, type DefaultKind, type Bid, type DrawRequest, type DrawRequestLine, type DrawPhoto, type DrawCall, type FloodMap, type PortfolioProperty, type PropertyRelease, type RolloverChoice, type ShareTransfer, type LoanExtension, type LoanMessage, type Screening, type WireInstruction, type Partner, type PayoffChannel, type PayoffLetter, type PayoffRequest, type NoticeToOwner, type LienWaiver, type ConditionTemplate, type LoanCondition, type DocStatus, type CapitalSource, type LoanBuyer, type LoanOffer, type LoanSale, type LoanPayment, type LoanStatus, type TeamMember, type PaymentMethod, type PhotoRequest, type RequestPhoto, type ScopeLine, type Sponsor, type StageEntry, type PolicyKind, type InsurancePolicy, type InsuranceRenewal, type ChangeOrder } from "./mockData";
+import { DEMO_TEAM, seedDeals, seedBids, seedDraws, seedLoanSales, seedLoanOffers, seedMessages, seedPhotoRequests, DEMO_SPONSORS, capitalSources, partners as seedPartners, brokers as seedBrokers, loanBuyers, BORROWER_ID, DEMO_PARTNER_ID, DEMO_BUYER_ID, DEMO_BROKER_ID, type Broker, type ClosingAgent, type Closure, type Deal, type DefaultKind, type Bid, type DrawRequest, type DrawRequestLine, type DrawPhoto, type DrawCall, type FloodMap, type PortfolioProperty, type PropertyRelease, type RolloverChoice, type ShareTransfer, type LoanExtension, type LoanMessage, type Screening, type WireInstruction, type Partner, type PayoffChannel, type PayoffLetter, type PayoffRequest, type NoticeToOwner, type LienWaiver, type ConditionTemplate, type LoanCondition, type DocStatus, type CapitalSource, type LoanBuyer, type LoanOffer, type LoanSale, type LoanPayment, type LoanStatus, type TeamMember, type PaymentMethod, type PhotoRequest, type RequestPhoto, type ScopeLine, type Sponsor, type StageEntry, type PolicyKind, type InsurancePolicy, type InsuranceRenewal, type ChangeOrder, type AdvanceKind, type Bankruptcy, type ContactChannel, type ContactOutcome, type DeliveryMethod, type ForeclosureStep, type LoanModification, type NoticeKind, type Payoff } from "./mockData";
 import { closingShare, creditOf, currentBids, drawCallsFor, moveShare, payoffProceeds, ROLLOVER, transferProblem, transferQuote } from "./capital-moves";
 import { portfolioApp, releaseQuote, scheduleProblem } from "./portfolio";
 import { applyFloodMap, withFloodFollowUps } from "./flood-zones";
 import { afterCheck, freshInspectionNeeded, type StormCheck, type StormWatch } from "./storms";
 import { BASE_VERSION, currentPricing, type PricingPayload } from "./pricing-versions";
 import { TEAM_ROLE_LABEL, type TeamRole } from "./loan-team";
-import { addDays, balanceOf, DEMO_SERVICING_DAY, firstDueDate, ledger, maturityOf, paymentsMade, payoffFor, recastPayment, SERVICED, servicingDate, settle } from "./servicing";
+import { addDays, balanceOf, DEMO_SERVICING_DAY, firstDueDate, ledger, maturityOf, openDefault, paymentsMade, payoffFor, recastPayment, SERVICED, servicingDate, settle } from "./servicing";
 
 export interface Book { partnerId: string; buyerId: string; brokerId: string; borrowerId: string; loanPrefix: string; deals: Deal[]; bids: Bid[]; partners: Partner[]; buyers: LoanBuyer[]; brokers: Broker[]; sales: LoanSale[]; offers: LoanOffer[]; draws: DrawRequest[]; photoRequests: PhotoRequest[]; payoffs: PayoffRequest[]; messages: LoanMessage[]; sources: CapitalSource[]; conditionLibrary: ConditionTemplate[]; /** Storms whose forecast cone has covered funded loans (lib/storms.ts). Staff only. */ storms: StormWatch[]; audit: { at: string; text: string }[]; sample?: boolean; /** A borrower's own referrals, summed up for them: friends' loans are never in their book (lib/referrals.ts). */ myReferrals?: MyReferral[]; /** The pricing its loans use, as sent to a browser. Not part of the records. */ pricing?: PricingPayload }
 
@@ -213,6 +215,28 @@ export type BookAction =
   | { t: "approveExtension"; dealId: string; extensionId: string; by: string }
   | { t: "declineExtension"; dealId: string; extensionId: string; reason: string; by: string }
   | { t: "executeExtension"; dealId: string; extensionId: string; on: string; method: PaymentMethod; reference: string; by: string }
+  /** A workout's change to the loan's terms (lib/modifications.ts): proposed, approved by two people, then signed. */
+  | { t: "proposeModification"; dealId: string; rate?: number; capitalize: boolean; waiveFees: boolean; months?: number; reason: string; by: string }
+  | { t: "approveModification"; dealId: string; modificationId: string; by: string }
+  | { t: "declineModification"; dealId: string; modificationId: string; reason: string; by: string }
+  | { t: "signModification"; dealId: string; modificationId: string; on: string; reference: string; by: string }
+  /** Collections (lib/collections.ts): calls and letters, promises to pay, notices and their delivery, bankruptcy, costs, foreclosure and REO. */
+  | { t: "logContact"; dealId: string; on: string; channel: ContactChannel; with: string; outcome: ContactOutcome; note: string; by: string }
+  | { t: "recordPromise"; dealId: string; amount: number; dueBy: string; note: string; by: string }
+  | { t: "cancelPromise"; dealId: string; promiseId: string; reason: string; by: string }
+  | { t: "logNotice"; dealId: string; kind: NoticeKind; sentOn: string; method: DeliveryMethod; to: string; tracking: string; amount: number; cureBy?: string; by: string }
+  | { t: "noticeOutcome"; dealId: string; noticeId: string; outcome: "delivered" | "returned"; on: string; detail: string; by: string }
+  | { t: "recordBankruptcy"; dealId: string; debtor: string; chapter: 7 | 11 | 13; caseNumber: string; court: string; filedOn: string; by: string }
+  | { t: "bankruptcyClaimFiled"; dealId: string; bankruptcyId: string; on: string; by: string }
+  | { t: "endBankruptcy"; dealId: string; bankruptcyId: string; on: string; how: NonNullable<Bankruptcy["ended"]>["how"]; by: string }
+  | { t: "recordAdvance"; dealId: string; on: string; kind: AdvanceKind; amount: number; note: string; by: string }
+  | { t: "advancesRepaid"; dealId: string; amount: number; on: string; reference: string; by: string }
+  | { t: "referForeclosure"; dealId: string; attorney: string; on: string; by: string }
+  | { t: "foreclosureStep"; dealId: string; step: ForeclosureStep; on: string; note: string; caseNumber?: string; county?: string; judgment?: { amount: number; saleOn: string }; sale?: { winner: "lendhous" | "third_party"; amount: number }; by: string }
+  | { t: "stopForeclosure"; dealId: string; on: string; why: "dismissed" | "deed_in_lieu"; note: string; by: string }
+  | { t: "saleProceeds"; dealId: string; amount: number; on: string; reference: string; by: string }
+  | { t: "listReo"; dealId: string; on: string; price: number; value?: number; by: string }
+  | { t: "sellReo"; dealId: string; on: string; price: number; closingCosts: number; reference: string; by: string }
   | { t: "sendMessage"; dealId: string; from: string; side: LoanMessage["side"]; text: string }
   | { t: "uploadDoc"; dealId: string; docId: string; fileName: string; documentId?: string }
   | { t: "docStatus"; dealId: string; docId: string; status: DocStatus; note?: string }
@@ -302,6 +326,18 @@ export function demoBook(): Book {
       const paid = (on: string): LoanPayment => ({ id: `pay-demo-11-${on}`, amount: monthly, receivedOn: on, method: "ach", reference: `ACH ${on}`, by: "Sam Servicer (FAKE)", at: `${on}T15:00:00Z` });
       return { ...deal, allocations: [{ sourceId: `partner:${DEMO_PARTNER_ID}`, amount: half }, { sourceId: "gt-main", amount: e.noteAmount - half }], route: "split" as const, teaserSentTo: [DEMO_PARTNER_ID], boardedThrough: "2026-09-01", payments: [paid("2026-09-01"), paid("2026-10-01")],
         partnerFunding: { partnerId: DEMO_PARTNER_ID, amount: half, sent: { on: "2026-06-29", reference: "FED REF 2026-0629-11 (FAKE)", by: "Pia Partner (FAKE)", at: "2026-06-29T14:00:00Z" }, received: { on: "2026-06-30", by: "Cam Capital (FAKE)", at: "2026-06-30T13:00:00Z" } } };
+    }
+    // The loan two payments behind has a collections file: the calls, a promise to pay that was broken, and a late notice.
+    if (d.id === "d13") {
+      const by = "Sam Servicer (FAKE)";
+      return { ...deal,
+        contacts: [
+          { id: "ct-demo-13-1", on: "2026-10-08", channel: "call" as const, with: d.borrowerName, outcome: "reached" as const, note: "Waiting on a buyer's deposit to clear; will pay the October payment by the 20th. (FAKE)", by, at: "2026-10-08T15:10:00Z" },
+          { id: "ct-demo-13-2", on: "2026-10-22", channel: "call" as const, with: d.borrowerName, outcome: "left_message" as const, note: "Nothing in by the 20th. Left a message. (FAKE)", by, at: "2026-10-22T14:00:00Z" },
+          { id: "ct-demo-13-3", on: "2026-10-27", channel: "text" as const, with: d.borrowerName, outcome: "no_answer" as const, note: "", by, at: "2026-10-27T16:30:00Z" },
+        ],
+        promises: [{ id: "ptp-demo-13", amount: 2_443.75, madeOn: "2026-10-08", dueBy: "2026-10-20", note: "The October payment (FAKE)", by, at: "2026-10-08T15:12:00Z" }],
+        notices: [{ id: "nt-demo-13", kind: "late" as const, sentOn: "2026-10-23", method: "first_class" as const, to: `${d.entityName}, ${d.address}, ${d.city} ${d.zip}`, tracking: "", amount: 5_131.88, by, at: "2026-10-23T13:00:00Z", delivered: { on: "2026-10-26", proof: "Borrower confirmed by text it arrived (FAKE)", by, at: "2026-10-26T13:00:00Z" } }] };
     }
     // One loan close to maturity whose borrower called to ask for more time, so the extension queue has something in it.
     if (d.id !== "d14") return deal;
@@ -398,6 +434,44 @@ export const emptyBook = (): Book => ({ partnerId: "", buyerId: "", brokerId: ""
  * tell how long each step took and how long a loan has sat where it is. Loading or clearing sample data keeps the
  * sample's own history.
  */
+/** Adds each partner's new proceeds to what it's owed or has rolled. */
+const withProceeds = (partners: Partner[], proceeds: ReturnType<typeof payoffProceeds>) => (proceeds.length ? partners.map((p) => { const mine = proceeds.filter((x) => x.partnerId === p.id).map((x) => x.proceeds); return mine.length ? { ...p, proceeds: [...(p.proceeds ?? []), ...mine] } : p; }) : partners);
+
+/**
+ * A loan's money back, from a payoff or a third party's foreclosure bid. It stops counting against capital, nothing else
+ * can be drawn, sold, extended or modified on it, a foreclosure ends, and each partner's part is rolled or owed to it.
+ */
+function closeLoan(s: Book, deal: Deal, paidOff: Payoff, text: string): Book {
+  const at = new Date().toISOString();
+  const closing = new Set(s.sales.filter((x) => x.dealId === deal.id && x.status === "listed").map((x) => x.id));
+  const proceeds = payoffProceeds(s, { ...deal, paidOff }, (n) => `pp${uid()}${n}`);
+  const foreclosure = deal.foreclosure && !deal.foreclosure.stopped && !paidOff.foreclosureSale ? { ...deal.foreclosure, stopped: { on: paidOff.receivedOn, why: "paid_off" as const, note: "", by: paidOff.by, at } } : deal.foreclosure;
+  const ended = { by: paidOff.by, at, reason: "The loan was paid off" };
+  return { ...s,
+    partners: withProceeds(s.partners, proceeds),
+    deals: s.deals.map((d) => (d.id === deal.id ? { ...deal, status: "paid_off", daysInStage: 0, paidOff, foreclosure, allocations: [], nextPaymentDue: undefined, paymentsLate: 0, extensions: deal.extensions?.map((x) => (x.status === "requested" || x.status === "approved" ? { ...x, status: "declined" as const, declined: ended } : x)), modifications: deal.modifications?.map((x) => (x.status === "proposed" || x.status === "approved" ? { ...x, status: "declined" as const, declined: ended } : x)) } : d)),
+    payoffs: s.payoffs.map((p) => (p.dealId === deal.id && p.status !== "paid" ? { ...p, status: "paid" } : p)),
+    draws: s.draws.map((d) => (d.dealId === deal.id && d.status !== "funded" && d.status !== "rejected" ? { ...d, status: "rejected", reason: "The loan was paid off" } : d)),
+    sales: s.sales.map((x) => (closing.has(x.id) ? { ...x, status: "withdrawn" } : x)),
+    offers: s.offers.map((o) => (closing.has(o.saleId) && o.status === "submitted" ? { ...o, status: "declined" } : o)),
+    audit: [{ at, text }, ...s.audit].slice(0, 50) };
+}
+
+/** The property becomes LendHous's (REO): what the loan came to is fixed, and nothing more is drawn, sold or changed on it. */
+function takeTitle(s: Book, deal: Deal, on: string, how: "certificate_of_title" | "deed_in_lieu", by: string, text: string): Book {
+  const at = new Date().toISOString();
+  const ended = { by, at, reason: "The property was foreclosed" };
+  const closing = new Set(s.sales.filter((x) => x.dealId === deal.id && x.status === "listed").map((x) => x.id));
+  const reo = { since: on, how, by, at, owed: owedAtTitle(deal, on) };
+  return { ...s,
+    deals: s.deals.map((d) => (d.id === deal.id ? { ...deal, status: "reo", daysInStage: 0, reo, nextPaymentDue: undefined, extensions: deal.extensions?.map((x) => (x.status === "requested" || x.status === "approved" ? { ...x, status: "declined" as const, declined: ended } : x)), modifications: deal.modifications?.map((x) => (x.status === "proposed" || x.status === "approved" ? { ...x, status: "declined" as const, declined: ended } : x)), promises: deal.promises?.map((x) => (x.cancelled ? x : { ...x, cancelled: { by, at, reason: "The property was foreclosed" } })) } : d)),
+    payoffs: s.payoffs.map((p) => (p.dealId === deal.id && (p.status === "requested" || p.status === "sent") ? { ...p, status: "refused", refused: { by, at, reason: "The property was foreclosed" } } : p)),
+    draws: s.draws.map((d) => (d.dealId === deal.id && d.status !== "funded" && d.status !== "rejected" ? { ...d, status: "rejected", reason: "The property was foreclosed" } : d)),
+    sales: s.sales.map((x) => (closing.has(x.id) ? { ...x, status: "withdrawn" } : x)),
+    offers: s.offers.map((o) => (closing.has(o.saleId) && o.status === "submitted" ? { ...o, status: "declined" } : o)),
+    audit: [{ at, text }, ...s.audit].slice(0, 50) };
+}
+
 export function reducer(s: Book, a: BookAction): Book {
   const next = apply(s, a);
   if (next.deals === s.deals || a.t === "reset" || a.t === "loadSample" || a.t === "clearSample") return next;
@@ -1152,18 +1226,18 @@ function apply(s: Book, a: BookAction): Book {
       if ((a.onLetter && !letter) || payoffError(deal, a.amount, a.receivedOn, today, letter || undefined)) return s;
       const owed = payoffOn(deal, a.receivedOn).quote.total;
       const paidOff = { amount: Math.round(a.amount * 100) / 100, receivedOn: a.receivedOn, method: a.method, reference: a.reference, by: a.by, at: now(), owed, ...(letter ? { letter: { payoffId: a.onLetter!.payoffId, number: letter.number, total: letter.total, shortfall: Math.max(0, Math.round((owed - a.amount) * 100) / 100) } } : {}) };
-      const closing = new Set(s.sales.filter((x) => x.dealId === deal.id && x.status === "listed").map((x) => x.id));
-      // Each partner's part of the payoff, rolled into its next loan or owed to it, the way it chose (lib/capital-moves.ts).
-      const proceeds = payoffProceeds(s, { ...deal, paidOff }, (n) => `pp${uid()}${n}`);
-      // The money is back, so the loan stops counting against capital, and nothing else can be drawn, sold or extended on it.
-      return { ...s,
-        partners: proceeds.length ? s.partners.map((p) => { const mine = proceeds.filter((x) => x.partnerId === p.id).map((x) => x.proceeds); return mine.length ? { ...p, proceeds: [...(p.proceeds ?? []), ...mine] } : p; }) : s.partners,
-        deals: upd(deal.id, () => ({ ...deal, status: "paid_off", daysInStage: 0, paidOff, allocations: [], nextPaymentDue: undefined, paymentsLate: 0, extensions: deal.extensions?.map((x) => (x.status === "requested" || x.status === "approved" ? { ...x, status: "declined" as const, declined: { by: a.by, at: now(), reason: "The loan was paid off" } } : x)) })),
-        payoffs: s.payoffs.map((p) => (p.dealId === deal.id && p.status !== "paid" ? { ...p, status: "paid" } : p)),
-        draws: s.draws.map((d) => (d.dealId === deal.id && d.status !== "funded" && d.status !== "rejected" ? { ...d, status: "rejected", reason: "The loan was paid off" } : d)),
-        sales: s.sales.map((x) => (closing.has(x.id) ? { ...x, status: "withdrawn" } : x)),
-        offers: s.offers.map((o) => (closing.has(o.saleId) && o.status === "submitted" ? { ...o, status: "declined" } : o)),
-        audit: log(`${deal.loanNumber}: paid off with ${money(paidOff.amount)} received ${a.receivedOn}`) };
+      return closeLoan(s, deal, paidOff, `${deal.loanNumber}: paid off with ${money(paidOff.amount)} received ${a.receivedOn}`);
+    }
+    case "saleProceeds": {
+      // A third party won the foreclosure sale: the clerk's money ends the loan, even short of what was owed.
+      const today = serviceDay(s);
+      const deal = settle(s.deals.find((d) => d.id === a.dealId)!, today);
+      const sale = deal.foreclosure?.sale;
+      if (sale?.winner !== "third_party" || deal.paidOff || !(a.amount > 0) || a.on < sale.on || a.on > today) return s;
+      const owed = payoffOn(deal, a.on).quote.total;
+      if (a.amount > owed + 0.005) return s;
+      const paidOff: Payoff = { amount: round2(a.amount), receivedOn: a.on, method: "other", reference: a.reference, by: a.by, at: now(), owed, foreclosureSale: { saleOn: sale.on, shortfall: Math.max(0, round2(owed - a.amount)) } };
+      return closeLoan(s, { ...deal, foreclosure: { ...deal.foreclosure!, steps: [...deal.foreclosure!.steps, { step: "certificate_of_title", on: a.on, note: "Sold to a third party; the clerk paid the sale money", by: a.by, at: now() }] } }, paidOff, `${deal.loanNumber}: foreclosure sale money of ${money(paidOff.amount)} received ${a.on}${paidOff.foreclosureSale!.shortfall ? `, ${money(paidOff.foreclosureSale!.shortfall)} short` : ""}`);
     }
     case "recordLienRelease": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
@@ -1241,6 +1315,115 @@ function apply(s: Book, a: BookAction): Book {
       const cured = { by: a.by, at: now(), note: "Cured by the extension" };
       const next: Deal = { ...deal, status: "servicing_current", maturityNotices: undefined, extensions: deal.extensions?.map((x) => (x.id === a.extensionId ? { ...x, status: "executed", executed } : x)), defaults: deal.defaults?.map((x) => (x.cured ? x : { ...x, cured })) };
       return { ...s, deals: upd(deal.id, () => settle(next, today)), audit: log(`${deal.loanNumber}: extended ${extension.months} months to ${maturityOf(next)}; fee of ${money(extension.fee)} received`) };
+    }
+    case "proposeModification": {
+      const today = serviceDay(s);
+      const deal = settle(s.deals.find((d) => d.id === a.dealId)!, today);
+      const terms = { rate: a.rate, capitalize: a.capitalize, waiveFees: a.waiveFees, months: a.months };
+      if (proposalProblem(deal, terms, today, inBankruptcy(deal))) return s;
+      const modification: LoanModification = { id: `mod${uid()}`, ...(a.rate !== undefined ? { rate: a.rate } : {}), capitalize: a.capitalize, waiveFees: a.waiveFees, ...(a.months ? { months: a.months } : {}), reason: a.reason.trim(), proposedBy: a.by, proposedAt: now(), proposedOn: today, status: "proposed", approvers: [] };
+      return { ...s, deals: upd(deal.id, (d) => ({ ...d, modifications: [...(d.modifications ?? []), modification] })), audit: log(`${deal.loanNumber}: modification proposed by ${a.by}: ${modificationWords(modificationPreview(deal, terms, today))}`) };
+    }
+    case "approveModification": case "declineModification": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const modification = deal.modifications?.find((x) => x.id === a.modificationId);
+      if (!modification || (modification.status !== "proposed" && modification.status !== "approved")) return s;
+      if (a.t === "declineModification") return { ...s, deals: upd(deal.id, (d) => ({ ...d, modifications: d.modifications?.map((x) => (x.id === a.modificationId ? { ...x, status: "declined", declined: { by: a.by, at: now(), reason: a.reason.trim() } } : x)) })), audit: log(`${deal.loanNumber}: modification declined by ${a.by}: ${a.reason.trim()}`) };
+      if (modification.status !== "proposed" || modification.approvers.includes(a.by)) return s;
+      const approvers = [...modification.approvers, a.by];
+      const done = approvers.length >= 2;
+      return { ...s, deals: upd(deal.id, (d) => ({ ...d, modifications: d.modifications?.map((x) => (x.id === a.modificationId ? { ...x, approvers, status: done ? "approved" : x.status } : x)) })), audit: log(`${deal.loanNumber}: modification approved by ${a.by}${done ? "" : "; second approver needed"}`) };
+    }
+    case "signModification": {
+      const today = serviceDay(s);
+      const deal = settle(s.deals.find((d) => d.id === a.dealId)!, today);
+      const modification = deal.modifications?.find((x) => x.id === a.modificationId);
+      if (!modification || signProblem(deal, modification, a.on, today, inBankruptcy(deal))) return s;
+      const p = modificationPreview(deal, modification, a.on);
+      const executed = { on: a.on, effectiveOn: p.effectiveOn, reference: a.reference.trim(), by: a.by, at: now(), fromRate: p.fromRate, toRate: p.toRate, fromMaturity: p.fromMaturity, toMaturity: p.toMaturity, fromPayment: p.fromPayment, newPayment: p.newPayment, capitalizedDues: p.capitalizedDues, capitalizedPayments: p.capitalizedPayments, fees: p.fees, capitalizedFees: p.capitalizedFees, waivedFees: p.waivedFees, afterPayments: p.afterPayments };
+      const moved = Boolean(modification.months);
+      let next = settle({ ...deal, modifications: deal.modifications?.map((x) => (x.id === a.modificationId ? { ...x, status: "executed" as const, executed } : x)), ...(moved ? { maturityNotices: undefined, exitAsked: undefined } : {}) }, today);
+      // Signed with nothing left behind, it ends a default, and any foreclosure with it.
+      if (openDefault(next) && !cureError(next, today)) {
+        const cured = { by: a.by, at: now(), note: "Cured by the modification" };
+        next = settle({ ...next, status: "servicing_current", defaults: next.defaults?.map((x) => (x.cured ? x : { ...x, cured })), foreclosure: next.foreclosure && !next.foreclosure.stopped ? { ...next.foreclosure, stopped: { on: a.on, why: "modified", note: "", by: a.by, at: now() } } : next.foreclosure }, today);
+      }
+      return { ...s, deals: upd(deal.id, () => next), audit: log(`${deal.loanNumber}: modification signed ${a.on} (${a.reference.trim()}): ${modificationWords(p)}`) };
+    }
+    case "logContact": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const contact = { id: `ct${uid()}`, on: a.on, channel: a.channel, with: a.with.trim(), outcome: a.outcome, note: a.note.trim(), by: a.by, at: now() };
+      return { ...s, deals: upd(deal.id, (d) => ({ ...d, contacts: [...(d.contacts ?? []), contact].sort((x, y) => x.on.localeCompare(y.on) || x.at.localeCompare(y.at)) })), audit: log(`${deal.loanNumber}: ${a.channel} with ${contact.with} logged by ${a.by}`) };
+    }
+    case "recordPromise": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const promise = { id: `ptp${uid()}`, amount: round2(a.amount), madeOn: serviceDay(s), dueBy: a.dueBy, note: a.note.trim(), by: a.by, at: now() };
+      return { ...s, deals: upd(deal.id, (d) => ({ ...d, promises: [...(d.promises ?? []), promise] })), audit: log(`${deal.loanNumber}: promise to pay ${money(promise.amount)} by ${a.dueBy} recorded by ${a.by}`) };
+    }
+    case "cancelPromise":
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, promises: d.promises?.map((x) => (x.id === a.promiseId && !x.cancelled ? { ...x, cancelled: { by: a.by, at: now(), reason: a.reason.trim() } } : x)) })), audit: log(`Promise to pay withdrawn by ${a.by}`) };
+    case "logNotice": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const cureBy = a.kind === "default" ? a.cureBy || addDays(a.sentOn, COLLECTIONS.cureDays) : undefined;
+      const notice = { id: `nt${uid()}`, kind: a.kind, sentOn: a.sentOn, method: a.method, to: a.to.trim(), tracking: a.tracking.trim(), amount: round2(a.amount), ...(cureBy ? { cureBy } : {}), by: a.by, at: now() };
+      return { ...s, deals: upd(deal.id, (d) => ({ ...d, notices: [...(d.notices ?? []), notice] })), audit: log(`${deal.loanNumber}: ${NOTICE_KINDS[a.kind].toLowerCase()} sent ${a.sentOn} by ${DELIVERY_METHODS[a.method].toLowerCase()}`) };
+    }
+    case "noticeOutcome": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const outcome = a.outcome === "delivered" ? { delivered: { on: a.on, proof: a.detail.trim(), by: a.by, at: now() } } : { returned: { on: a.on, reason: a.detail.trim(), by: a.by, at: now() } };
+      return { ...s, deals: upd(deal.id, (d) => ({ ...d, notices: d.notices?.map((x) => (x.id === a.noticeId ? { ...x, ...outcome } : x)) })), audit: log(`${deal.loanNumber}: notice ${a.outcome} ${a.on}`) };
+    }
+    case "recordBankruptcy": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const bankruptcy = { id: `bk${uid()}`, debtor: a.debtor.trim(), chapter: a.chapter, caseNumber: a.caseNumber.trim(), court: a.court.trim(), filedOn: a.filedOn, by: a.by, at: now() };
+      return { ...s, deals: upd(deal.id, (d) => ({ ...d, bankruptcies: [...(d.bankruptcies ?? []), bankruptcy] })), audit: log(`${deal.loanNumber}: chapter ${a.chapter} bankruptcy filed ${a.filedOn} by ${bankruptcy.debtor} (case ${bankruptcy.caseNumber}); collection paused`) };
+    }
+    case "bankruptcyClaimFiled": case "endBankruptcy": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const change = a.t === "bankruptcyClaimFiled" ? { claimFiledOn: a.on } : { ended: { on: a.on, how: a.how, by: a.by, at: now() } };
+      return { ...s, deals: upd(deal.id, (d) => ({ ...d, bankruptcies: d.bankruptcies?.map((x) => (x.id === a.bankruptcyId ? { ...x, ...change } : x)) })), audit: log(a.t === "bankruptcyClaimFiled" ? `${deal.loanNumber}: proof of claim filed ${a.on}` : `${deal.loanNumber}: bankruptcy ended ${a.on} (${BANKRUPTCY_ENDS[a.how].toLowerCase()})`) };
+    }
+    case "recordAdvance": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const advance = { id: `adv${uid()}`, on: a.on, kind: a.kind, amount: round2(a.amount), note: a.note.trim(), by: a.by, at: now() };
+      return { ...s, deals: upd(deal.id, (d) => ({ ...d, advances: [...(d.advances ?? []), advance] })), audit: log(`${deal.loanNumber}: ${money(advance.amount)} paid out for ${ADVANCE_KINDS[a.kind].toLowerCase()}`) };
+    }
+    case "advancesRepaid": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const repaid = { id: `rep${uid()}`, amount: round2(a.amount), on: a.on, reference: a.reference.trim(), by: a.by, at: now() };
+      return { ...s, deals: upd(deal.id, (d) => ({ ...d, advancesRepaid: [...(d.advancesRepaid ?? []), repaid] })), audit: log(`${deal.loanNumber}: ${money(repaid.amount)} of costs repaid by the borrower`) };
+    }
+    case "referForeclosure": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      return { ...s, deals: upd(deal.id, (d) => ({ ...d, foreclosure: { attorney: a.attorney.trim(), referredOn: a.on, by: a.by, at: now(), steps: [] } })), audit: log(`${deal.loanNumber}: referred to ${a.attorney.trim()} for foreclosure`) };
+    }
+    case "foreclosureStep": {
+      const today = serviceDay(s);
+      const deal = settle(s.deals.find((d) => d.id === a.dealId)!, today);
+      const case_ = deal.foreclosure;
+      if (!case_ || stepProblem(deal, a.step, a.on, today, a)) return s;
+      const step = { step: a.step, on: a.on, note: a.note.trim(), by: a.by, at: now() };
+      const foreclosure = { ...case_, steps: [...case_.steps, step], ...(a.caseNumber?.trim() ? { caseNumber: a.caseNumber.trim() } : {}), ...(a.county?.trim() ? { county: a.county.trim() } : {}), ...(a.step === "judgment" ? { judgment: a.judgment } : {}), ...(a.step === "sale_held" ? { sale: { on: a.on, ...a.sale! } } : {}) };
+      if (a.step !== "certificate_of_title") return { ...s, deals: upd(deal.id, () => ({ ...deal, foreclosure })), audit: log(`${deal.loanNumber}: foreclosure, ${stepLabel(a.step).toLowerCase()} ${a.on}`) };
+      return takeTitle(s, { ...deal, foreclosure }, a.on, "certificate_of_title", a.by, `${deal.loanNumber}: certificate of title ${a.on}; the property is bank-owned`);
+    }
+    case "stopForeclosure": {
+      const today = serviceDay(s);
+      const deal = settle(s.deals.find((d) => d.id === a.dealId)!, today);
+      if (!deal.foreclosure || deal.foreclosure.stopped) return s;
+      const foreclosure = { ...deal.foreclosure, stopped: { on: a.on, why: a.why, note: a.note.trim(), by: a.by, at: now() } };
+      if (a.why === "dismissed") return { ...s, deals: upd(deal.id, () => ({ ...deal, foreclosure })), audit: log(`${deal.loanNumber}: foreclosure dismissed ${a.on}`) };
+      return takeTitle(s, { ...deal, foreclosure }, a.on, "deed_in_lieu", a.by, `${deal.loanNumber}: deed in lieu of foreclosure taken ${a.on}; the property is bank-owned`);
+    }
+    case "listReo":
+      return { ...s, deals: upd(a.dealId, (d) => (d.reo && !d.reo.sold ? { ...d, reo: { ...d.reo, listed: { on: a.on, price: round2(a.price), by: a.by }, ...(a.value ? { value: round2(a.value) } : {}) } } : d)), audit: log(`Bank-owned property listed for ${money(a.price)}`) };
+    case "sellReo": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (!deal.reo || deal.reo.sold) return s;
+      const sold: Deal = { ...deal, daysInStage: 0, allocations: [], reo: { ...deal.reo, sold: { on: a.on, price: round2(a.price), closingCosts: round2(a.closingCosts), reference: a.reference.trim(), by: a.by, at: now() } } };
+      // Each partner's share of what came back, rolled or owed to it the way it chose, as at a payoff.
+      const proceeds = payoffProceeds(s, sold, (n) => `pp${uid()}${n}`);
+      return { ...s, partners: withProceeds(s.partners, proceeds), deals: upd(deal.id, () => sold), audit: log(`${deal.loanNumber}: bank-owned property sold ${a.on} for ${money(a.price)}`) };
     }
     case "sendMessage": {
       const text = a.text.trim();

@@ -1583,3 +1583,48 @@ describe("portfolio loans", () => {
     vi.restoreAllMocks();
   });
 });
+
+describe("collections and modifications", () => {
+  it("keep the collections file, pause it in bankruptcy, and modify the loan through the server", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const { demoBook, serviceDay } = await import("@/lib/book");
+    const { readBook, runAction } = await import("@/lib/book-store");
+    const { balanceOf, ledger } = await import("@/lib/servicing");
+    const { stageOf } = await import("@/lib/collections");
+    const d13 = demoBook().deals.find((deal) => deal.id === "d13")!;
+    await prisma.bookRecord.create({ data: { id: "deals:col-late", kind: "deals", data: JSON.parse(JSON.stringify({ ...d13, id: "col-late", loanNumber: "LH-7401", contacts: undefined, promises: undefined, notices: undefined })) } });
+    const servicer = { id: "staff-col", name: "Cole Collector", roleCodes: ["SERVICER" as const] };
+    const first = { id: "staff-ua", name: "Ula Approver", roleCodes: ["UNDERWRITER" as const] };
+    const second = { id: "staff-ub", name: "Ubi Approver", roleCodes: ["UNDERWRITER" as const] };
+    const must = async (viewer: Parameters<typeof runAction>[0], action: Parameters<typeof runAction>[1]) => { const result = await runAction(viewer, action); if ("error" in result) throw new Error(result.error); return result; };
+    let book = (await readBook()).book;
+    const today = serviceDay(book);
+    await must(servicer, { t: "logContact", dealId: "col-late", on: today, channel: "call", with: "The borrower", outcome: "reached", note: "Asked for a workout", by: "" });
+    await must(servicer, { t: "recordBankruptcy", dealId: "col-late", debtor: "Sample LLC", chapter: 11, caseNumber: "26-1", court: "S.D. Fla.", filedOn: today, by: "" });
+    const stayed = await runAction(servicer, { t: "recordPromise", dealId: "col-late", amount: 500, dueBy: today, note: "", by: "" });
+    expect(stayed).toMatchObject({ error: expect.stringMatching(/automatic stay/) });
+    book = (await readBook()).book;
+    let loan = book.deals.find((deal) => deal.id === "col-late")!;
+    expect(stageOf(loan, today)).toBe("bankruptcy");
+    expect(loan.contacts?.[0]).toMatchObject({ by: "Cole Collector", with: "The borrower" });
+    await must(servicer, { t: "endBankruptcy", dealId: "col-late", bankruptcyId: loan.bankruptcies![0].id, on: today, how: "dismissed", by: "" });
+    // Then the workout: what's behind added to principal, approved by two people and signed.
+    const behind = ledger(loan).amountDue;
+    await must(servicer, { t: "proposeModification", dealId: "col-late", capitalize: true, waiveFees: false, reason: "Workout after the dismissal", by: "" });
+    book = (await readBook()).book;
+    const id = book.deals.find((deal) => deal.id === "col-late")!.modifications![0].id;
+    await must(first, { t: "approveModification", dealId: "col-late", modificationId: id, by: "" });
+    expect(await runAction(first, { t: "approveModification", dealId: "col-late", modificationId: id, by: "" })).toMatchObject({ error: "A second, different approver is required." });
+    await must(second, { t: "approveModification", dealId: "col-late", modificationId: id, by: "" });
+    await must(servicer, { t: "signModification", dealId: "col-late", modificationId: id, on: today, reference: "MOD-DB-1", by: "" });
+    book = (await readBook()).book;
+    const before = loan;
+    loan = book.deals.find((deal) => deal.id === "col-late")!;
+    expect(loan.modifications![0]).toMatchObject({ status: "executed", approvers: ["Ula Approver", "Ubi Approver"], executed: { reference: "MOD-DB-1", by: "Cole Collector" } });
+    expect(ledger(loan).amountDue).toBe(0);
+    expect(balanceOf(loan)).toBeGreaterThan(balanceOf(before));
+    expect(behind).toBeGreaterThan(0);
+    vi.restoreAllMocks();
+  });
+});
+

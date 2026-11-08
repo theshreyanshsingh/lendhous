@@ -19,6 +19,8 @@ import { OfacPanel } from "@/components/loan/OfacPanel";
 import { CreditReview } from "@/components/loan/CreditReview";
 import { DocUpload } from "@/components/loan/DocUpload";
 import { LoanLedger } from "@/components/loan/LoanLedger";
+import { CollectionsPanel } from "@/components/loan/CollectionsPanel";
+import { ForeclosurePanel } from "@/components/loan/ForeclosurePanel";
 import { LoanMessages } from "@/components/loan/LoanMessages";
 import { PhotoRequests } from "@/components/loan/PhotoRequests";
 import { ScopeOfWork } from "@/components/loan/ScopeOfWork";
@@ -90,7 +92,7 @@ export default function DealWorkspace() {
   // The loan's own pricing: its limits and assumptions, not whatever was published since.
   const pricingConfig = pricingFor(d.app.pricingVersion);
   // The servicing tab only means something once there's money out.
-  const tabs = allTabs.filter((t) => (t !== "Servicing" || SERVICED.includes(d.status) || d.status === "paid_off") && (t !== "Closing" || CLOSING_TAB.includes(d.status)) && (t !== "Term sheet" || ["underwriting", "term_sheet_issued"].includes(d.status) || Boolean(d.termSheets?.length || d.pricingException)) && (t !== "Conditions" || !BEFORE_UNDERWRITING.includes(d.status) || Boolean(d.conditions?.length)));
+  const tabs = allTabs.filter((t) => (t !== "Servicing" || SERVICED.includes(d.status) || d.status === "paid_off" || d.status === "reo") && (t !== "Closing" || CLOSING_TAB.includes(d.status)) && (t !== "Term sheet" || ["underwriting", "term_sheet_issued"].includes(d.status) || Boolean(d.termSheets?.length || d.pricingException)) && (t !== "Conditions" || !BEFORE_UNDERWRITING.includes(d.status) || Boolean(d.conditions?.length)));
   const avail = inHouseAvailable(s.deals, s.sources, d.id);
   const rec = recommendRoute({ product: d.app.product, noteAmount: e.noteAmount, grade: e.score.grade, location: e.location, inHouseAvailable: avail });
   const cap = capitalSummary(s.deals, s.sources);
@@ -302,12 +304,13 @@ export default function DealWorkspace() {
       {tab === "Credit review" && <div className="space-y-4"><ApplicationRecord deal={d} /><ApplicationOnFile deal={d} /><OfacPanel deal={d} /><CreditReview deal={d} /></div>}
       {tab === "Closing" && <div className="space-y-4"><ClosingPanel deal={d} />{INSURED.includes(d.status) && <InsurancePanel deal={d} />}{(d.app.product === "fix_flip" || d.app.product === "ground_up" || d.lienFile) && <LienProtection deal={d} />}<OfacPanel deal={d} /></div>}
       {tab === "Servicing" && (SERVICED.includes(d.status) || d.status === "paid_off") && <LoanLedger deal={d} />}
+      {tab === "Servicing" && d.status === "reo" && <div className="space-y-4"><ForeclosurePanel deal={d} /><CollectionsPanel deal={d} /></div>}
       {tab === "Servicing" && SERVICED.includes(d.status) && d.properties?.length ? <ReleaseProperty deal={d} /> : null}
       {tab === "Servicing" && SERVICED.includes(d.status) && <BudgetControls deal={d} side="team" />}
-      {tab === "Servicing" && (SERVICED.includes(d.status) || d.status === "paid_off") && <InvestorUpdates deal={d} />}
+      {tab === "Servicing" && (SERVICED.includes(d.status) || d.status === "paid_off" || d.status === "reo") && <InvestorUpdates deal={d} />}
       {tab === "Servicing" && SERVICED.includes(d.status) && <InsurancePanel deal={d} />}
       {tab === "Servicing" && SERVICED.includes(d.status) && <ExitPlanCard deal={d} side="team" />}
-      {tab === "Servicing" && (SERVICED.includes(d.status) || d.status === "paid_off") && <TeamLoanStatements deal={d} />}
+      {tab === "Servicing" && (SERVICED.includes(d.status) || d.status === "paid_off" || d.status === "reo") && <TeamLoanStatements deal={d} />}
 
       {tab === "Messages" && (
         <div className="grid gap-4 lg:grid-cols-2">

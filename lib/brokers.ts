@@ -55,7 +55,7 @@ export function approveProblem(broker: Broker | undefined, reason: string): stri
 
 /** A broker's fee on a loan: expected until the loan funds, then unpaid until it's recorded as paid. */
 export type FeeState = "expected" | "unpaid" | "paid" | "none";
-const FUNDED = new Set(["funded", "servicing_current", "servicing_delinquent", "matured", "default", "paid_off"]);
+const FUNDED = new Set(["funded", "servicing_current", "servicing_delinquent", "matured", "default", "paid_off", "reo"]);
 const ENDED = new Set(["declined", "withdrawn"]);
 export const FEE_STATE: Record<FeeState, string> = { expected: "Expected at closing", unpaid: "Not paid yet", paid: "Paid", none: "No fee" };
 

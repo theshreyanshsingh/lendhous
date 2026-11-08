@@ -2,7 +2,7 @@
 // 98 is a 2% discount. Like a partner teaser, the tape names no street, borrower or entity until the sale closes.
 import { evaluate, fundedBalances } from "./engine";
 import type { Deal, LoanSale } from "./mockData";
-import { balanceOf, extendedMonths, maturityOf, paymentsMade } from "./servicing";
+import { balanceOf, extendedMonths, maturityOf, noteRateOn, paymentsMade } from "./servicing";
 
 /** Kept by LendHous as servicer, the same placeholder 1% strip as partner teasers (Spec 6.6). */
 export const SERVICING_STRIP_PCT = 1;
@@ -49,7 +49,8 @@ export function tapeOf(deal: Deal, sale: LoanSale) {
   const made = paymentsMade(deal);
   const balance = balanceOf(deal);
   const monthsLeft = Math.max(1, e.termMonths + extendedMonths(deal) - made);
-  const note: Note = { balance, ratePct: e.rate, months: monthsLeft, monthlyPayment: amortizing ? e.monthlyPayment : undefined };
+  const rate = noteRateOn(deal);
+  const note: Note = { balance, ratePct: rate, months: monthsLeft, monthlyPayment: amortizing ? e.monthlyPayment : undefined };
   const band = Math.floor(deal.app.fico / 20) * 20;
   const paymentsLate = deal.paymentsLate ?? 0;
   return {
@@ -63,8 +64,8 @@ export function tapeOf(deal: Deal, sale: LoanSale) {
     balance,
     // Buying a rehab loan means funding its remaining draws, so the buyer has to see this next to the balance.
     holdbackLeft: funded.holdbackRemaining,
-    noteRate: e.rate,
-    netRate: round2(e.rate - SERVICING_STRIP_PCT),
+    noteRate: rate,
+    netRate: round2(rate - SERVICING_STRIP_PCT),
     termMonths: e.termMonths + extendedMonths(deal),
     monthsLeft,
     maturity: maturityOf(deal),

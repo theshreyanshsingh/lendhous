@@ -17,7 +17,7 @@ export type RepeatRecord = {
   asOf: string;
 };
 
-const ACTIVE = new Set([...SERVICED, "paid_off"]);
+const ACTIVE = new Set([...SERVICED, "paid_off", "reo"]);
 
 /** The payments a loan was late on (past grace, fee not waived) that fell due on or after a day. */
 function latePayments(deal: Deal, since: string) {

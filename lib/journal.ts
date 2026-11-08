@@ -20,7 +20,7 @@ export const ACCOUNTS = {
 /** QuickBooks Online's journal import columns. */
 export type JournalRow = { "Journal No.": string; "Journal Date": string; "Account Name": string; Debits: number | string; Credits: number | string; Description: string; Name: string };
 
-const FUNDED = new Set([...SERVICED, "paid_off"]);
+const FUNDED = new Set([...SERVICED, "paid_off", "reo"]);
 const lastDay = (month: string) => { const [y, m] = month.split("-").map(Number); return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10); };
 
 /** LendHous's own share of a loan: what isn't allocated to partner lenders or sold to buyers. */

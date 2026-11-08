@@ -2,10 +2,12 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { BarChart3, Bell, Briefcase, ChevronDown, ChevronsUpDown, CloudLightning, FileCheck, FileText, TriangleAlert, Percent, Building2, ClipboardList, FilePlus, Hammer, Inbox, Landmark, LayoutDashboard, ListChecks, BookOpen, Lock, LogOut, Menu, MessageSquare, ReceiptText, RotateCcw, ScrollText, Settings, Store, Tag, Upload, UserRound, Users, type LucideIcon } from "lucide-react";
+import { BarChart3, Bell, Briefcase, ChevronDown, ChevronsUpDown, CloudLightning, Gavel, FileCheck, FileText, TriangleAlert, Percent, Building2, ClipboardList, FilePlus, Hammer, Inbox, Landmark, LayoutDashboard, ListChecks, BookOpen, Lock, LogOut, Menu, MessageSquare, ReceiptText, RotateCcw, ScrollText, Settings, Store, Tag, Upload, UserRound, Users, type LucideIcon } from "lucide-react";
 import { logout } from "@/actions/auth";
 import { attentionCounts } from "@/lib/attention";
 import { activeWatches } from "@/lib/storms";
+import { serviceDay } from "@/lib/book";
+import { SERIOUS, stageOf } from "@/lib/collections";
 import { useStore } from "@/lib/store";
 import { VIEW_HOME, type View } from "@/lib/permissions";
 import { Logo } from "@/components/logo";
@@ -63,11 +65,15 @@ export default function Shell({ children, account, view }: { children: React.Rea
     return () => window.removeEventListener(OPEN_UPLOAD, show);
   }, [view]);
   const watches = view === "admin" ? activeWatches(s.storms) : [];
+  // Only loans that could be that far along are worked out, so the menu stays cheap on a big book.
+  const serious = view === "admin" ? s.deals.filter((deal) => { if (deal.status !== "default" && deal.status !== "reo" && !deal.bankruptcies?.length && !deal.foreclosure) return false; const stage = stageOf(deal, serviceDay(s)); return stage && SERIOUS.includes(stage); }).length : 0;
   const counted: Record<string, number> = view === "admin" ? { "/admin/leads": waiting.leads, "/admin/draws": waiting.draws, "/admin/loan-sales": waiting.offers, "/admin/servicing": waiting.servicing, "/admin/storms": watches.length } : {};
   const items: NavItem[] = [
     ...(view ? nav[view] : []).map((item) => ({ ...item, count: counted[item.href] })),
     // Storms join the menu once one has covered a loan; until then the page is a link from Loan servicing, so the menu fits a laptop.
     ...(view === "admin" && (s.storms ?? []).length ? [{ href: "/admin/storms", label: "Storms", icon: CloudLightning, section: "Servicing", count: watches.length || undefined }] : []),
+    // Collections joins the menu once a loan is in default, bankruptcy, foreclosure or bank-owned; until then it's a link from Loan servicing.
+    ...(serious ? [{ href: "/admin/collections", label: "Collections", icon: Gavel, section: "Servicing", count: serious }] : []),
     ...(account.canViewReports && view === "admin" ? [{ href: "/admin/reports", label: "Reports", icon: BarChart3 }] : []),
     ...(account.canIssueLetters && view === "admin" ? [{ href: "/admin/letters", label: "Letters", icon: FileCheck }] : []),
     ...(account.canManageFirms ? [{ href: "/admin/partners", label: "Partners & buyers", icon: Building2, section: "Money" }] : []),

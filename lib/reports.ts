@@ -19,7 +19,7 @@ export const SOURCE_LABEL: Record<string, string> = {
 };
 export const sourceLabel = (source: string) => SOURCE_LABEL[source] ?? (source ? source.replace(/_/g, " ").replace(/^./, (first) => first.toUpperCase()) : "Not recorded");
 
-const FUNDED: LoanStatus[] = [...(SERVICED as LoanStatus[]), "paid_off"];
+const FUNDED: LoanStatus[] = [...(SERVICED as LoanStatus[]), "paid_off", "reo"];
 const dayOf = (at: string) => servicingDate(new Date(at));
 export const daysFrom = (from: string, to: string) => Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
 export const inPeriod = (day: string | undefined, period: Period) => Boolean(day && day >= period.from && day <= period.to);

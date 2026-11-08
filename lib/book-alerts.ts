@@ -16,7 +16,9 @@ import { currentBids, ROLLOVER, rolloverOf } from "@/lib/capital-moves";
 import { afterCheck, exposureLines } from "@/lib/storms";
 import { dueOf, fromThirdParty, letterChanges, receivedOf, requesterLine, staleLetter } from "@/lib/payoffs";
 import { prisma } from "@/lib/prisma";
-import { defaultInterestFrom, defaultRateOf, ledger, maturityOf, servicingTermsOf } from "@/lib/servicing";
+import { addDays, defaultInterestFrom, defaultRateOf, ledger, maturityOf, servicingTermsOf } from "@/lib/servicing";
+import { BANKRUPTCY_ENDS, COLLECTIONS, inBankruptcy, PAUSED_IN_BANKRUPTCY } from "@/lib/collections";
+import { modificationWords } from "@/lib/modifications";
 
 const origin = () => (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "");
 
@@ -72,7 +74,10 @@ function staleLetterAlerts(before: Book, after: Book): Alert[] {
 
 /** The alerts one action causes. Pure, so it can be tested. */
 export function alertsFor(before: Book, after: Book, action: BookAction): Alert[] {
-  return [...actionAlerts(before, after, action), ...staleLetterAlerts(before, after), ...referralAlerts(before, after)];
+  const all = [...actionAlerts(before, after, action), ...staleLetterAlerts(before, after), ...referralAlerts(before, after)];
+  // The automatic stay: nothing that asks a borrower in bankruptcy to pay goes to them or their broker (lib/collections.ts).
+  const stayed = (alert: Alert) => (alert.to === "borrower" || alert.to === "broker") && PAUSED_IN_BANKRUPTCY.has(alert.event) && inBankruptcy(after.deals.find((deal) => deal.id === alert.dealId) ?? {});
+  return all.filter((alert) => !stayed(alert));
 }
 
 /**
@@ -527,6 +532,57 @@ function actionAlerts(before: Book, after: Book, action: BookAction): Alert[] {
         { to: "borrower", dealId: deal.id, subject: `Your loan is extended: ${deal.loanNumber}`, body: `Your loan now matures on ${maturity}. We received the ${dollars(extension.fee)} extension fee. Thank you.`, event: "extension.executed" },
         { to: "team", subject: `Extended: ${deal.loanNumber}`, body: `${deal.borrowerName}'s loan now matures on ${maturity}.`, event: "extension.executed" },
         ...holdersOf(deal).map((holder) => ({ ...holder, subject: `A loan you hold was extended: ${deal.loanNumber}`, body: `${deal.loanNumber} was extended ${extension.months} month${extension.months === 1 ? "" : "s"}; it now matures on ${maturity}.`, event: "extension.executed" })),
+      ];
+    }
+    case "proposeModification": {
+      const deal = loan(action.dealId);
+      const proposed = deal?.modifications?.at(-1);
+      return deal && proposed?.status === "proposed" ? [{ to: "team", dealId: deal.id, subject: `Modification to approve: ${deal.loanNumber}`, body: `${action.by} proposed changing ${deal.borrowerName}'s loan: ${action.reason.trim()} It needs two approvers; decide it on the loan's Servicing tab.`, event: "modification.proposed" }] : [];
+    }
+    case "signModification": {
+      const deal = loan(action.dealId);
+      const signed = deal?.modifications?.find((item) => item.id === action.modificationId)?.executed;
+      if (!deal || !signed) return [];
+      const changes = modificationWords(signed);
+      return [
+        { to: "borrower", dealId: deal.id, subject: `Your loan modification is in effect: ${deal.loanNumber}`, body: `The modification you signed on ${longDate(signed.on)} took effect from ${longDate(signed.effectiveOn)}: ${changes}. Your next payment is ${dollars(signed.newPayment)}${ledger(deal).nextDue ? `, due ${longDate(ledger(deal).nextDue!)}` : ""}. Thank you for working this out with us.`, event: "modification.signed" },
+        { to: "broker", dealId: deal.id, subject: `Your client's loan was modified: ${deal.loanNumber}`, body: `${deal.loanNumber} was modified on ${longDate(signed.on)}.`, event: "modification.signed" },
+        { to: "team", dealId: deal.id, subject: `Modified: ${deal.loanNumber}`, body: `${deal.borrowerName}'s modification was signed ${longDate(signed.on)}: ${changes}.`, event: "modification.signed" },
+        ...holdersOf(deal).map((holder) => ({ ...holder, subject: `A loan you hold was modified: ${deal.loanNumber}`, body: `${deal.loanNumber} was modified on ${longDate(signed.on)}, from ${longDate(signed.effectiveOn)}: ${changes}. Your rate moves with the note's, and your statements follow the new terms.`, event: "modification.signed" })),
+      ];
+    }
+    case "recordBankruptcy": {
+      const deal = loan(action.dealId);
+      if (!deal) return [];
+      return [
+        { to: "team", dealId: deal.id, subject: `Bankruptcy filed: ${deal.loanNumber}`, body: `${action.debtor.trim()} filed for chapter ${action.chapter} bankruptcy on ${longDate(action.filedOn)} (case ${action.caseNumber.trim()}, ${action.court.trim()}). The automatic stay is on: no calls asking for payment, no notices and no foreclosure steps. Late and maturity emails to the borrower are paused. Send the case to counsel and file the proof of claim by ${longDate(addDays(action.filedOn, COLLECTIONS.claimDays))}.`, event: "bankruptcy.filed" },
+        ...holdersOf(deal).map((holder) => ({ ...holder, subject: `Bankruptcy on a loan you hold: ${deal.loanNumber}`, body: `The borrower on ${deal.loanNumber} filed for chapter ${action.chapter} bankruptcy on ${longDate(action.filedOn)}. Collection is paused while the case is open; LendHous is working with counsel.`, event: "bankruptcy.filed" })),
+      ];
+    }
+    case "endBankruptcy": {
+      const deal = loan(action.dealId);
+      return deal ? [{ to: "team", dealId: deal.id, subject: `Bankruptcy ended: ${deal.loanNumber}`, body: `The case ended on ${longDate(action.on)} (${BANKRUPTCY_ENDS[action.how].toLowerCase()}). Collection can go ahead again; late emails to the borrower start again with the next one.`, event: "bankruptcy.ended" }] : [];
+    }
+    case "referForeclosure": case "foreclosureStep": case "stopForeclosure": {
+      const deal = loan(action.dealId);
+      if (!deal?.foreclosure) return [];
+      const on = longDate(action.on);
+      const what = action.t === "referForeclosure" ? `It was referred to the foreclosure attorney on ${on}.`
+        : action.t === "stopForeclosure" ? (action.why === "deed_in_lieu" ? `The borrower gave LendHous a deed in lieu of foreclosure on ${on}, so the property is now bank-owned.` : `The foreclosure was dismissed on ${on}.`)
+        : action.step === "judgment" ? `The court entered a final judgment of foreclosure on ${on} and set the sale for ${longDate(action.judgment!.saleOn)}.`
+        : action.step === "sale_held" ? `The foreclosure sale was held on ${on}, and ${action.sale?.winner === "lendhous" ? "LendHous" : "a third party"} won it.`
+        : action.step === "certificate_of_title" ? `The property is bank-owned from ${on}.` : "";
+      return what ? holdersOf(deal).map((holder) => ({ ...holder, subject: `Foreclosure update: ${deal.loanNumber}`, body: `${deal.loanNumber}: ${what}`, event: "foreclosure.update" })) : [];
+    }
+    case "saleProceeds": case "sellReo": {
+      const deal = loan(action.dealId);
+      // Closing it out lets its capital go, so who held it comes from before.
+      const held = before.deals.find((item) => item.id === action.dealId);
+      if (!deal) return [];
+      const what = action.t === "saleProceeds" ? `The clerk paid ${dollars(action.amount)} from the foreclosure sale of ${deal.loanNumber} on ${longDate(action.on)}` : `The bank-owned property from ${deal.loanNumber} sold on ${longDate(action.on)} for ${dollars(action.price)}`;
+      return [
+        { to: "team", dealId: deal.id, subject: `${action.t === "saleProceeds" ? "Foreclosure sale money in" : "Bank-owned property sold"}: ${deal.loanNumber}`, body: `${what}. Send each partner its share from the Capital page.`, event: "foreclosure.closed" },
+        ...holdersOf(held).map((holder) => ({ ...holder, subject: `A loan you hold is closed out: ${deal.loanNumber}`, body: `${what}. Your share follows under your agreement, and your statement shows it.`, event: "foreclosure.closed" })),
       ];
     }
     case "sendMessage":

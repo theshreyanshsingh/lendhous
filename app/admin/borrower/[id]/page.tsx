@@ -2,13 +2,14 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { isClosedApplication, PRE_FUNDING } from "@/lib/loan-exits";
-import { ledger, SERVICED } from "@/lib/servicing";
+import { balanceOf, ledger, noteRateOn, SERVICED } from "@/lib/servicing";
 import { useStore, est } from "@/lib/store";
 import { fundedBalances } from "@/lib/engine";
 import { CloseApplication } from "@/components/loan/CloseApplication";
 import { DrawPanel } from "@/components/loan/DrawPanel";
 import { BudgetControls } from "@/components/loan/BudgetControls";
 import { Extensions } from "@/components/loan/Extensions";
+import { Modifications } from "@/components/loan/Modifications";
 import { PaidOff } from "@/components/loan/PaidOff";
 import { LoanMessages } from "@/components/loan/LoanMessages";
 import { PaymentsPanel } from "@/components/loan/PaymentsPanel";
@@ -43,6 +44,10 @@ export default function BorrowerLoan() {
   if (!d) return <div className="glass p-6">Loan not found. <Link className="underline" href="/admin/borrower">Back</Link></div>;
   const e = est(d.app); const funded = SERVICED.includes(d.status); const closed = isClosedApplication(d.status);
   const b = fundedBalances(e, d.app, d.disbursedDraws);
+  // Once funded, the figures a release or a modification changed: what's owed, the payment coming and the rate now.
+  const now = funded ? ledger(d) : null;
+  const nextPayment = now?.rows.find((row) => row.due === now.nextDue)?.amount ?? b.nextPayment;
+  const rate = funded ? noteRateOn(d) : e.rate;
   const keyRatios = e.ratios.filter((r) => ["ltc", "ltarv", "ltv", "dscr"].includes(r.key)); // flip: LTC/LTARV · bridge: LTV · DSCR: LTV/DSCR
   return (
     <div className="space-y-4">
@@ -56,7 +61,7 @@ export default function BorrowerLoan() {
         </div>
         {!closed && (
               <dl className="mt-4 grid grid-cols-3 gap-x-3 gap-y-1 text-xs sm:max-w-lg" data-testid="loan-glance">
-                {(funded ? [["Balance", usd(b.disbursed)], ["Next payment", ledger(d).nextDue ? `${usd(b.nextPayment)}, ${shortDay(ledger(d).nextDue!)}` : "None due"], ["Matures", shortDay(ledger(d).maturity)]] : d.status === "paid_off" ? [["Paid off", shortDay(d.paidOff?.receivedOn)], ["Loan", usd(e.noteAmount)], ["Rate", `${e.rate.toFixed(2)}%`]] : [["Loan", usd(e.noteAmount)], ["Rate", `${e.rate.toFixed(2)}%`], ["Closing", shortDay(d.closingDate)]]).map(([label, value]) => (
+                {(funded ? [["Balance", usd(balanceOf(d))], ["Next payment", ledger(d).nextDue ? `${usd(nextPayment)}, ${shortDay(ledger(d).nextDue!)}` : "None due"], ["Matures", shortDay(ledger(d).maturity)]] : d.status === "paid_off" ? [["Paid off", shortDay(d.paidOff?.receivedOn)], ["Loan", usd(e.noteAmount)], ["Rate", `${e.rate.toFixed(2)}%`]] : [["Loan", usd(e.noteAmount)], ["Rate", `${e.rate.toFixed(2)}%`], ["Closing", shortDay(d.closingDate)]]).map(([label, value]) => (
                   <div key={label} className="min-w-0"><dt className="text-muted-foreground">{label}</dt><dd className="font-semibold text-foreground tabular-nums">{value}</dd></div>
                 ))}
               </dl>
@@ -86,8 +91,8 @@ export default function BorrowerLoan() {
           <Section title={funded ? "Loan balance" : "Estimated terms"}>
             <div className="grid grid-cols-2 gap-3">
               <Stat label="Note amount" value={usd(e.noteAmount)} />
-              <Stat label="Rate" value={`${e.rate.toFixed(2)}%`} sub={interestBasis(d.app.product, d.app.accrual)} />
-              {funded ? <><Stat label="Disbursed" value={usd(b.disbursed)} /><Stat label="Holdback left" value={usd(b.holdbackRemaining)} /><Stat label="Next payment" value={usd(b.nextPayment)} sub={ledger(d).nextDue ? `due ${shortDay(ledger(d).nextDue!)}` : "—"} /><Stat label="Maturity" value={shortDay(ledger(d).maturity)} sub={`${e.termMonths}-month term${d.extensions?.some((x) => x.status === "executed") ? ", extended" : ""}`} /></>
+              <Stat label="Rate" value={`${rate.toFixed(2)}%`} sub={interestBasis(d.app.product, d.app.accrual)} />
+              {funded ? <><Stat label="Disbursed" value={usd(b.disbursed)} /><Stat label="Holdback left" value={usd(b.holdbackRemaining)} /><Stat label="Next payment" value={usd(nextPayment)} sub={ledger(d).nextDue ? `due ${shortDay(ledger(d).nextDue!)}` : "—"} /><Stat label="Maturity" value={shortDay(ledger(d).maturity)} sub={`${e.termMonths}-month term${d.extensions?.some((x) => x.status === "executed") || d.modifications?.some((x) => x.status === "executed" && x.months) ? ", extended" : ""}`} /></>
                 : <><Stat label="Cash to close" value={usd(e.cashToClose)} /><Stat label="Target closing" value={shortDay(d.closingDate)} />{keyRatios.map((r) => <Stat key={r.key} label={PLAIN_RATIO[r.key] ?? r.label} value={r.key === "dscr" ? r.actual.toFixed(2) + "x" : pct(r.actual)} />)}<Stat label="Points" value={usd(e.points)} /></>}
             </div>
           </Section>
@@ -100,6 +105,7 @@ export default function BorrowerLoan() {
           {funded && <InsuranceCard deal={d} />}
           {funded && <div id="payments"><PaymentsPanel deal={d} /></div>}
           {funded && <div id="extensions"><Extensions deal={d} side="borrower" /></div>}
+          {funded && <Modifications deal={d} side="borrower" />}
           {d.status === "paid_off" && <PaidOff deal={d} side="borrower" />}
           {d.closing && PRE_FUNDING.includes(d.status) && (
             <Section title="Closing">

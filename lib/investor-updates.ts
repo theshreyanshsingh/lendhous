@@ -3,13 +3,19 @@
 // either; the borrower and broker never do. Pure.
 import type { Deal } from "./mockData";
 
-export type InvestorStatus = "current" | "late" | "default" | "default_late" | "matured" | "workout" | "paid_off";
-export const INVESTOR_STATUS: Record<InvestorStatus, string> = { current: "Current", late: "Late", default: "In default", default_late: "In default, payments late", matured: "Matured, not repaid", workout: "In workout", paid_off: "Paid off" };
-export const STATUS_TONE: Record<InvestorStatus, "green" | "amber" | "rose" | "slate" | "violet"> = { current: "green", late: "amber", default: "rose", default_late: "rose", matured: "amber", workout: "violet", paid_off: "slate" };
+export type InvestorStatus = "current" | "late" | "default" | "default_late" | "matured" | "workout" | "bankruptcy" | "foreclosure" | "reo" | "reo_sold" | "paid_off";
+export const INVESTOR_STATUS: Record<InvestorStatus, string> = { current: "Current", late: "Late", default: "In default", default_late: "In default, payments late", matured: "Matured, not repaid", workout: "In workout", bankruptcy: "Borrower in bankruptcy", foreclosure: "In foreclosure", reo: "Bank-owned", reo_sold: "Bank-owned, sold", paid_off: "Paid off" };
+export const STATUS_TONE: Record<InvestorStatus, "green" | "amber" | "rose" | "slate" | "violet"> = { current: "green", late: "amber", default: "rose", default_late: "rose", matured: "amber", workout: "violet", bankruptcy: "rose", foreclosure: "rose", reo: "rose", reo_sold: "slate", paid_off: "slate" };
 
-/** A loan's status in an investor's words. A workout the team declared outranks the rest until it's lifted. */
-export function investorStatus(deal: Pick<Deal, "status" | "paymentsLate" | "workout">): InvestorStatus {
+/**
+ * A loan's status in an investor's words. A foreclosure or bankruptcy outranks a workout the team declared, which outranks
+ * the rest until it's lifted (lib/collections.ts).
+ */
+export function investorStatus(deal: Pick<Deal, "status" | "paymentsLate" | "workout" | "bankruptcies" | "foreclosure" | "reo">): InvestorStatus {
   if (deal.status === "paid_off") return "paid_off";
+  if (deal.status === "reo") return deal.reo?.sold ? "reo_sold" : "reo";
+  if (deal.bankruptcies?.some((item) => !item.ended)) return "bankruptcy";
+  if (deal.foreclosure && !deal.foreclosure.stopped) return "foreclosure";
   if (deal.workout) return "workout";
   if (deal.status === "default") return deal.paymentsLate ? "default_late" : "default";
   if (deal.status === "matured") return "matured";
@@ -23,7 +29,7 @@ export const latestUpdate = (deal: Pick<Deal, "investorUpdates">) => [...(deal.i
 /** Why an update can't be posted, or null. */
 export function updateProblem(deal: Deal | undefined, text: string) {
   if (!deal) return "That loan no longer exists.";
-  if (!["funded", "servicing_current", "servicing_delinquent", "matured", "default", "paid_off"].includes(deal.status)) return "Updates for investors are for funded loans.";
+  if (!["funded", "servicing_current", "servicing_delinquent", "matured", "default", "paid_off", "reo"].includes(deal.status)) return "Updates for investors are for funded loans.";
   if (!text.trim()) return "Write the update.";
   return null;
 }

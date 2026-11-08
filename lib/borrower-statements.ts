@@ -3,9 +3,10 @@
 // ledger the loan page and the payoff letters do, so the three always agree.
 import type { Book } from "./book";
 import { evaluate, fundedBalances } from "./engine";
+import { inBankruptcy } from "./collections";
 import { splitOf } from "./investor-statements";
 import type { Deal } from "./mockData";
-import { addDays, addMonths, balanceOf, ledgerOf, maturityOf, METHODS, payoffFor, SERVICED } from "./servicing";
+import { addDays, addMonths, balanceOf, ledgerOf, maturityOf, METHODS, noteRateOn, payoffFor, SERVICED } from "./servicing";
 import { interestBasis } from "./status-words";
 import { individualBorrower, TAX_CONFIG } from "./tax-forms";
 
@@ -24,6 +25,8 @@ export type BorrowerStatement = {
   payoff: { goodThrough: string; total: number; perDiem: number } | null;
   paidOff?: string;
   interestThisYear: number;
+  /** The borrower is in bankruptcy, so the statement says it's for information only (lib/collections.ts). */
+  bankruptcy?: boolean;
 };
 
 const monthStart = (month: string) => `${month}-01`;
@@ -62,7 +65,7 @@ export function borrowerStatementFor(book: Book, deal: Deal, month: string): Bor
   return {
     dealId: deal.id, loanNumber: deal.loanNumber, borrowerName: deal.borrowerName, entityName: deal.entityName, property: `${deal.address}, ${deal.city} ${deal.zip}`,
     month, statementDate,
-    rate: e.rate, interestOn: interestBasis(deal.app.product, deal.app.accrual), maturity: maturityOf(deal), principal: paidOff ? 0 : balanceOf(deal),
+    rate: noteRateOn(deal), interestOn: interestBasis(deal.app.product, deal.app.accrual), maturity: maturityOf(deal), principal: paidOff ? 0 : balanceOf(deal),
     holdback: { total: round2(e.holdback), drawn: round2(e.holdback - balances.holdbackRemaining), remaining: round2(balances.holdbackRemaining) },
     draws, payments, received: round2(payments.reduce((sum, payment) => sum + payment.amount, 0)),
     billed: atEnd.rows.filter((row) => counts(row.due)).map((row) => ({ due: row.due, amount: row.amount, status: row.status })),
@@ -73,5 +76,6 @@ export function borrowerStatementFor(book: Book, deal: Deal, month: string): Bor
     payoff: payoff && { goodThrough: statementDate, total: payoff.total, perDiem: payoff.perDiem },
     paidOff,
     interestThisYear: interestPaidIn(deal, Number(month.slice(0, 4))),
+    ...(inBankruptcy(deal) ? { bankruptcy: true } : {}),
   };
 }

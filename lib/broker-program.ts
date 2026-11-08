@@ -22,7 +22,7 @@ export const PRIORITY_TIERS = new Set(["Platinum", "Gold"]);
 export const BROKER_LETTER_DAYS = 30;
 
 const LATE = new Set(["servicing_delinquent", "default"]);
-const FUNDED = new Set([...SERVICED, "paid_off"]);
+const FUNDED = new Set([...SERVICED, "paid_off", "reo"]);
 
 /** A broker's last 12 months with LendHous: what funded, how much, how much of it is behind now, and the tier that earns. */
 export function brokerStanding(deals: Deal[], brokerId: string, today: string) {

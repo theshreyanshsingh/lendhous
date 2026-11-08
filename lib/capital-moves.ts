@@ -5,7 +5,7 @@
 // portfolio and the team's desk agree.
 import type { Book } from "./book";
 import { evaluate } from "./engine";
-import { payoffShare, type Holding } from "./investor-statements";
+import { payoffShare, ratesOn, reoShare, type Holding } from "./investor-statements";
 import { payoffOn } from "./loan-exits";
 import type { Bid, Deal, DrawCall, Partner, PayoffProceeds, RolloverChoice, ShareTransfer } from "./mockData";
 import { firmOfacBlocker } from "./ofac";
@@ -27,14 +27,15 @@ export const currentBids = (book: Pick<Book, "bids">, dealId: string) => book.bi
 
 const holdingOf = (deal: Deal, bid: Bid): Holding => ({ deal, share: bid.pct / 100, investorRate: bid.lenderRate, noteRate: evaluate(deal.app).rate });
 
-/** Each current partner's money from a loan that just paid off, split the way it chose. */
+/** Each current partner's money from a loan that just paid off, or whose bank-owned property just sold, split the way it chose. */
 export function payoffProceeds(book: Pick<Book, "bids" | "partners">, paidOff: Deal, id: (n: number) => string): { partnerId: string; proceeds: PayoffProceeds }[] {
-  if (!paidOff.paidOff) return [];
+  const on = paidOff.paidOff?.receivedOn ?? paidOff.reo?.sold?.on;
+  if (!on) return [];
   return currentBids(book, paidOff.id).map((bid, n) => {
-    const { principal, interest } = payoffShare(holdingOf(paidOff, bid));
+    const { principal, interest } = paidOff.paidOff ? payoffShare(holdingOf(paidOff, bid)) : reoShare(holdingOf(paidOff, bid));
     const choice = rolloverOf(book.partners.find((partner) => partner.id === bid.partnerId));
     const rolled = choice === "all" ? round2(principal + interest) : choice === "principal" ? principal : 0;
-    return { partnerId: bid.partnerId, proceeds: { id: id(n), dealId: paidOff.id, loanNumber: paidOff.loanNumber, on: paidOff.paidOff!.receivedOn, principal, interest, choice, rolled, toSend: round2(principal + interest - rolled) } };
+    return { partnerId: bid.partnerId, proceeds: { id: id(n), dealId: paidOff.id, loanNumber: paidOff.loanNumber, on, principal, interest, choice, rolled, toSend: round2(principal + interest - rolled) } };
   });
 }
 
@@ -82,7 +83,9 @@ export function transferQuote(deal: Deal, bid: Pick<Bid, "pct" | "lenderRate">, 
   const { quote } = payoffOn(deal, on);
   const share = bid.pct / 100;
   const e = evaluate(deal.app);
-  const atRate = e.rate > 0 ? bid.lenderRate / e.rate : 1;
+  // The partner's rate moves with the note's when a modification changes it (lib/investor-statements.ts).
+  const rates = ratesOn({ deal, share, investorRate: bid.lenderRate, noteRate: e.rate }, on);
+  const atRate = rates.note > 0 ? rates.investor / rates.note : 1;
   const principal = round2(share * quote.principal);
   const holdback = deal.partnerFunding?.drawsAsReleased ? 0 : round2(share * Math.max(0, e.holdback - (deal.disbursedDraws ?? 0)));
   const accrued = round2(share * quote.accrued * atRate);

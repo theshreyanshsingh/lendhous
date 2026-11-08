@@ -7,6 +7,8 @@ import type { Application, BuyBox, Product } from "./engine";
 export type LoanStatus =
   | "submitted" | "initial_review" | "underwriting" | "term_sheet_issued" | "term_sheet_accepted" | "conditions"
   | "clear_to_close" | "closing" | "funded" | "servicing_current" | "servicing_delinquent" | "matured" | "default" | "paid_off"
+  // Foreclosed: the property is LendHous's (bank-owned) until it's sold (lib/collections.ts).
+  | "reo"
   // An application that ended before funding: turned down by the team, or called off by the borrower.
   | "declined" | "withdrawn";
 export type CapitalStatus = "not_started" | "recommended" | "teaser_out" | "bids_in" | "reserved" | "committed" | "funded";
@@ -106,6 +108,21 @@ export interface Deal {
   /** Every default declared on the loan, oldest first. The last one is open until it's cured. */
   defaults?: DefaultCase[];
   extensions?: LoanExtension[];
+  /** Changes to the loan's terms in a workout: a new rate, the arrears added to principal, more months (lib/modifications.ts). */
+  modifications?: LoanModification[];
+  /** Collections (lib/collections.ts): each call, text, letter or visit, the promises to pay, and the notices sent and how they arrived. */
+  contacts?: CollectionContact[];
+  promises?: PromiseToPay[];
+  notices?: CollectionNotice[];
+  /** Bankruptcy filings by the borrower or a guarantor. While one is open the automatic stay pauses collection. */
+  bankruptcies?: Bankruptcy[];
+  /** Money paid out to protect the loan (attorney's fees, court costs, taxes, insurance, upkeep): owed back at payoff. */
+  advances?: Advance[];
+  /** Costs the borrower paid back outside a payoff, as when bringing the loan current. */
+  advancesRepaid?: { id: string; amount: number; on: string; reference: string; by: string; at: string }[];
+  /** The foreclosure case, and the property once it's LendHous's (REO). */
+  foreclosure?: Foreclosure;
+  reo?: Reo;
   /** The money that paid the loan off, and the release of the mortgage after it. */
   paidOff?: Payoff;
   /** Who's closing the loan: the title company or closing attorney. */
@@ -221,8 +238,86 @@ export interface LoanExtension {
   declined?: { by: string; at: string; reason: string };
   executed?: { by: string; at: string; on: string; method: PaymentMethod; reference: string };
 }
+/**
+ * A change to a funded loan's terms in a workout (lib/modifications.ts): a new rate, the payments and fees behind added to
+ * principal or the fees waived, more months. Two people approve it, then it's signed and takes effect from the 1st of
+ * that month. What it changed is fixed when it's signed.
+ */
+export interface LoanModification {
+  id: string;
+  /** The new note rate, or none to keep the rate. */
+  rate?: number;
+  /** Add the payments behind (and the late fees, unless they're waived) to principal. */
+  capitalize: boolean;
+  waiveFees: boolean;
+  /** Months added to the maturity (short-term loans). */
+  months?: number;
+  /** proposedOn is the servicing day it was proposed, which the signing can't be before. */
+  reason: string; proposedBy: string; proposedAt: string; proposedOn: string;
+  status: "proposed" | "approved" | "declined" | "executed"; approvers: string[];
+  declined?: { by: string; at: string; reason: string };
+  executed?: {
+    on: string; effectiveOn: string; reference: string; by: string; at: string;
+    fromRate: number; toRate: number; fromMaturity: string; toMaturity: string; fromPayment: number; newPayment: number;
+    /** The payments added to principal, by due date, and the late fees added or waived, by the payment they were on. */
+    capitalizedDues: string[]; capitalizedPayments: number;
+    fees: { due: string; amount: number }[]; capitalizedFees: number; waivedFees: number;
+    /** Where the payments stood once it was signed: the rows through effectiveOn count as made. */
+    afterPayments: number;
+  };
+}
+export type ContactChannel = "call" | "text" | "email" | "letter" | "visit";
+export type ContactOutcome = "reached" | "left_message" | "no_answer" | "wrong_number" | "refused";
+/** One try at reaching the borrower about a late loan, and how it went. */
+export interface CollectionContact { id: string; on: string; channel: ContactChannel; with: string; outcome: ContactOutcome; note: string; by: string; at: string }
+/** The borrower's word that a payment is coming: kept once that much has arrived by the day, broken if not. */
+export interface PromiseToPay { id: string; amount: number; madeOn: string; dueBy: string; note: string; by: string; at: string; cancelled?: { by: string; at: string; reason: string } }
+export type NoticeKind = "late" | "default" | "acceleration" | "maturity_demand";
+export type DeliveryMethod = "certified_mail" | "first_class" | "overnight" | "hand" | "email";
+/** A collection notice and the proof it arrived: the return receipt or tracking, or why it came back. */
+export interface CollectionNotice {
+  id: string; kind: NoticeKind; sentOn: string; method: DeliveryMethod; to: string; tracking: string;
+  /** What the notice said was owed, and for a notice of default the day the borrower has until to cure it. */
+  amount: number; cureBy?: string;
+  by: string; at: string;
+  delivered?: { on: string; proof: string; by: string; at: string };
+  returned?: { on: string; reason: string; by: string; at: string };
+}
+/** A bankruptcy case. The automatic stay (11 U.S.C. 362) stops collection from the day it's filed until it ends. */
+export interface Bankruptcy {
+  id: string; debtor: string; chapter: 7 | 11 | 13; caseNumber: string; court: string; filedOn: string; by: string; at: string;
+  /** The day LendHous's proof of claim was filed with the court. */
+  claimFiledOn?: string;
+  ended?: { on: string; how: "dismissed" | "discharged" | "relief_from_stay" | "closed"; by: string; at: string };
+}
+export type AdvanceKind = "attorney" | "court" | "title" | "service" | "taxes" | "insurance" | "hoa" | "utilities" | "repairs" | "preservation" | "commission" | "other";
+/** Money paid out on a loan or its property. Before LendHous owns it, it's owed back at payoff; after, it's a carrying cost. */
+export interface Advance { id: string; on: string; kind: AdvanceKind; amount: number; note: string; by: string; at: string }
+/** The steps of a Florida foreclosure, which is in court (Fla. Stat. ch. 702 and 45.031). */
+export type ForeclosureStep = "complaint_filed" | "served" | "default_entered" | "judgment" | "sale_held" | "certificate_of_title";
+export interface Foreclosure {
+  attorney: string; referredOn: string; by: string; at: string;
+  caseNumber?: string; county?: string;
+  steps: { step: ForeclosureStep; on: string; note: string; by: string; at: string }[];
+  /** The final judgment's amount and the sale date the court set. */
+  judgment?: { amount: number; saleOn: string };
+  /** Who won at the sale and for how much. LendHous bids its judgment; a third party's bid pays the loan. */
+  sale?: { on: string; winner: "lendhous" | "third_party"; amount: number };
+  /** The case stopped without a sale: paid off, brought current, modified, dismissed, or the deed taken instead. */
+  stopped?: { on: string; why: "reinstated" | "paid_off" | "modified" | "dismissed" | "deed_in_lieu"; note: string; by: string; at: string };
+}
+/** A property LendHous owns after a foreclosure or a deed in lieu, until it's sold, and what the loan came to then. */
+export interface Reo {
+  since: string; how: "certificate_of_title" | "deed_in_lieu"; by: string; at: string;
+  owed: { principal: number; interest: number; fees: number; advances: number };
+  value?: number;
+  listed?: { on: string; price: number; by: string };
+  sold?: { on: string; price: number; closingCosts: number; reference: string; by: string; at: string };
+}
 export interface Payoff {
   amount: number; receivedOn: string; method: PaymentMethod; reference: string; by: string; at: string;
+  /** A third party's winning bid at the foreclosure sale: it ends the loan even when it's short of what was owed. */
+  foreclosureSale?: { saleOn: string; shortfall: number };
   /** What the payoff came to on the day it arrived. Anything over it is owed back to the borrower. */
   owed: number;
   /** Paid on a payoff letter that came to less than the payoff: the mortgage is released, and the rest is still owed. */
@@ -391,6 +486,8 @@ export type PayoffChannel = "portal" | "web_form" | "email" | "fax" | "mail" | "
 export interface PayoffLetter {
   number: number; issuedAt: string; issuedOn: string; issuedBy: string; goodThrough: string;
   principal: number; accrued: number; defaultAccrued: number; fees: number; credit: number; perDiem: number; total: number;
+  /** Costs advanced to protect the loan and not yet repaid. Letters from before these were kept have none. */
+  advances?: number;
   rate: number; interestFrom: string; interestDays: number; defaultRate?: number; defaultFrom?: string; defaultDays?: number;
   /** The letter this one corrects or brings forward, and why. */
   replaces?: number; reason?: string;
@@ -399,7 +496,7 @@ export interface PayoffLetter {
 export interface PayoffRequest {
   id: string; dealId: string; goodThrough: string;
   /** The estimate when it was asked for. The letters hold the figures that count. */
-  principal: number; accrued: number; defaultAccrued?: number; fees?: number; credit?: number; perDiem: number; total: number;
+  principal: number; accrued: number; defaultAccrued?: number; fees?: number; advances?: number; credit?: number; perDiem: number; total: number;
   requestedAt: string; by: string; status: "requested" | "sent" | "paid" | "refused";
   /** The day it counts as received, which starts the 10 days. Requests from before this was kept use requestedAt. */
   receivedOn?: string; channel?: PayoffChannel;
@@ -608,7 +705,7 @@ export const pipelineStages: { code: LoanStatus; label: string }[] = [
   { code: "submitted", label: "Submitted" }, { code: "initial_review", label: "Initial review" }, { code: "underwriting", label: "Underwriting" },
   { code: "term_sheet_issued", label: "Term sheet issued" }, { code: "term_sheet_accepted", label: "Term sheet accepted" }, { code: "conditions", label: "Conditions" },
   { code: "clear_to_close", label: "Clear to close" }, { code: "closing", label: "Closing" }, { code: "funded", label: "Funded" },
-  { code: "servicing_current", label: "Servicing: current" }, { code: "servicing_delinquent", label: "Servicing: delinquent" }, { code: "matured", label: "Matured" }, { code: "default", label: "Default" }, { code: "paid_off", label: "Paid off" },
+  { code: "servicing_current", label: "Servicing: current" }, { code: "servicing_delinquent", label: "Servicing: delinquent" }, { code: "matured", label: "Matured" }, { code: "default", label: "Default" }, { code: "paid_off", label: "Paid off" }, { code: "reo", label: "Bank-owned (REO)" },
   { code: "declined", label: "Declined" }, { code: "withdrawn", label: "Withdrawn" },
 ];
 export const borrowerTimeline = ["Submitted", "Underwriting", "Term sheet", "Conditions", "Clear to close", "Funded"];

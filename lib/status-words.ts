@@ -5,7 +5,7 @@ import type { CapitalStatus, DocStatus, LoanStatus } from "./mockData";
 export const LOAN_STATUS_WORDS: Record<LoanStatus, string> = {
   submitted: "Submitted", initial_review: "In review", underwriting: "Underwriting", term_sheet_issued: "Term sheet sent", term_sheet_accepted: "Term sheet signed",
   conditions: "Conditions", clear_to_close: "Clear to close", closing: "Closing", funded: "Funded", servicing_current: "Current", servicing_delinquent: "Payment late",
-  matured: "Matured", default: "In default", paid_off: "Paid off", declined: "Declined", withdrawn: "Withdrawn",
+  matured: "Matured", default: "In default", paid_off: "Paid off", reo: "Bank-owned (REO)", declined: "Declined", withdrawn: "Withdrawn",
 };
 export const DOC_STATUS_WORDS: Record<DocStatus, string> = { requested: "Requested", uploaded: "Uploaded", in_review: "In review", accepted: "Accepted", rejected: "Sent back", waived: "Not needed" };
 export const CAPITAL_STATUS_WORDS: Record<CapitalStatus, string> = { not_started: "Not started", recommended: "Recommended", teaser_out: "Teaser out", bids_in: "Bids in", reserved: "Reserved", committed: "Committed", funded: "Funded" };
