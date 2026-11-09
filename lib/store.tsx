@@ -6,6 +6,7 @@ import { demoBook, emptyBook, reducer, type Book, type BookAction } from "./book
 import { adoptPricing, type PricingPayload } from "./pricing-versions";
 import type { PolicyKind } from "./mockData";
 import { setInvestorFees } from "./investor-statements";
+import { applyRules, DEMO_RULES, type BookRules } from "./settings-rules";
 
 // Demo seats share one demo book in the browser, so a bid placed as the partner seat shows up for the staff seats.
 const KEY = "lendhous-demo-v4";
@@ -58,9 +59,10 @@ function outer(s: Book, a: Outer): Book {
   return a.state;
 }
 
-export function StoreProvider({ demo, accountId, viewerName, viewerEmail = "", initialBook, pricing, newLeads = 0, streetView = false, targets = SLA_TARGETS, paymentInstructions = "", referralBonus = 0, reviewUrl = "", lateFeesToInvestors = false, children }: { demo: boolean; accountId: string; viewerName: string; viewerEmail?: string; initialBook?: Book; pricing?: PricingPayload; newLeads?: number; streetView?: boolean; targets?: Targets; paymentInstructions?: string; referralBonus?: number; reviewUrl?: string; lateFeesToInvestors?: boolean; children: React.ReactNode }) {
+export function StoreProvider({ demo, accountId, viewerName, viewerEmail = "", initialBook, pricing, newLeads = 0, streetView = false, targets = SLA_TARGETS, paymentInstructions = "", referralBonus = 0, reviewUrl = "", lateFeesToInvestors = false, rules = DEMO_RULES, children }: { demo: boolean; accountId: string; viewerName: string; viewerEmail?: string; initialBook?: Book; pricing?: PricingPayload; newLeads?: number; streetView?: boolean; targets?: Targets; paymentInstructions?: string; referralBonus?: number; reviewUrl?: string; lateFeesToInvestors?: boolean; rules?: BookRules; children: React.ReactNode }) {
   // Investors' statements and portfolios split late fees the way Settings says, before anything here adds them up.
   setInvestorFees({ lateFees: lateFeesToInvestors });
+  applyRules(rules);
   const [s, local] = useReducer(outer, demo, (isDemo: boolean) => { adoptPricing(pricing); adoptPricing(initialBook?.pricing); return isDemo ? demoBook() : initialBook ?? emptyBook(); });
   const [hydrated, setHydrated] = useState(false);
   const [error, setError] = useState("");

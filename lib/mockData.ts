@@ -344,7 +344,7 @@ export interface Overrun { id: string; amount: number; scopeId?: string; note: s
 /** observedPct is the inspection's; claimedPct is how far along the borrower says the line is when they ask (0 to 1). */
 export interface DrawRequestLine { scopeId: string; requested: number; observedPct?: number; claimedPct?: number }
 /** A photo the borrower took for one budget line from their phone, with where and when (lib/photo-checks.ts). */
-export interface DrawPhoto { id: string; scopeId: string; name: string; at: string; takenAt?: string; lat?: number; lng?: number; documentId?: string }
+export interface DrawPhoto { id: string; scopeId: string; name: string; at: string; takenAt?: string; lat?: number; lng?: number; documentId?: string; sha256?: string; dhash?: string }
 export interface DrawRequest {
   id: string; dealId: string; requestedAt: string; by: string; note: string; contact: string; photos: string[]; lines: DrawRequestLine[];
   status: "submitted" | "inspecting" | "inspected" | "approved" | "funded" | "rejected"; approved?: number; approvers: string[]; reason?: string; fundedAt?: string; photoIds?: string[];
@@ -359,7 +359,13 @@ export interface DrawRequest {
   /** When it was approved or turned down, which stops its clock (lib/sla.ts). */
   decidedAt?: string;
   /** Who recorded the inspection, and how: the team, or a third-party inspector through their link (lib/photo-checks.ts). */
-  inspection?: { by: string; at: string; requestId?: string; notes: string };
+  inspection?: { by: string; at: string; requestId?: string; notes: string; method?: "desk" | "site" };
+  /**
+   * How the work is checked (lib/draw-review.ts): the team reviewing the borrower's photos at a desk, or an inspector's
+   * visit, and the fee for it, kept from the money released. A desk review the team sends on to an inspector says why.
+   */
+  path?: "desk" | "inspector"; fee?: number;
+  escalated?: { by: string; at: string; reason: string };
   /** The contractor's sign-off through their photo link that the work on these lines is done as the photos show. */
   contractorSigned?: { name: string; at: string; requestId: string };
 }
@@ -392,6 +398,10 @@ export interface InsurancePolicy {
   windIncluded?: boolean;
   /** LendHous is named as mortgagee and loss payee (ISAOA/ATIMA). Undefined on policies saved before this was asked. */
   mortgagee?: boolean;
+  /** Written by Citizens Property Insurance (lib/florida-insurance.ts). Unset reads the carrier's name. */
+  citizens?: boolean;
+  /** A flood policy from the federal program (NFIP) or a private insurer (Fla. Stat. 627.715). */
+  program?: "nfip" | "private";
   fileName?: string; documentId?: string;
   by: string; at: string;
   /** When the borrower and the team were told it ends soon, and that it lapsed. */
@@ -409,6 +419,8 @@ export interface InsuranceFile {
   /** Whether the property is in a special flood hazard area (FEMA zones A and V), which makes flood insurance required. */
   flood?: { sfha: boolean; zone: string; by: string; at: string; source?: "fema" };
   renewals?: InsuranceRenewal[];
+  /** A condo's association and who insures its building (lib/florida-insurance.ts). */
+  association?: { carrier: string; citizens: boolean; by: string; at: string };
 }
 /** A notice to owner from a lienor not hired by the borrower directly (713.06(2)). Each one needs a waiver for every draw after it. */
 export interface NoticeToOwner { id: string; lienor: string; role: "subcontractor" | "supplier" | "sub_subcontractor" | "other"; servedOn: string; by: string; at: string }
@@ -419,7 +431,8 @@ export interface LienWaiver {
   rejected?: { by: string; at: string; reason: string };
 }
 export interface FinalAffidavit { fileName: string; documentId?: string; sentBy: string; sentAt: string; checked?: { by: string; at: string; unpaidLienors: boolean } }
-export interface RequestPhoto { id: string; scopeId: string; shot: string; name: string; at: string; takenAt?: string; lat?: number; lng?: number }
+/** sha256 and dhash: the photo's fingerprints, worked out by the browser that sent it, to find it again (lib/photo-checks.ts). */
+export interface RequestPhoto { id: string; scopeId: string; shot: string; name: string; at: string; takenAt?: string; lat?: number; lng?: number; sha256?: string; dhash?: string }
 /** stormId: the property's condition after a storm passed (lib/storms.ts), not finished work. */
 export interface PhotoRequest { id: string; dealId: string; drawId?: string; stormId?: string; to: string; email?: string; who: "contractor" | "borrower" | "inspector"; scopeIds: string[]; sentBy: string; byTeam?: boolean; sentAt: string; expiresAt: string; status: "open" | "received" | "off"; finishedAt?: string; finishedBy?: string; note?: string; photos: RequestPhoto[] }
 export type ConditionCategory = "prior_to_docs" | "prior_to_funding" | "post_closing";

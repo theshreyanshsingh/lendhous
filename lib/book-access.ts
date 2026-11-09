@@ -26,6 +26,7 @@ import { currentPricing, pricingPayload } from "./pricing-versions";
 import { shortDay } from "./format";
 import { addDays, advancesOwed, ledger, ledgerOf, openDefault, SERVICED, servicingDate } from "./servicing";
 import { proposalProblem, signProblem } from "./modifications";
+import { deskProblem, deskReviewProblem } from "./draw-review";
 import { COLLECTIONS, defaultNotice, inBankruptcy, openBankruptcy, stayProblem, stepProblem } from "./collections";
 import { viewFor, type MemberAccess, type Permission } from "./permissions";
 import { approveProblem, canSendDeals, feePaidProblem } from "./brokers";
@@ -824,6 +825,11 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       if (!(view === "borrower" && deal.borrowerId === viewer.id)) return no(NOT_ALLOWED);
       if (!FUNDED.includes(deal.status)) return no("Draws start once the loan is funded.");
       if (action.linePhotos?.some((photo) => photo.documentId && !action.photoIds?.includes(photo.documentId))) return no("A photo on this draw wasn't uploaded with it. Try again.");
+      if (action.path === "desk") {
+        const lines = action.lines.filter((line) => line.requested > 0);
+        const refused = deskProblem(book, deal, lines, action.linePhotos ?? [], new Date().toISOString());
+        if (refused) return no(refused);
+      }
       return ok({ ...action, by: viewer.name });
     }
     case "requestChangeOrder": {
@@ -862,9 +868,21 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       if (!action.how.trim()) return no("Say how it was covered: the borrower paid the contractor, or a change order moved the money.");
       return staffOnlyAllowed("approve_draw") ? ok({ ...action, by: viewer.name }) : no(NOT_ALLOWED);
     }
-    case "sendInspector": case "recordInspection":
-      if (!book.draws.some((draw) => draw.id === action.drawId)) return no(GONE);
-      return staffOnly("assign_inspection", "approve_draw");
+    case "sendInspector": case "recordInspection": {
+      const draw = book.draws.find((item) => item.id === action.drawId);
+      if (!draw) return no(GONE);
+      if (!staffOnlyAllowed("assign_inspection", "approve_draw")) return no(NOT_ALLOWED);
+      // A photo review the borrower chose goes to an inspector only with the reason they'll be told.
+      if (action.t === "sendInspector" && draw.path === "desk" && draw.status === "submitted" && !action.reason?.trim()) return no("Say why it needs an inspector's visit: the borrower is told.");
+      return ok(action.t === "sendInspector" ? { ...action, by: viewer.name } : action);
+    }
+    case "deskReview": {
+      const draw = book.draws.find((item) => item.id === action.drawId);
+      if (!draw) return no(GONE);
+      if (!staffOnlyAllowed("assign_inspection", "approve_draw")) return no(NOT_ALLOWED);
+      const refused = deskReviewProblem(draw, action.observed);
+      return refused ? no(refused) : ok({ ...action, by: viewer.name });
+    }
     case "approveDrawRequest":
       if (!book.draws.some((draw) => draw.id === action.drawId)) return no(GONE);
       if (!staff || !allowed("approve_draw")) return no(NOT_ALLOWED);
@@ -878,12 +896,13 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       const holds = action.t === "releaseDraw" ? unreleasedHolds(dealOf(draw.dealId)!, draw, serviceDay(book)) : [];
       return holds.length ? no(holds[0]) : staffOnly("approve_draw");
     }
-    case "saveInsurance": case "setFloodZone": case "decideRenewal": {
+    case "saveInsurance": case "setFloodZone": case "decideRenewal": case "saveAssociationPolicy": {
       const deal = dealOf(action.dealId);
       if (!deal) return no(GONE);
       if (!staffOnlyAllowed("manage_conditions", "service_loans", "approve_draw", "assign_inspection")) return no(NOT_ALLOWED);
       if (!INSURED.includes(deal.status)) return no("The insurance file is kept from an accepted term sheet until the loan is paid off.");
       if (action.t === "saveInsurance") { const refused = policyProblem(deal, action); if (refused) return no(refused); }
+      if (action.t === "saveAssociationPolicy" && deal.app.propertyType !== "condo") return no("Only a condo has an association's policy to record.");
       if (action.t === "decideRenewal") {
         if (!openRenewals(deal).some((item) => item.id === action.renewalId)) return no("That renewal has already been looked at.");
         if (!action.accept && !action.note.trim()) return no("Say what's wrong with it, so the borrower knows what to send.");

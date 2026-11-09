@@ -19,6 +19,7 @@ import { prisma } from "@/lib/prisma";
 import { addDays, defaultInterestFrom, defaultRateOf, ledger, maturityOf, servicingTermsOf } from "@/lib/servicing";
 import { BANKRUPTCY_ENDS, COLLECTIONS, inBankruptcy, PAUSED_IN_BANKRUPTCY } from "@/lib/collections";
 import { modificationWords } from "@/lib/modifications";
+import { toSend } from "@/lib/draw-review";
 
 const origin = () => (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "");
 
@@ -335,8 +336,17 @@ function actionAlerts(before: Book, after: Book, action: BookAction): Alert[] {
       for (const storm of passed) alerts.push({ to: "team", subject: `${storm.label} has passed`, body: `${storm.label} is no longer on NHC's list of active storms. Each of the ${covers(storm.dealIds.length)} it covered is asked for photos of the property, and draws on them need an inspection from after the storm before they're approved or released. ${page}`, event: "storm.passed" });
       return alerts;
     }
-    case "requestDraw":
-      return [{ to: "team", subject: `Draw requested: ${number(action.dealId)}`, body: `${action.by} requested a draw of $${action.lines.reduce((sum, line) => sum + line.requested, 0).toLocaleString("en-US")}.`, event: "draw.requested" }];
+    case "requestDraw": {
+      const draw = after.draws.find((item) => !before.draws.some((old) => old.id === item.id));
+      const way = draw?.path === "desk" ? " It's for a photo review: decide it from the borrower's photos on the Draws page." : "";
+      return [{ to: "team", subject: `Draw requested: ${number(action.dealId)}`, body: `${action.by} requested a draw of $${action.lines.reduce((sum, line) => sum + line.requested, 0).toLocaleString("en-US")}.${way}`, event: "draw.requested" }];
+    }
+    case "sendInspector": {
+      // A photo review the team sent on to an inspector: the borrower hears why, and that the fee changed.
+      const draw = after.draws.find((item) => item.id === action.drawId);
+      if (!draw?.escalated || before.draws.find((item) => item.id === action.drawId)?.escalated) return [];
+      return [{ to: "borrower", dealId: draw.dealId, subject: `Your draw needs an inspector: ${number(draw.dealId)}`, body: `We couldn't decide your draw from the photos alone: ${draw.escalated.reason} An inspector will visit; whoever you named for the inspector will hear from them.${draw.fee ? ` The inspection fee of ${dollars(draw.fee)} comes out of the draw instead of the photo review's.` : ""}`, event: "draw.escalated" }];
+    }
     case "finishPhotoRequest": {
       const request = after.photoRequests.find((item) => item.id === action.requestId);
       if (!request) return [];
@@ -352,7 +362,7 @@ function actionAlerts(before: Book, after: Book, action: BookAction): Alert[] {
       if (!draw) return [];
       const calls = (after.deals.find((item) => item.id === draw.dealId)?.drawCalls ?? []).filter((call) => call.drawId === draw.id && !(before.deals.find((item) => item.id === draw.dealId)?.drawCalls ?? []).some((old) => old.id === call.id));
       return [
-        ...calls.map((call): Alert => ({ to: "partner", firmId: call.partnerId, subject: `Your share of a draw: ${number(draw.dealId)}`, body: `LendHous released a draw of ${dollars(draw.approved ?? 0)} on ${number(draw.dealId)}. Your share is ${dollars(call.amount)}, due by ${longDate(call.dueOn)}. Where to send it is on your portfolio page; confirm it by phone before you first send money.`, event: "investor.draw_call" })),{ to: "borrower", dealId: draw.dealId, subject: `Update on your draw: ${number(draw.dealId)}`, body: action.t === "releaseDraw" ? `Your draw of $${(draw.approved ?? 0).toLocaleString("en-US")} was released.` : `Your draw wasn't approved: ${draw.reason}`, event: `draw.${action.t === "releaseDraw" ? "released" : "rejected"}` }];
+        ...calls.map((call): Alert => ({ to: "partner", firmId: call.partnerId, subject: `Your share of a draw: ${number(draw.dealId)}`, body: `LendHous released a draw of ${dollars(draw.approved ?? 0)} on ${number(draw.dealId)}. Your share is ${dollars(call.amount)}, due by ${longDate(call.dueOn)}. Where to send it is on your portfolio page; confirm it by phone before you first send money.`, event: "investor.draw_call" })),{ to: "borrower", dealId: draw.dealId, subject: `Update on your draw: ${number(draw.dealId)}`, body: action.t === "releaseDraw" ? `Your draw of $${(draw.approved ?? 0).toLocaleString("en-US")} was released.${draw.fee ? ` ${dollars(toSend(draw))} is on its way to you after the ${dollars(draw.fee)} ${draw.path === "desk" ? "photo review" : "inspection"} fee.` : ""}` : `Your draw wasn't approved: ${draw.reason}`, event: `draw.${action.t === "releaseDraw" ? "released" : "rejected"}` }];
     }
     case "recordPayment": {
       const deal = loan(action.dealId);

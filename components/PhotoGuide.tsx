@@ -4,6 +4,7 @@ import { Camera, Check, Loader2, MapPin, RotateCcw, X } from "lucide-react";
 import { Logo } from "@/components/logo";
 import { missingShots, type GuideStep } from "@/lib/photo-requests";
 import { shrinkPhoto } from "@/lib/shrink-photo";
+import { photoPrints } from "@/lib/photo-prints";
 
 type Sent = { id: string; scopeId: string; shot: string; name: string };
 type Tile = { key: string; scopeId: string; shot: string; state: "sending" | "sent" | "failed"; url: string; photoId?: string; file?: File; error?: string };
@@ -59,6 +60,9 @@ export function PhotoGuide({ token, to, sentBy, address, steps, photos, finished
       const small = await shrinkPhoto(file);
       const form = new FormData();
       form.set("file", small);
+      // The picture's difference hash, so the team sees a photo sent before (lib/photo-checks.ts). The server hashes the file.
+      const { dhash } = await photoPrints(small);
+      if (dhash) form.set("dhash", dhash);
       form.set("scopeId", tile.scopeId);
       form.set("shot", tile.shot);
       if (file.lastModified) form.set("takenAt", new Date(file.lastModified).toISOString());

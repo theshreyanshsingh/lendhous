@@ -51,6 +51,19 @@ const makePhoto = async (p) => Buffer.from(await p.evaluate(() => {
   context.fillStyle = "#202B28"; context.beginPath(); context.moveTo(160, 270); context.lineTo(400, 110); context.lineTo(640, 270); context.fill();
   return canvas.toDataURL("image/jpeg", 0.9).split(",")[1];
 }), "base64");
+// A different picture for each seed, so each has its own fingerprint: a grid of grey blocks in a pattern from the seed.
+const makeScene = async (p, seed) => Buffer.from(await p.evaluate((n) => {
+  const canvas = document.createElement("canvas");
+  canvas.width = 900; canvas.height = 800;
+  const context = canvas.getContext("2d");
+  let x = n * 2654435761 % 4294967296;
+  for (let row = 0; row < 8; row++) for (let col = 0; col < 9; col++) {
+    x = (x * 1103515245 + 12345) % 2147483648;
+    const grey = 30 + (x % 200);
+    context.fillStyle = `rgb(${grey},${grey},${grey})`; context.fillRect(col * 100, row * 100, 100, 100);
+  }
+  return canvas.toDataURL("image/jpeg", 0.92).split(",")[1];
+}, seed), "base64");
 const seen = (locator) => locator.waitFor({ timeout: 5000 }).then(() => true, () => false);
 const shot = async (p, name, full = true) => { await p.waitForTimeout(350); await p.screenshot({ path: `${OUT}/${name}`, fullPage: full }); };
 
@@ -139,7 +152,7 @@ ok("the quote request takes photos of the property", await page.getByTestId("quo
 await page.getByTestId("quote-see-terms").click();
 ok("the visitor sees indicative terms from today's pricing before giving any contact details", (await seen(page.getByTestId("quote-live"))) && (await page.getByTestId("quote-amount").innerText()).startsWith("up to $"));
 await page.getByTestId("quote-cash-parts").locator("summary").click();
-ok("with the cash to close itemized", (await page.getByTestId("quote-cash-parts").innerText()).includes("Down payment") && (await page.getByTestId("quote-cash-parts").innerText()).includes("Closing costs"));
+ok("with the cash to close itemized, Florida's doc stamps and intangible tax to the dollar", (await page.getByTestId("quote-cash-parts").innerText()).includes("Down payment") && (await page.getByTestId("quote-cash-parts").innerText()).includes("Florida doc stamps on the mortgage") && (await page.getByTestId("quote-cash-parts").innerText()).includes("Title, recording and settlement"));
 const cashBefore = await page.getByTestId("quote-cash").innerText();
 await page.getByTestId("quote-rehab").fill("90000");
 ok("the terms follow the numbers as they change", (await page.getByTestId("quote-cash").innerText()) !== cashBefore);
@@ -1595,6 +1608,53 @@ await page.getByTestId("sell-reo").click();
 ok("its sale pays costs back, then principal, and splits the loss by who holds the loan", (await seen(page.getByTestId("loss-split"))) && (await page.getByTestId("loss-row").count()) >= 1 && (await page.getByTestId("reo-loss").innerText()).startsWith("$"));
 ok("and the loan ends bank-owned, its collections file closed", (await seen(page.getByTestId("collections-closed"))) && (await page.getByText("Bank-owned", { exact: true }).count()) > 0 && (await page.getByTestId("contact-form").count()) === 0);
 await shot(page, "28g-admin-reo-sold.png");
+
+// 10e. Florida's rules: insurance deadlines on a Citizens rental, recording taxes at closing, and a draw checked from the
+// borrower's own photos, which are fingerprinted so a photo sent before is caught.
+await page.goto(BASE + "/admin/deals/d10?tab=Servicing");
+ok("a Citizens-insured rental shows its coverage after the biggest Citizens increase", (await seen(page.getByTestId("insurance-warning-citizens-rise"))) && (await page.getByTestId("insurance-warning-citizens-rise").innerText()).includes("up to 50% at renewal"));
+await page.goto(BASE + "/admin/deals/d7?tab=Closing");
+ok("the closing tab states Florida's doc stamps and intangible tax", (await seen(page.getByTestId("closing-taxes"))) && (await page.getByTestId("closing-taxes-total").innerText()).startsWith("$"));
+await shot(page, "29-admin-closing-taxes.png");
+await page.goto(BASE + "/admin/settings");
+ok("an owner sets the NFIP's date and each way of checking a draw's fee", (await seen(page.getByTestId("setting-nfip"))) && (await page.getByTestId("setting-fee-desk").isVisible()));
+await actAs(SEATS.borrower);
+await ctx.grantPermissions(["geolocation"], { origin: BASE });
+await ctx.setGeolocation({ latitude: 26.1224, longitude: -80.1374 });
+await page.goto(BASE + "/admin/borrower/d2");
+await page.getByTestId("request-draw").click();
+await page.getByTestId("draw-pick-plumbing").check();
+await page.getByTestId("draw-pick-exterior").check();
+await page.getByTestId("draw-next").click();
+const deskLine = async (scopeId, amount, seeds) => {
+  await page.getByTestId(`draw-${scopeId}`).fill(amount);
+  await page.getByTestId(`draw-pct-${scopeId}`).fill("70");
+  await page.getByTestId(`draw-photo-${scopeId}`).setInputFiles(await Promise.all(seeds.map(async (seed) => ({ name: `${scopeId}-${seed}.jpg`, mimeType: "image/jpeg", buffer: await makeScene(page, seed) }))));
+  await page.getByTestId("draw-shots").waitFor();
+  await page.waitForTimeout(600);
+  await page.getByTestId("draw-next").click();
+};
+const firstLine = (await page.getByTestId("draw-line").innerText()).includes("Plumbing") ? "plumbing" : "exterior";
+await deskLine(firstLine, "1500", [11, 12]);
+await deskLine(firstLine === "plumbing" ? "exterior" : "plumbing", "2000", [13, 14]);
+ok("a modest draw with two located photos of each line can be checked from the photos", (await seen(page.getByTestId("draw-path"))) && !(await page.getByTestId("draw-path-desk").isDisabled()) && (await page.getByTestId("draw-path").innerText()).includes("$100"));
+await page.getByTestId("draw-note").fill("Fixtures in and siding on (FAKE).");
+await page.getByTestId("draw-contact").fill("Alex Sample, (555) 010-0100");
+await page.getByTestId("draw-certify").check();
+await shot(page, "29b-borrower-photo-review.png");
+await page.getByTestId("submit-draw").click();
+ok("the borrower asks for a photo review, and sees its fee", await seen(page.getByTestId("my-draw").filter({ hasText: "photo review ($100 fee" })));
+await ctx.clearPermissions();
+await actAs(SEATS.staff);
+await page.goto(BASE + "/admin/draws");
+const deskCard = page.getByTestId("draw-card").filter({ has: page.getByTestId("record-desk-review") }).first();
+ok("the team sees it's a photo review, with the borrower's claims filled in to check", (await seen(deskCard)) && (await deskCard.getByTestId("draw-path-line").innerText()).includes("Photo review · $100 fee"));
+await shot(page, "29c-admin-photo-review.png");
+await deskCard.getByTestId("record-desk-review").click();
+const reviewed = page.getByTestId("draw-card").filter({ hasText: "reviewed from the photos" }).first();
+ok("recording the photo review readies it to approve, as an inspection would", (await seen(reviewed)) && (await reviewed.getByTestId("draw-review").innerText()).includes("supported"));
+await reviewed.getByTestId("approve-draw").click();
+ok("once approved, it says what to send after the fee", (await seen(page.getByTestId("draw-approved").filter({ hasText: "the $100 fee is kept" }))));
 
 // 11. Real records: the audit log, notifications, and a forgotten password
 await page.goto(BASE + "/admin/audit");

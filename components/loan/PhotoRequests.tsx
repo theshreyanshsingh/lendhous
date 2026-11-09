@@ -5,7 +5,7 @@ import { Badge, shortDate } from "@/components/ui";
 import type { Deal, DrawRequest, PhotoRequest, RequestPhoto } from "@/lib/mockData";
 import { looksOld, missingShots, PHOTO_LINK_DAYS, photoRequestState, requestSteps, type LinkState } from "@/lib/photo-requests";
 import { useStore } from "@/lib/store";
-import { photosSummary } from "@/lib/photo-checks";
+import { photosSummary, reusedSummary } from "@/lib/photo-checks";
 import { phonePill } from "@/lib/ui-classes";
 
 const STATE: Record<LinkState, { label: string; tone: "blue" | "amber" | "slate" }> = {
@@ -149,6 +149,7 @@ function IssuedLink({ issued, demo, onClose }: { issued: Issued; demo: boolean; 
 }
 
 function RequestRow({ request, deal, draw, local, busy, canChange, asBorrowerView = false, onRenew, onTurnOff }: { request: PhotoRequest; deal: Deal; draw?: DrawRequest; local: boolean; busy: boolean; canChange: boolean; asBorrowerView?: boolean; onRenew: () => void; onTurnOff: () => void }) {
+  const { s } = useStore();
   const state = photoRequestState(request, deal, draw);
   const steps = requestSteps(request, deal);
   const missing = missingShots(steps, request.photos);
@@ -169,6 +170,7 @@ function RequestRow({ request, deal, draw, local, busy, canChange, asBorrowerVie
         </div>
       ))}
       {(() => { const summary = !asBorrowerView ? photosSummary(request.photos, deal.geo) : null; return summary ? <p className={`mt-2 text-xs ${summary.flagged ? "text-warn" : "text-muted-foreground"}`} data-testid="photo-checks">Where and when: {summary.text}.</p> : null; })()}
+      {(() => { const reused = !asBorrowerView ? reusedSummary(s, request.photos) : null; return reused ? <p className="mt-1 text-xs text-warn" data-testid="photo-reused">{reused}</p> : null; })()}
       {request.who === "inspector" && draw?.inspection?.requestId === request.id && <p className="mt-2 text-xs text-good" data-testid="inspector-recorded">{draw.inspection.by} recorded the inspection{draw.inspection.notes ? `: ${draw.inspection.notes}` : "."}</p>}
       {received && missing.length > 0 && <p className="mt-2 text-xs text-warn" data-testid="photo-missing">Not sent: {missing.map((item) => `${item.step}, ${item.shot.toLowerCase()}`).join("; ")}</p>}
       {state !== "closed" && canChange && (

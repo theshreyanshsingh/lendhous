@@ -1628,3 +1628,30 @@ describe("collections and modifications", () => {
   });
 });
 
+
+describe("Florida rules from Settings", () => {
+  it("charge the photo review's fee the owner set, on a draw through the server", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const { demoBook } = await import("@/lib/book");
+    const { readBook, runAction } = await import("@/lib/book-store");
+    const { resetSettingsCache } = await import("@/lib/settings");
+    const d17 = demoBook().deals.find((deal) => deal.id === "d17")!;
+    await prisma.platformSettings.upsert({ where: { id: "default" }, create: { id: "default", drawFeeDeskCents: 9_500, drawFeeInspectionCents: 22_500 }, update: { drawFeeDeskCents: 9_500, drawFeeInspectionCents: 22_500 } });
+    resetSettingsCache();
+    await prisma.bookRecord.create({ data: { id: "deals:fl-draw", kind: "deals", data: JSON.parse(JSON.stringify({ ...d17, id: "fl-draw", loanNumber: "LH-7501", borrowerId: "fl-borrower" })) } });
+    const borrower = { id: "fl-borrower", name: "Logan Fakename (FAKE)", roleCodes: ["BORROWER" as const] };
+    const at = new Date(Date.now() - 3_600_000).toISOString();
+    const shots = ["plumbing", "exterior"].flatMap((scopeId, line) => [0, 1].map((n) => ({ scopeId, name: `${scopeId}-${n}.jpg`, takenAt: at, lat: d17.geo!.lat, lng: d17.geo!.lng, dhash: ["9c3a5e1f7b2d4086", "35ac91e07f4b2d68", "c8e1374fa95b2d06", "71f04ec9b2a85d3e"][line * 2 + n] })));
+    const asked = await runAction(borrower, { t: "requestDraw", dealId: "fl-draw", by: "", note: "Done", contact: "Logan", photos: [], lines: [{ scopeId: "plumbing", requested: 3_000, claimedPct: 0.5 }, { scopeId: "exterior", requested: 4_000, claimedPct: 0.5 }], linePhotos: shots, path: "desk" });
+    if ("error" in asked) throw new Error(asked.error);
+    const draw = (await readBook()).book.draws.find((item) => item.dealId === "fl-draw")!;
+    expect(draw).toMatchObject({ path: "desk", fee: 95 });
+    const staff = { id: "staff-fl", name: "Uma Desk", roleCodes: ["UNDERWRITER" as const] };
+    const sent = await runAction(staff, { t: "sendInspector", drawId: draw.id, reason: "The siding photos are blurry." });
+    if ("error" in sent) throw new Error(sent.error);
+    expect((await readBook()).book.draws.find((item) => item.id === draw.id)).toMatchObject({ path: "inspector", fee: 225, escalated: { by: "Uma Desk" } });
+    await prisma.platformSettings.update({ where: { id: "default" }, data: { drawFeeDeskCents: 0, drawFeeInspectionCents: 0 } });
+    resetSettingsCache();
+    vi.restoreAllMocks();
+  });
+});

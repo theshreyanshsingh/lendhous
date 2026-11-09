@@ -4,6 +4,8 @@ import { Reveal } from "@/components/motion";
 import { Badge, Section } from "@/components/ui";
 import { shortDay } from "@/lib/format";
 import { coverageShort, coverNeeds, insuranceGaps, kindsFor, lapsedPolicies, openRenewals, policiesOf, POLICY_KINDS } from "@/lib/insurance";
+import { insuranceWarnings, isCitizens } from "@/lib/florida-insurance";
+import { pricingFor } from "@/lib/pricing-versions";
 import type { Deal, InsurancePolicy, InsuranceRenewal, PolicyKind } from "@/lib/mockData";
 import { daysBetween, SERVICED } from "@/lib/servicing";
 import { useStore } from "@/lib/store";
@@ -11,8 +13,8 @@ import { FloodMapLine } from "./FloodMapLine";
 import { useServiceDay } from "./use-service-day";
 
 const small = "h-9! px-3! text-xs!";
-type Draft = { kind: PolicyKind; carrier: string; policy: string; expiresOn: string; coverage: string; windIncluded: boolean; mortgagee: boolean };
-const draftOf = (kind: PolicyKind, policy?: InsurancePolicy): Draft => ({ kind, carrier: policy?.carrier ?? "", policy: policy?.policy ?? "", expiresOn: policy?.expiresOn ?? "", coverage: policy?.coverage !== undefined ? String(policy.coverage) : "", windIncluded: policy?.windIncluded ?? false, mortgagee: policy?.mortgagee ?? false });
+type Draft = { kind: PolicyKind; carrier: string; policy: string; expiresOn: string; coverage: string; windIncluded: boolean; mortgagee: boolean; citizens?: boolean; program: "" | "nfip" | "private" };
+const draftOf = (kind: PolicyKind, policy?: InsurancePolicy): Draft => ({ kind, carrier: policy?.carrier ?? "", policy: policy?.policy ?? "", expiresOn: policy?.expiresOn ?? "", coverage: policy?.coverage !== undefined ? String(policy.coverage) : "", windIncluded: policy?.windIncluded ?? false, mortgagee: policy?.mortgagee ?? false, citizens: policy?.citizens, program: policy?.program ?? "" });
 const insuresBuilding = (kind: PolicyKind) => kind === "hazard" || kind === "builders_risk";
 
 /**
@@ -38,10 +40,15 @@ export function InsurancePanel({ deal }: { deal: Deal }) {
   const save = async () => {
     if (!draft) return;
     const coverage = draft.coverage.trim() ? Number(draft.coverage.replace(/[$,\s]/g, "")) : undefined;
-    if (await dispatch({ t: "saveInsurance", dealId: deal.id, kind: draft.kind, carrier: draft.carrier, policy: draft.policy, expiresOn: draft.expiresOn, ...(coverage !== undefined ? { coverage } : {}), ...(insuresBuilding(draft.kind) ? { windIncluded: draft.windIncluded } : {}), mortgagee: draft.mortgagee, by: viewerName })) setDraft(null);
+    if (await dispatch({ t: "saveInsurance", dealId: deal.id, kind: draft.kind, carrier: draft.carrier, policy: draft.policy, expiresOn: draft.expiresOn, ...(coverage !== undefined ? { coverage } : {}), ...(insuresBuilding(draft.kind) ? { windIncluded: draft.windIncluded } : {}), mortgagee: draft.mortgagee, ...(draft.kind !== "flood" ? { citizens: isCitizens({ carrier: draft.carrier, citizens: draft.citizens }) } : {}), ...(draft.kind === "flood" && draft.program ? { program: draft.program } : {}), by: viewerName })) setDraft(null);
   };
   const saveFlood = async () => { if (await dispatch({ t: "setFloodZone", dealId: deal.id, sfha: floodDraft.sfha === "yes", zone: floodDraft.zone, by: viewerName })) setFloodOpen(false); };
   const tone = lapsed.length ? "rose" : gaps.length ? "amber" : "green";
+  // What's coming under Florida's insurance rules: Citizens' flood requirement, the NFIP's date, a rental's coverage
+  // after the biggest Citizens rise, and a condo association moving to surplus lines (lib/florida-insurance.ts).
+  const warnings = today ? insuranceWarnings(deal, policies, today, pricingFor(deal.app.pricingVersion).minDscr) : [];
+  const [association, setAssociation] = useState({ carrier: deal.insurance?.association?.carrier ?? "", citizens: deal.insurance?.association?.citizens ?? false });
+  const saveAssociation = () => void dispatch({ t: "saveAssociationPolicy", dealId: deal.id, carrier: association.carrier.trim(), citizens: association.citizens, by: viewerName });
   const funded = SERVICED.includes(deal.status);
   return (
     <Section title="Insurance" right={<Badge tone={tone}>{lapsed.length ? "Lapsed" : gaps.length ? `${gaps.length} to sort out` : "In place"}</Badge>}>
@@ -90,7 +97,7 @@ export function InsurancePanel({ deal }: { deal: Deal }) {
                 return (
                   <li key={policy.kind} className="space-y-0.5 py-2" data-testid="insurance-policy-row">
                     <p><span className="font-medium">{POLICY_KINDS[policy.kind]}</span> · {policy.carrier}{policy.policy ? ` · policy ${policy.policy}` : ""} · ends {shortDay(policy.expiresOn)}</p>
-                    <p className="text-muted-foreground">{[policy.coverage !== undefined ? `$${policy.coverage.toLocaleString("en-US")} coverage` : "", insuresBuilding(policy.kind) ? (policy.windIncluded ? "wind included" : "no wind in this policy") : "", policy.mortgagee === true ? "names LendHous as mortgagee" : policy.mortgagee === false ? "doesn't name LendHous yet" : "mortgagee not checked"].filter(Boolean).join(" · ")}{policy.documentId ? <> · <a className="text-link underline underline-offset-2" href={`/api/documents/${policy.documentId}`} target="_blank" rel="noreferrer">{policy.fileName ?? "the policy"}</a></> : null}</p>
+                    <p className="text-muted-foreground">{[policy.coverage !== undefined ? `$${policy.coverage.toLocaleString("en-US")} coverage` : "", insuresBuilding(policy.kind) ? (policy.windIncluded ? "wind included" : "no wind in this policy") : "", policy.kind !== "flood" && isCitizens(policy) ? "Citizens" : "", policy.kind === "flood" ? (policy.program === "private" ? "private flood" : policy.program === "nfip" ? "NFIP" : "NFIP or private not said") : "", policy.mortgagee === true ? "names LendHous as mortgagee" : policy.mortgagee === false ? "doesn't name LendHous yet" : "mortgagee not checked"].filter(Boolean).join(" · ")}{policy.documentId ? <> · <a className="text-link underline underline-offset-2" href={`/api/documents/${policy.documentId}`} target="_blank" rel="noreferrer">{policy.fileName ?? "the policy"}</a></> : null}</p>
                     {days !== null && <p className={days < 0 ? "text-bad" : days <= 30 ? "text-warn" : "text-muted-foreground"}>{days < 0 ? `Lapsed ${-days} day${days === -1 ? "" : "s"} ago.` : `${days} day${days === 1 ? "" : "s"} left.`}{funded && days <= 30 ? " Draws stop if it lapses." : ""}</p>}
                     <button type="button" className={`btn-ghost ${small} mt-1`} data-testid={`edit-policy-${policy.kind}`} onClick={() => edit(policy.kind)}>Update it</button>
                   </li>
@@ -111,9 +118,11 @@ export function InsurancePanel({ deal }: { deal: Deal }) {
                   <label className="block min-w-0"><span className="label">{insuresBuilding(draft.kind) ? "Dwelling coverage ($, optional)" : "Coverage ($, optional)"}</span><input className="desk-input" inputMode="numeric" data-testid="insurance-coverage" maxLength={14} value={draft.coverage} onChange={(event) => put({ coverage: event.target.value })} /></label>
                 </div>
                 {insuresBuilding(draft.kind) && <label className="flex items-start gap-2 text-xs"><input type="checkbox" className="mt-0.5" data-testid="insurance-wind" checked={draft.windIncluded} onChange={(event) => put({ windIncluded: event.target.checked })} /><span>It covers windstorm and hurricane too (no wind exclusion).</span></label>}
+                {draft.kind !== "flood" && <label className="flex items-start gap-2 text-xs"><input type="checkbox" className="mt-0.5" data-testid="insurance-citizens" checked={isCitizens({ carrier: draft.carrier, citizens: draft.citizens })} onChange={(event) => put({ citizens: event.target.checked })} /><span>Written by Citizens Property Insurance, the state&apos;s insurer of last resort.</span></label>}
+                {draft.kind === "flood" && <label className="block max-w-xs"><span className="label">Flood program</span><select className="desk-input" data-testid="insurance-program" value={draft.program} onChange={(event) => put({ program: event.target.value as Draft["program"] })}><option value="">Choose one</option><option value="nfip">The NFIP (FEMA)</option><option value="private">A private insurer</option></select></label>}
                 <label className="flex items-start gap-2 text-xs"><input type="checkbox" className="mt-0.5" data-testid="insurance-mortgagee" checked={draft.mortgagee} onChange={(event) => put({ mortgagee: event.target.checked })} /><span>It names LendHous as mortgagee and loss payee (ISAOA/ATIMA).</span></label>
                 <div className="flex flex-wrap gap-2">
-                  <button type="button" className={`btn-primary ${small}`} data-testid="save-insurance" disabled={!draft.carrier.trim() || !draft.expiresOn} onClick={() => void save()}>Save</button>
+                  <button type="button" className={`btn-primary ${small}`} data-testid="save-insurance" disabled={!draft.carrier.trim() || !draft.expiresOn || (draft.kind === "flood" && !draft.program)} onClick={() => void save()}>Save</button>
                   <button type="button" className={`btn-ghost ${small}`} onClick={() => setDraft(null)}>Cancel</button>
                 </div>
               </div>
@@ -128,6 +137,17 @@ export function InsurancePanel({ deal }: { deal: Deal }) {
           </div>
         )}
 
+        {deal.app.propertyType === "condo" && (
+          <div className="space-y-2 border-t border-border pt-3" data-testid="association-policy">
+            <p className="font-medium">The condo association&apos;s building</p>
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="block min-w-0 flex-1 basis-48"><span className="label">Who insures it</span><input className="desk-input" data-testid="association-carrier" maxLength={160} value={association.carrier} onChange={(event) => setAssociation({ ...association, carrier: event.target.value })} /></label>
+              <label className="flex items-center gap-2 text-xs"><input type="checkbox" data-testid="association-citizens" checked={association.citizens} onChange={(event) => setAssociation({ ...association, citizens: event.target.checked })} />Citizens</label>
+              <button type="button" className={`btn-ghost ${small}`} data-testid="save-association" disabled={!association.carrier.trim()} onClick={saveAssociation}>Save</button>
+            </div>
+          </div>
+        )}
+        {warnings.length > 0 && <ul className="space-y-1 text-xs" data-testid="insurance-warnings">{warnings.map((warning) => <li key={warning.key} className={warning.tone === "warn" ? "text-warn" : "text-muted-foreground"} data-testid={`insurance-warning-${warning.key}`}>{warning.text}</li>)}</ul>}
         {gaps.length > 0 && <ul className="space-y-0.5 text-xs text-warn" data-testid="insurance-gaps">{gaps.map((gap) => <li key={gap}>{gap}</li>)}</ul>}
       </div>
     </Section>

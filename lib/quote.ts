@@ -5,6 +5,7 @@ import { z } from "zod";
 import { evaluate, type Application, type Estimate, type Product } from "./engine";
 import { optionAt, quoteBuyDowns } from "./buy-down";
 import type { PricingConfig } from "./pricing-config";
+import { closingCostLines } from "./florida-taxes";
 
 export const LOAN_TYPES = {
   fix_flip: "Fix & flip",
@@ -153,10 +154,12 @@ export type CashLine = { label: string; amount: number };
  */
 export function cashToCloseParts(quote: QuoteDeal, terms: Estimate, pricing: PricingConfig): CashLine[] {
   const closingCosts = quote.purchasePrice * pricing.assumptions.buyClosingCostPct;
+  // In Florida the part set by law, doc stamps and intangible tax on the loan, is worked out to the dollar (lib/florida-taxes.ts).
+  const app = quoteApplication(quote);
   const costs: CashLine[] = [
     { label: `Points (${terms.pointsPct}%)`, amount: terms.points },
     { label: "Lender fees (processing and underwriting)", amount: terms.lenderFees },
-    { label: `Closing costs, about ${Math.round(pricing.assumptions.buyClosingCostPct * 1000) / 10}% (title, recording, taxes)`, amount: closingCosts },
+    ...(app ? closingCostLines(app, terms.noteAmount, closingCosts, pricing.assumptions.buyClosingCostPct) : [{ label: `Closing costs, about ${Math.round(pricing.assumptions.buyClosingCostPct * 1000) / 10}% (title, recording, taxes)`, amount: closingCosts }]),
   ];
   return quote.purpose === "purchase"
     ? [{ label: "Down payment (the price less what the loan pays at closing)", amount: quote.purchasePrice - terms.initialAdvance }, ...costs]

@@ -14,6 +14,7 @@ export const ACCOUNTS = {
   interest: "Interest income",
   lateFees: "Late fee income",
   origination: "Origination fee income",
+  drawFees: "Draw inspection fee income",
   referrals: "Referral bonus expense",
 };
 
@@ -52,7 +53,9 @@ export function monthJournal(book: Book, month: string): JournalRow[] {
       entry(deal.closingDate, deal, "points and lender fees at closing", [[ACCOUNTS.cash, e.points + e.lenderFees, 0], [ACCOUNTS.origination, 0, e.points + e.lenderFees]]);
     }
     for (const draw of book.draws.filter((item) => item.dealId === deal.id && item.status === "funded" && inMonth(item.fundedAt?.slice(0, 10)))) {
-      entry(draw.fundedAt!.slice(0, 10), deal, "draw released", [[ACCOUNTS.loans, draw.approved ?? 0, 0], [ACCOUNTS.cash, 0, draw.approved ?? 0]]);
+      // The fee for checking the work is kept from what's sent: the loan grows by the whole draw (lib/draw-review.ts).
+      const fee = Math.min(draw.fee ?? 0, draw.approved ?? 0);
+      entry(draw.fundedAt!.slice(0, 10), deal, "draw released", [[ACCOUNTS.loans, draw.approved ?? 0, 0], [ACCOUNTS.cash, 0, (draw.approved ?? 0) - fee], ...(fee ? [[ACCOUNTS.drawFees, 0, fee] as [string, number, number]] : [])]);
     }
     const split = splitOf({ deal, share: 1, investorRate: e.rate, noteRate: e.rate }, (day) => inMonth(day));
     const received = round2(split.interest + split.principal + split.lateFees);

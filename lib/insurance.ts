@@ -6,6 +6,7 @@
 import { evaluate } from "./engine";
 import type { Deal, InsuranceFile, InsurancePolicy, InsuranceRenewal, LienFile, PolicyKind } from "./mockData";
 import { daysBetween, SERVICED } from "./servicing";
+import { citizensFlood, nfipPolicyProblem } from "./florida-insurance";
 
 export const POLICY_KINDS: Record<PolicyKind, string> = { hazard: "Hazard (property)", windstorm: "Windstorm", flood: "Flood", builders_risk: "Builder's risk" };
 /** PLACEHOLDER until GT and the attorney set them: how long before a policy ends people hear, and whether wind cover is required. */
@@ -55,7 +56,9 @@ export function coverNeeds(deal: Insured & Pick<Deal, "app">): CoverNeed[] {
   }
   const flood = deal.insurance?.flood;
   const floodPolicy = policies.some((item) => item.kind === "flood");
-  needs.push({ key: "flood", label: "Flood", met: flood ? !flood.sfha || floodPolicy : false, note: !flood ? "Record whether the property is in a special flood hazard area first." : flood.sfha ? `${flood.zone ? `Zone ${flood.zone} is` : "It's in"} a special flood hazard area, so flood insurance is required.` : `${flood.zone ? `Zone ${flood.zone}: n` : "N"}ot in a special flood hazard area, so it isn't required.` });
+  // Citizens makes flood a condition of its policy in any zone, phased in to every policy by 2027 (lib/florida-insurance.ts).
+  const citizens = citizensFlood(deal, policies)?.now ?? false;
+  needs.push({ key: "flood", label: "Flood", met: flood ? (!flood.sfha && !citizens) || floodPolicy : false, note: !flood ? "Record whether the property is in a special flood hazard area first." : flood.sfha ? `${flood.zone ? `Zone ${flood.zone} is` : "It's in"} a special flood hazard area, so flood insurance is required.` : citizens ? `${flood.zone ? `Zone ${flood.zone} isn't` : "It isn't in"} a special flood hazard area, but Citizens requires flood insurance with its policy here (Fla. Stat. 627.351(6)(aa)).` : `${flood.zone ? `Zone ${flood.zone}: n` : "N"}ot in a special flood hazard area, so it isn't required.` });
   return needs;
 }
 
@@ -76,6 +79,8 @@ export function insuranceGaps(deal: Insured & Pick<Deal, "app">, today: string) 
     if (policy.expiresOn < today) gaps.push(`The ${policyWord(policy.kind)} policy lapsed on ${longDay(policy.expiresOn)}`);
     else if (policy.mortgagee !== true) gaps.push(`The ${policyWord(policy.kind)} policy isn't confirmed to name LendHous as mortgagee`);
   }
+  const nfip = nfipPolicyProblem(policiesOf(deal), today);
+  if (nfip) gaps.push(nfip.replace(/\.$/, ""));
   return gaps;
 }
 
@@ -97,7 +102,7 @@ export function nextToEnd(deal: Insured, today: string) {
 export const insuranceLapsed = (deal: Insured & Pick<Deal, "status">, today: string) => SERVICED.includes(deal.status) && lapsedPolicies(deal, today).length > 0;
 export const openRenewals = (deal: Pick<Deal, "insurance">): InsuranceRenewal[] => (deal.insurance?.renewals ?? []).filter((item) => item.status === "submitted");
 
-export type PolicyInput = { kind: PolicyKind; carrier: string; policy: string; expiresOn: string; coverage?: number; windIncluded?: boolean; mortgagee?: boolean };
+export type PolicyInput = { kind: PolicyKind; carrier: string; policy: string; expiresOn: string; coverage?: number; windIncluded?: boolean; mortgagee?: boolean; citizens?: boolean; program?: "nfip" | "private" };
 
 /** Why a policy can't be saved as entered, or null. */
 export function policyProblem(deal: Pick<Deal, "app">, input: PolicyInput): string | null {
@@ -105,6 +110,7 @@ export function policyProblem(deal: Pick<Deal, "app">, input: PolicyInput): stri
   if (!input.carrier.trim()) return "Add the insurance company.";
   if (!isDay(input.expiresOn)) return "Enter the day the policy ends.";
   if (input.coverage !== undefined && (!Number.isFinite(input.coverage) || input.coverage < 0)) return "Enter the coverage in dollars, or leave it blank.";
+  if (input.kind === "flood" && !input.program) return "Say whether the flood policy is from the NFIP or a private insurer.";
   return null;
 }
 

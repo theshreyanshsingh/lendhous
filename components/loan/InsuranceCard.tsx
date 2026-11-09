@@ -5,6 +5,7 @@ import { Reveal } from "@/components/motion";
 import { Section } from "@/components/ui";
 import { shortDay } from "@/lib/format";
 import { kindsFor, policiesOf, POLICY_KINDS, policyWord, renewalProblem } from "@/lib/insurance";
+import { insuranceWarnings } from "@/lib/florida-insurance";
 import type { Deal, PolicyKind } from "@/lib/mockData";
 import { daysBetween } from "@/lib/servicing";
 import { useStore } from "@/lib/store";
@@ -17,6 +18,7 @@ import { useServiceDay } from "./use-service-day";
 export function InsuranceCard({ deal }: { deal: Deal }) {
   const { uploadRenewal } = useStore();
   const today = useServiceDay();
+  const ahead = today ? insuranceWarnings(deal, policiesOf(deal), today, 0).filter((warning) => warning.key === "citizens-renewal" || (warning.key.startsWith("nfip-") && warning.key !== "nfip-unknown")) : [];
   const policies = policiesOf(deal);
   const renewals = deal.insurance?.renewals ?? [];
   const soonest = [...policies].sort((a, b) => a.expiresOn.localeCompare(b.expiresOn))[0];
@@ -57,6 +59,8 @@ export function InsuranceCard({ deal }: { deal: Deal }) {
             })}
           </ul>
         ) : <p className="text-xs text-muted-foreground">We don&apos;t have a policy on file yet. Send yours below.</p>}
+        {/* What the borrower can act on: Citizens' flood requirement at renewal and the NFIP's date (lib/florida-insurance.ts). */}
+        {ahead.map((warning) => <p key={warning.key} className="text-xs text-warn" data-testid={`borrower-insurance-${warning.key}`}>{warning.text.replace(/ Ask the borrower for a flood quote now\./, " Get a flood quote now, so it's in place by then.").replace(/Line up a private flood policy/, "Get a private flood policy")}</p>)}
         {renewals.slice(-3).reverse().map((renewal) => (
           <p key={renewal.id} className={`text-xs ${renewal.status === "returned" ? "text-bad" : "text-muted-foreground"}`} data-testid="renewal-status">
             {renewal.status === "submitted" ? `We're checking the ${policyWord(renewal.kind)} renewal you sent on ${shortDay(renewal.at.slice(0, 10))}.` : renewal.status === "accepted" ? `The ${policyWord(renewal.kind)} renewal is on file, through ${shortDay(renewal.expiresOn)}.` : `We sent back the ${policyWord(renewal.kind)} renewal: ${renewal.decided?.note ?? ""} Please send a corrected one.`}

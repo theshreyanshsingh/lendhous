@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { inBankruptcy } from "@/lib/collections";
+import { increaseTaxes } from "@/lib/florida-taxes";
 import { shortDay } from "@/lib/format";
 import type { Deal, LoanModification } from "@/lib/mockData";
 import { MODIFICATION, modificationPreview, modificationWords, openModification, proposalProblem, signProblem, type ModificationPreview, type ModificationTerms } from "@/lib/modifications";
@@ -26,6 +27,13 @@ function Changes({ preview }: { preview: ModificationPreview }) {
       <tbody>{rows.map(([label, from, to]) => <tr key={label} className="border-b border-border last:border-0"><td className="py-1">{label}</td><td className="py-1 text-right tabular-nums">{from}</td><td className={`py-1 text-right tabular-nums ${from !== to ? "font-semibold" : ""}`}>{to}</td></tr>)}</tbody>
     </table>
   );
+}
+
+/** Florida's taxes that may be due on what a modification adds to principal: for the closing attorney to confirm. */
+function IncreaseTaxes({ deal, preview }: { deal: Deal; preview: ModificationPreview }) {
+  const added = preview.capitalizedPayments + preview.capitalizedFees;
+  const taxes = deal.app.state === "FL" ? increaseTaxes(added) : null;
+  return taxes ? <p className="text-xs text-muted-foreground" data-testid="modification-taxes">Adding {usd(added, 2)} to what the mortgage secures may owe Florida doc stamps of {usd(taxes.stamps, 2)} and intangible tax of {usd(taxes.intangible, 2)} when the modification is recorded. Whether it does turns on Fla. Stat. 201.09(1): ask the closing attorney.</p> : null;
 }
 
 /**
@@ -74,6 +82,7 @@ function TeamModifications({ deal, today }: { deal: Deal; today: string }) {
             <label className="flex items-start gap-2"><input type="checkbox" className="mt-1" data-testid="modification-waive" checked={waiveFees} onChange={(event) => setWaiveFees(event.target.checked)} /><span>Waive the {usd(l.feesOwed, 2)} of late fees</span></label>
             <label className="block"><span className="label">Why, and what the borrower agreed to</span><textarea className="desk-input min-h-16" data-testid="modification-reason" maxLength={500} value={reason} onChange={(event) => setReason(event.target.value)} /></label>
             {preview && <Changes preview={preview} />}
+            {preview && <IncreaseTaxes deal={deal} preview={preview} />}
             {preview && preview.stillOwed > 0 && <p className="text-xs text-warn">{usd(preview.stillOwed, 2)} would still be behind once it&apos;s signed.</p>}
             {problem && <p className="text-xs text-warn" data-testid="modification-problem">{problem}</p>}
             <p className="text-xs text-muted-foreground">It needs two approvers, then the borrower and every guarantor sign the modification agreement from the attorney&apos;s template. It takes effect from the 1st of the month it&apos;s signed. Partners&apos; and buyers&apos; rates move with the note&apos;s (PLACEHOLDER until their agreements say otherwise).</p>
@@ -107,6 +116,7 @@ function OpenModification({ deal, modification, today }: { deal: Deal; modificat
         <Badge tone={statusTone[modification.status]}>{statusText[modification.status]}</Badge>
       </div>
       <Changes preview={preview} />
+      <IncreaseTaxes deal={deal} preview={preview} />
       {modification.status === "proposed" && (
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs text-muted-foreground" data-testid="modification-approvers">{modification.approvers.length ? `Approved by ${modification.approvers.join(", ")}; ${2 - modification.approvers.length} more needed` : "Two approvers needed"}</span>

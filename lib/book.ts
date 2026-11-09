@@ -15,6 +15,7 @@ import { surveyProblem } from "./surveys";
 import { cureError, defaultError, executeError, extensionFee, extensionRequestError, payoffError, payoffOn, PRE_FUNDING, reopenTo, closureReason, DEFAULT_KINDS } from "./loan-exits";
 import { canAdvance, nextStage } from "./loan-stages";
 import { modificationPreview, modificationWords, proposalProblem, signProblem } from "./modifications";
+import { deskProblem, deskReviewProblem, drawFees, toSend, type DrawPath } from "./draw-review";
 import { ADVANCE_KINDS, BANKRUPTCY_ENDS, COLLECTIONS, DELIVERY_METHODS, inBankruptcy, NOTICE_KINDS, owedAtTitle, stepLabel, stepProblem } from "./collections";
 import { issueProblem, latestLetter, letterFigures, receivedOnFor } from "./payoffs";
 import { isLarge, noticeDueOn, noticeOwed, reasonsProblem, requestProblem, startAdverseAction, STATEMENT_DAYS } from "./adverse-action";
@@ -134,7 +135,9 @@ export type BookAction =
   | { t: "checkTermSheets"; asOf: string }
   | { t: "saveScope"; dealId: string; scope: ScopeLine[]; summary: string }
   /** linePhotos: the photos taken line by line on the borrower's phone, with where and when (lib/draw-walk.ts). */
-  | { t: "requestDraw"; dealId: string; by: string; note: string; contact: string; photos: string[]; photoIds?: string[]; lines: DrawRequestLine[]; linePhotos?: Omit<DrawPhoto, "id" | "at">[] }
+  | { t: "requestDraw"; dealId: string; by: string; note: string; contact: string; photos: string[]; photoIds?: string[]; lines: DrawRequestLine[]; linePhotos?: Omit<DrawPhoto, "id" | "at">[]; path?: DrawPath }
+  /** The team's review of a photo-review draw from the borrower's photos (lib/draw-review.ts). */
+  | { t: "deskReview"; drawId: string; observed: Record<string, number>; note: string; by: string }
   | { t: "askForPhotos"; requestId: string; dealId: string; drawId?: string; stormId?: string; to: string; email?: string; who: PhotoRequest["who"]; scopeIds: string[]; by: string; byTeam: boolean; expiresAt: string }
   | { t: "renewPhotoRequest"; requestId: string; expiresAt: string }
   | { t: "turnOffPhotoRequest"; requestId: string }
@@ -142,7 +145,7 @@ export type BookAction =
   | { t: "removeRequestPhoto"; requestId: string; photoId: string }
   /** signDraw: the contractor also signs off that the work on the draw's lines is done as the photos show. */
   | { t: "finishPhotoRequest"; requestId: string; by: string; note: string; signDraw?: boolean; observed?: Record<string, number> }
-  | { t: "sendInspector"; drawId: string }
+  | { t: "sendInspector"; drawId: string; reason?: string; by?: string }
   | { t: "recordInspection"; drawId: string; observed: Record<string, number> }
   | { t: "approveDrawRequest"; drawId: string; by: string }
   | { t: "rejectDraw"; drawId: string; reason: string }
@@ -157,7 +160,9 @@ export type BookAction =
   | { t: "saveLienFile"; dealId: string; contractor: string; noc?: { recordedOn: string; reference: string; expiresOn: string; commencedOn?: string; lenderNamed: boolean; mortgageFirst?: boolean }; mortgageRecordedOn?: string; by: string }
   | { t: "addNoticeToOwner"; dealId: string; lienor: string; role: NoticeToOwner["role"]; servedOn: string; by: string }
   /** A policy on the property, put on file by the team (lib/insurance.ts). It replaces the one of its kind. */
-  | { t: "saveInsurance"; dealId: string; kind: PolicyKind; carrier: string; policy: string; expiresOn: string; coverage?: number; windIncluded?: boolean; mortgagee?: boolean; by: string }
+  | { t: "saveInsurance"; dealId: string; kind: PolicyKind; carrier: string; policy: string; expiresOn: string; coverage?: number; windIncluded?: boolean; mortgagee?: boolean; citizens?: boolean; program?: "nfip" | "private"; by: string }
+  /** Who insures a condo association's building (lib/florida-insurance.ts). */
+  | { t: "saveAssociationPolicy"; dealId: string; carrier: string; citizens: boolean; by: string }
   /** Whether the property is in a special flood hazard area, which makes flood insurance required. */
   | { t: "setFloodZone"; dealId: string; sfha: boolean; zone: string; by: string }
   /** The borrower sent a renewed policy. The server records it once the file is stored; a demo browser keeps the name only. */
@@ -383,7 +388,7 @@ export function demoBook(): Book {
       const coverage = Math.round((evaluate(d.app).noteAmount * 1.1) / 1000) * 1000;
       const separate = d.id === "d10";
       const policies: InsurancePolicy[] = [{ kind: d.app.product === "ground_up" ? "builders_risk" : "hazard", carrier: "Sample Mutual (FAKE)", policy: `SM-${d.loanNumber.slice(-4)}`, expiresOn: d.id === "d9" ? "2026-11-20" : d.id === "d13" ? "2026-10-15" : "2027-06-30", coverage, ...(separate ? {} : { windIncluded: true }), mortgagee: true, by: "Pat Processor (FAKE)", at }];
-      if (separate) policies.push({ kind: "windstorm", carrier: "Coastal Wind Pool (FAKE)", policy: `CW-${d.loanNumber.slice(-4)}`, expiresOn: "2027-05-31", mortgagee: true, by: "Pat Processor (FAKE)", at }, { kind: "flood", carrier: "Sample Flood (FAKE)", policy: `SF-${d.loanNumber.slice(-4)}`, expiresOn: "2027-03-01", coverage: 250_000, mortgagee: true, by: "Pat Processor (FAKE)", at });
+      if (separate) policies.push({ kind: "windstorm", carrier: "Citizens Property Insurance (FAKE)", policy: `CW-${d.loanNumber.slice(-4)}`, expiresOn: "2027-05-31", mortgagee: true, by: "Pat Processor (FAKE)", at }, { kind: "flood", carrier: "Sample Flood (FAKE)", policy: `SF-${d.loanNumber.slice(-4)}`, expiresOn: "2027-03-01", coverage: 250_000, mortgagee: true, program: "nfip", by: "Pat Processor (FAKE)", at });
       deals[i] = { ...deals[i], insurance: { policies, flood: { sfha: separate, zone: separate ? "AE" : "X", by: "Pat Processor (FAKE)", at } } };
     }
     // The Coral Springs rental loan is a portfolio of two: its values, rents and costs add up to the loan's own numbers.
@@ -940,7 +945,10 @@ function apply(s: Book, a: BookAction): Book {
       const at = now();
       // Only the photos of lines asked for, each stamped with when it arrived so its age can be checked.
       const linePhotos = (a.linePhotos ?? []).filter((photo) => lines.some((line) => line.scopeId === photo.scopeId)).map((photo, index): DrawPhoto => ({ ...photo, id: `dp${uid()}${index}`, at }));
-      const draw: DrawRequest = { id: `draw${uid()}`, dealId: a.dealId, requestedAt: at, by: a.by, note: a.note, contact: a.contact, photos: a.photos, photoIds: a.photoIds, lines: lines.map((line) => (line.claimedPct === undefined ? line : { ...line, claimedPct: Math.min(1, Math.max(0, line.claimedPct)) })), ...(linePhotos.length ? { linePhotos } : {}), status: "submitted", approvers: [] };
+      // Checked from the borrower's photos where it qualifies and they asked; otherwise by an inspector. Its fee is fixed now.
+      const path: DrawPath = a.path === "desk" && !deskProblem(s, deal, lines, linePhotos, at) ? "desk" : "inspector";
+      const fee = drawFees()[path];
+      const draw: DrawRequest = { id: `draw${uid()}`, dealId: a.dealId, requestedAt: at, by: a.by, note: a.note, contact: a.contact, photos: a.photos, photoIds: a.photoIds, lines: lines.map((line) => (line.claimedPct === undefined ? line : { ...line, claimedPct: Math.min(1, Math.max(0, line.claimedPct)) })), ...(linePhotos.length ? { linePhotos } : {}), status: "submitted", approvers: [], path, ...(fee ? { fee } : {}) };
       return { ...s, draws: [draw, ...s.draws], audit: log(`${deal.loanNumber}: draw of $${lines.reduce((sum, line) => sum + line.requested, 0).toLocaleString()} requested`) };
     }
     case "askForPhotos": {
@@ -971,7 +979,15 @@ function apply(s: Book, a: BookAction): Book {
     case "sendInspector": {
       // A storm since the last inspection sends an inspected or approved draw back for a fresh one (lib/storms.ts).
       const again = (d: DrawRequest) => (d.status === "inspected" || d.status === "approved") && Boolean(freshInspectionNeeded(s.deals.find((deal) => deal.id === d.dealId) ?? {}, d));
-      return { ...s, draws: s.draws.map((d) => (d.id === a.drawId && (d.status === "submitted" || again(d)) ? { ...d, status: "inspecting", ...(again(d) ? { approvers: [], approved: undefined } : {}) } : d)), audit: log("Draw inspection ordered") };
+      // A photo review sent on to an inspector takes the inspector's fee instead, and says why.
+      const escalate = (d: DrawRequest) => d.path === "desk" && d.status === "submitted";
+      return { ...s, draws: s.draws.map((d) => (d.id === a.drawId && (d.status === "submitted" || again(d)) ? { ...d, status: "inspecting", ...(again(d) ? { approvers: [], approved: undefined } : {}), ...(escalate(d) ? { path: "inspector" as const, fee: drawFees().inspector || undefined, escalated: { by: a.by ?? "The team", at: now(), reason: a.reason?.trim() ?? "" } } : {}) } : d)), audit: log(s.draws.some((d) => d.id === a.drawId && escalate(d)) ? `Photo review sent on to an inspector: ${a.reason?.trim()}` : "Draw inspection ordered") };
+    }
+    case "deskReview": {
+      const draw = s.draws.find((d) => d.id === a.drawId);
+      if (!draw || deskReviewProblem(draw, a.observed)) return s;
+      const at = now();
+      return { ...s, draws: s.draws.map((d) => (d.id === a.drawId ? { ...d, status: "inspected", lines: d.lines.map((line) => ({ ...line, observedPct: a.observed[line.scopeId] })), inspection: { by: a.by, at, notes: a.note.trim(), method: "desk" } } : d)), audit: log(`Draw reviewed from the borrower's photos by ${a.by}`) };
     }
     case "recordInspection": return { ...s, draws: s.draws.map((d) => (d.id === a.drawId && d.status === "inspecting" ? { ...d, status: "inspected", lines: d.lines.map((line) => ({ ...line, observedPct: a.observed[line.scopeId] ?? 0 })), inspection: { by: "The team", at: now(), notes: "" } } : d)), audit: log("Draw inspection recorded") };
     case "approveDrawRequest": {
@@ -993,7 +1009,7 @@ function apply(s: Book, a: BookAction): Book {
         // Brought up to today first, so the payments already due keep the amount they owed before this draw.
         // Partners that fund draws as they're released are asked for their share; LendHous has paid the borrower already.
         deals: upd(deal.id, (d) => ({ ...settle(d, serviceDay(s)), disbursedDraws: (d.disbursedDraws ?? 0) + draw.approved!, scope: releaseToScope(d.scope ?? [], d, draw), ...(d.partnerFunding?.drawsAsReleased ? { drawCalls: [...(d.drawCalls ?? []), ...drawCallsFor(s, d, draw.id, draw.approved!, serviceDay(s), (n) => `dc${uid()}${n}`)] } : {}) })),
-        audit: log(`${deal.loanNumber}: draw of $${draw.approved.toLocaleString()} released`) };
+        audit: log(`${deal.loanNumber}: draw of $${draw.approved.toLocaleString()} released${draw.fee ? `, $${toSend(draw).toLocaleString("en-US")} sent after the $${draw.fee.toLocaleString("en-US")} ${draw.path === "desk" ? "photo review" : "inspection"} fee` : ""}`) };
     }
     case "requestChangeOrder": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
@@ -1033,10 +1049,15 @@ function apply(s: Book, a: BookAction): Book {
     }
     case "saveInsurance": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
-      const input = { kind: a.kind, carrier: a.carrier.trim(), policy: a.policy.trim(), expiresOn: a.expiresOn, ...(a.coverage !== undefined ? { coverage: Math.round(a.coverage) } : {}), ...(a.windIncluded !== undefined && a.kind !== "windstorm" && a.kind !== "flood" ? { windIncluded: a.windIncluded } : {}), ...(a.mortgagee !== undefined ? { mortgagee: a.mortgagee } : {}) };
+      const input = { kind: a.kind, carrier: a.carrier.trim(), policy: a.policy.trim(), expiresOn: a.expiresOn, ...(a.coverage !== undefined ? { coverage: Math.round(a.coverage) } : {}), ...(a.windIncluded !== undefined && a.kind !== "windstorm" && a.kind !== "flood" ? { windIncluded: a.windIncluded } : {}), ...(a.mortgagee !== undefined ? { mortgagee: a.mortgagee } : {}), ...(a.citizens !== undefined ? { citizens: a.citizens } : {}), ...(a.kind === "flood" && a.program ? { program: a.program } : {}) };
       if (policyProblem(deal, input)) return s;
       const policy: InsurancePolicy = { ...input, by: a.by, at: now() };
       return { ...s, deals: upd(a.dealId, (d) => withInsurance(d, putPolicy(insuranceFileOf(d), policy))), audit: log(`${deal.loanNumber}: ${policyWord(a.kind)} policy on file to ${a.expiresOn}`) };
+    }
+    case "saveAssociationPolicy": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const association = { carrier: a.carrier.trim(), citizens: a.citizens, by: a.by, at: now() };
+      return { ...s, deals: upd(a.dealId, (d) => withInsurance(d, { ...insuranceFileOf(d), association })), audit: log(`${deal.loanNumber}: the condo association's building is insured by ${association.carrier}`) };
     }
     case "setFloodZone": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;

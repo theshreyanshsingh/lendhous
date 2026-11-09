@@ -1,5 +1,7 @@
 # What competitors have that LendHous doesn't (2026-11-07)
 
+> **Rescanned 2026-11-09:** see `docs/competitor-gaps-2026-11-09.md` for 39 ranked gaps (30 buildable with no vendor or outside decision), each sourced, and 13 corrections to this file. The ones below are fixed in place. In short: Figure now owns Kiavi (closed 2026), Pretium owns Anchor, NYMT owns Constructive, Fund That Flip is winding down as Upright, Vaster already lends on non-warrantable condos in Miami, and Altaloans' own site says nothing about remote closings. The rescan's top picks are Florida's dated rules: the NFIP authorization ending December 11, 2026, Citizens requiring flood cover in every zone from January 1, 2027, and doc stamps and intangible tax (about 0.55% of every loan) in place of the quote's flat 2% closing costs.
+
 A CEO-style scan of about 60 companies in four groups:
 
 - national investor lenders: Kiavi, Lima One, RCN, CoreVest, LendingOne, Easy Street, New Silver, Dominion, RFG, Builders Capital, SLA Capital and others
@@ -279,7 +281,7 @@ These extend the vendor list in `docs/next-features-prompt.md`.
   - These sit alongside the ACH item already listed.
 - **Photo authenticity:** Truepic (Lima One, CoreVest; R) stamps time and place and checks for tampering. It is stronger than N's browser location check.
 - **Inspector network:**
-  - Built: 300+ inspectors, about 2.5-day turnaround (C).
+  - Built: average turn times of "two days or less" (C, 2026-11-09; its page no longer gives an inspector count).
   - Trinity inside LendingWise (C).
 - **Title ordering and lien monitoring:**
   - Built and Land Gorilla watch for new liens daily (C).
@@ -291,7 +293,7 @@ These extend the vendor list in `docs/next-features-prompt.md`.
 - **Accreditation checks**, only if LendHous raises under Rule 506(c):
   - Parallel Markets (~$59 a letter, 90-day expiry)
   - VerifyInvestor (EquityMultiple)
-- **Remote online closing for foreign nationals:** Alta Loans in Miami (R). None of the software vendors offer it.
+- **Remote online closing for foreign nationals:** reported for Alta Loans (R), but Altaloans' own site (Aventura) doesn't mention it (C, 2026-11-09), so treat it as unconfirmed. None of the software vendors offer it.
 - **Already listed, now with more evidence:**
   - AVM and comps: Kiavi's estimator pulls comps from the address and rejects ineligible properties (C); Angel Oak's rental AVM holds the rent through closing (C)
   - credit (Xactus in LendingWise, Mortgage Automator and The Mortgage Office)
@@ -318,7 +320,7 @@ These extend the vendor list in `docs/next-features-prompt.md`.
     - a no-appraisal bridge loan (Kiavi, Easy Street EasyFix in 24 hours)
   - Florida-specific ideas:
     - more leverage for local experience (Ridge Street gives about 5% more in Miami-Dade)
-    - **non-warrantable condo DSCR.** Florida's SB 4-D inspections are making many condos ineligible elsewhere, and no private lender was confirmed doing it. This is open ground.
+    - **non-warrantable condo DSCR.** Florida's SB 4-D inspections are making many condos ineligible elsewhere. Vaster (Brickell) lists non-warrantable condo loans in Miami at about 30–35% down, though not as DSCR (C, 2026-11-09), so it isn't open ground. A condo building check (milestone, SIRS, assessments, master policy) comes first either way.
 - **A pooled note fund**, with net asset value (NAV), reinvested distributions, redemptions and lockups. The Mortgage Office, Mortgage Automator, LendingWise and Groundfloor have one (C). Only if GT raises a fund, and only with securities counsel.
 
   The research also found IRA accounts (Baseline, Groundfloor) and an NDA-gated data room with watermarks and engagement tracking (Juniper Square). These would be a second tier after our blind teasers.

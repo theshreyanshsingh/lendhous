@@ -33,6 +33,7 @@ const about = z.object({
   takenAt: z.string().datetime().optional(),
   lat: z.coerce.number().min(-90).max(90).optional(),
   lng: z.coerce.number().min(-180).max(180).optional(),
+  dhash: z.string().regex(/^[0-9a-f]{16}$/).optional(),
 });
 
 /** Adds one photo. They go up one at a time, so a dropped connection only ever costs the one being sent. */
@@ -51,15 +52,17 @@ export async function POST(request: Request, { params }: Context) {
   const bytes = Buffer.from(await file.arrayBuffer());
   const problem = photoProblem(file.name, file.size, bytes);
   if (problem) return refuse(problem, 400);
-  const details = about.safeParse({ takenAt: form.get("takenAt") || undefined, lat: form.get("lat") || undefined, lng: form.get("lng") || undefined });
+  const details = about.safeParse({ takenAt: form.get("takenAt") || undefined, lat: form.get("lat") || undefined, lng: form.get("lng") || undefined, dhash: form.get("dhash") || undefined });
 
   const id = randomUUID();
   const ext = extensionOf(file.name)!;
   const key = `loans/${safeBasename(link.deal.id)}/${id}.${ext}`;
   const name = attachmentName(file.name);
   const fileKeyId = await putBytes(key, bytes);
-  await prisma.document.create({ data: { id, ownerType: "LOAN", ownerId: link.deal.id, documentType: "draw_photo", originalName: encryptField(name, documentNameContext(id)), storageKey: key, fileKeyId, mime: mimeFor(ext, file.type), size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex") } });
-  const photo = { id, scopeId, shot, name, at: new Date().toISOString(), ...(details.success ? details.data : {}) };
+  const sha256 = createHash("sha256").update(bytes).digest("hex");
+  await prisma.document.create({ data: { id, ownerType: "LOAN", ownerId: link.deal.id, documentType: "draw_photo", originalName: encryptField(name, documentNameContext(id)), storageKey: key, fileKeyId, mime: mimeFor(ext, file.type), size: bytes.length, sha256 } });
+  // The file's own fingerprint from the server, and the picture's from the browser, to find it if it's sent again.
+  const photo = { id, scopeId, shot, name, at: new Date().toISOString(), sha256, ...(details.success ? details.data : {}) };
   const saved = await runAction(linkActor(link.request), { t: "addRequestPhoto", requestId: link.request.id, photo }, { trusted: true });
   if ("error" in saved) {
     await prisma.document.update({ where: { id }, data: { deletedAt: new Date() } });

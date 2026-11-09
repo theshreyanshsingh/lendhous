@@ -3,10 +3,11 @@ import { useState } from "react";
 import { activeWire, maskAccount, missingClosingItems, PHONE_SOURCES, titleLinkState, verifyProblem, WIRE_SOURCES, wireProblem } from "@/lib/closing";
 import { PRE_FUNDING } from "@/lib/loan-exits";
 import type { ClosingAgent, Deal, WireInstruction } from "@/lib/mockData";
-import { useStore } from "@/lib/store";
+import { est, useStore } from "@/lib/store";
+import { closingTaxes } from "@/lib/florida-taxes";
 import { TitleLinkPanel } from "./TitleLinkPanel";
 import { PartnerFunds } from "./PartnerFunds";
-import { Badge, Section, shortDate, statusLabel } from "@/components/ui";
+import { Badge, Section, shortDate, statusLabel, usd } from "@/components/ui";
 
 const blankAgent: ClosingAgent = { company: "", contact: "", phone: "", email: "", fileNumber: "" };
 const blankWire = { bankName: "", routing: "", account: "", confirmAccount: "", beneficiary: "", reference: "", source: "" };
@@ -14,6 +15,8 @@ const newId = () => `wire${Date.now().toString(36)}${Math.random().toString(36).
 
 /** The staff Closing tab (Spec A13): who's closing it, the title company's checklist, and the wire instructions funding goes to. */
 export function ClosingPanel({ deal }: { deal: Deal }) {
+  const e = est(deal.app);
+  const taxes = closingTaxes(deal.app, e.noteAmount);
   const { dispatch, viewerName } = useStore();
   const open = PRE_FUNDING.includes(deal.status);
   const [editingAgent, setEditingAgent] = useState(false);
@@ -53,6 +56,18 @@ export function ClosingPanel({ deal }: { deal: Deal }) {
       </Section>
 
       <TitleLinkPanel deal={deal} />
+
+      {taxes && (
+        <Section title="Florida taxes at recording">
+          <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4" data-testid="closing-taxes">
+            <div><dt className="text-xs text-muted-foreground">Doc stamps on the mortgage</dt><dd className="font-semibold tabular-nums">{usd(taxes.stamps, 2)}</dd><dd className="text-[11px] text-muted-foreground">$0.35 per $100 of {usd(e.noteAmount)}</dd></div>
+            <div><dt className="text-xs text-muted-foreground">Intangible tax</dt><dd className="font-semibold tabular-nums">{usd(taxes.intangible, 2)}</dd><dd className="text-[11px] text-muted-foreground">0.2% of the debt</dd></div>
+            <div><dt className="text-xs text-muted-foreground">The borrower&apos;s total</dt><dd className="font-semibold tabular-nums" data-testid="closing-taxes-total">{usd(taxes.total, 2)}</dd></div>
+            {taxes.deed !== undefined && <div><dt className="text-xs text-muted-foreground">Doc stamps on the deed</dt><dd className="font-semibold tabular-nums">{usd(taxes.deed, 2)}</dd><dd className="text-[11px] text-muted-foreground">usually the seller&apos;s</dd></div>}
+          </dl>
+          <p className="mt-2 text-xs text-muted-foreground">Paid to the clerk when the mortgage is recorded (Fla. Stat. 201.08, 199.133). Every party to the mortgage is liable for the stamps whoever agreed to pay, and late payment costs up to 50% more, so check the title company&apos;s settlement statement shows these figures.</p>
+        </Section>
+      )}
 
       <Section title="Closing checklist">
         {closingDocs.length ? (

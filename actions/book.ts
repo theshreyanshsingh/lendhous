@@ -48,7 +48,16 @@ function subjectOf(action: BookAction) {
   return action.t;
 }
 
-async function perform(viewer: Viewer, action: BookAction, options: { trusted?: boolean } = {}): Promise<BookReply> {
+/** A draw's photos carry the SHA-256 the server stored for each file, not the browser's word for it (lib/photo-checks.ts). */
+async function withStoredPrints(action: BookAction): Promise<BookAction> {
+  if (action.t !== "requestDraw" || !action.linePhotos?.some((photo) => photo.documentId)) return action;
+  const rows = await prisma.document.findMany({ where: { id: { in: action.linePhotos.flatMap((photo) => (photo.documentId ? [photo.documentId] : [])) } }, select: { id: true, sha256: true } });
+  const stored = new Map(rows.map((row) => [row.id, row.sha256]));
+  return { ...action, linePhotos: action.linePhotos.map((photo) => (photo.documentId && stored.get(photo.documentId) ? { ...photo, sha256: stored.get(photo.documentId)! } : photo)) };
+}
+
+async function perform(viewer: Viewer, request: BookAction, options: { trusted?: boolean } = {}): Promise<BookReply> {
+  const action = await withStoredPrints(request);
   const result = await runAction(viewer, action, options);
   if ("error" in result) return { error: result.error, book: scopeBook((await readBook()).book, viewer) };
   // Message text and application details stay in the record; the log says who did what to which loan.

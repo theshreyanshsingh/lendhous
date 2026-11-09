@@ -9,6 +9,8 @@ import { can, type Permission } from "@/lib/permissions";
 import { prisma } from "@/lib/prisma";
 import { loadPricing } from "@/lib/pricing-store";
 import { BASE_VERSION } from "@/lib/pricing-versions";
+import { applyRules, rulesFrom } from "@/lib/settings-rules";
+import { getSettings } from "@/lib/settings";
 
 const LISTS = ["deals", "bids", "partners", "buyers", "brokers", "sales", "offers", "draws", "payoffs", "messages", "sources", "photoRequests", "conditionLibrary", "storms"] as const;
 const AUDIT_ID = "activity:feed";
@@ -80,6 +82,8 @@ export type BookResult = { error: string } | { before: Book; after: Book; action
 /** Checks and runs one action. trusted is for the server's own steps, like recording a file it has just stored. */
 export async function runAction(viewer: Viewer, action: BookAction, options: { trusted?: boolean } = {}): Promise<BookResult> {
   const allowed = await permissionCheck(viewer);
+  // The owner's settings the rules follow: the NFIP's date and the draw fees (lib/settings-rules.ts).
+  applyRules(rulesFrom(await getSettings()));
   for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
     const { book, version } = await readBook();
     const checked = authorize(book, viewer, action, allowed, options.trusted);

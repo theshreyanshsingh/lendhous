@@ -7,6 +7,8 @@ import { drawRequestError } from "@/lib/draws";
 import { awaitingDecision, claimedFrom, decideByText, drawableLines, lastPhotos, lineProblem } from "@/lib/draw-walk";
 import type { Deal, DrawRequest } from "@/lib/mockData";
 import { shrinkPhoto } from "@/lib/shrink-photo";
+import { photoPrints } from "@/lib/photo-prints";
+import { deskProblem, drawFees, PATH_LABEL, type DrawPath } from "@/lib/draw-review";
 import { est, useStore } from "@/lib/store";
 import { Badge, Section, shortDate, usd } from "@/components/ui";
 
@@ -21,7 +23,7 @@ export const DRAW_STATUS: Record<DrawRequest["status"], { label: string; tone: "
 
 export const drawTotal = (draw: DrawRequest) => draw.lines.reduce((sum, line) => sum + line.requested, 0);
 
-type Shot = { key: string; file: File; url: string; takenAt?: string; lat?: number; lng?: number };
+type Shot = { key: string; file: File; url: string; takenAt?: string; lat?: number; lng?: number; prints?: { sha256?: string; dhash?: string } };
 type Place = { lat: number; lng: number };
 
 /**
@@ -45,6 +47,7 @@ export function DrawPanel({ deal }: { deal: Deal }) {
   const [contact, setContact] = useState("");
   const [sending, setSending] = useState(false);
   const [certified, setCertified] = useState(false);
+  const [path, setPath] = useState<DrawPath>("desk");
   const [locating, setLocating] = useState<"off" | "asking" | "on" | "refused" | "none">("off");
   // The clock for "we'll decide by" is the browser's, set after the first render so the server's page matches.
   const [now, setNow] = useState<Date | null>(null);
@@ -79,6 +82,8 @@ export function DrawPanel({ deal }: { deal: Deal }) {
     });
     if (!added.length) return;
     setShots((all) => ({ ...all, [scopeId]: [...(all[scopeId] ?? []), ...added] }));
+    // Each photo's fingerprints as it would be sent, so a photo review can see it wasn't sent before (lib/photo-checks.ts).
+    for (const shot of added) void shrinkPhoto(shot.file).then(photoPrints).then((prints) => setShots((all) => ({ ...all, [scopeId]: (all[scopeId] ?? []).map((item) => (item.key === shot.key ? { ...item, prints } : item)) })));
     void locate().then((place) => {
       if (!place) return;
       const keys = new Set(added.map((shot) => shot.key));
@@ -87,7 +92,12 @@ export function DrawPanel({ deal }: { deal: Deal }) {
   };
   const drop = (scopeId: string, key: string) => setShots((all) => ({ ...all, [scopeId]: (all[scopeId] ?? []).filter((shot) => shot.key !== key) }));
 
-  const reset = () => { setStep("closed"); setChosen([]); setAmounts({}); setClaimed({}); setShots({}); setNote(""); setContact(""); setCertified(false); };
+  const reset = () => { setStep("closed"); setChosen([]); setAmounts({}); setClaimed({}); setShots({}); setNote(""); setContact(""); setCertified(false); setPath("desk"); };
+  // Whether the team can decide it from these photos, without an inspector's visit (lib/draw-review.ts).
+  const photosNow = chosen.flatMap((scopeId) => (shots[scopeId] ?? []).map((shot) => ({ id: shot.key, scopeId, ...(shot.takenAt ? { takenAt: shot.takenAt } : {}), ...(shot.lat !== undefined ? { lat: shot.lat, lng: shot.lng } : {}), ...(shot.prints ?? {}) })));
+  const deskWhy = step === "finish" && now ? deskProblem(s, deal, asked, photosNow, now.toISOString()) : null;
+  const chosenPath: DrawPath = deskWhy ? "inspector" : path;
+  const fees = drawFees();
   const submit = async () => {
     setSending(true);
     // Photos go up first, so the request can point at them, and one at a time, so a phone holds one big picture in memory
@@ -95,12 +105,14 @@ export function DrawPanel({ deal }: { deal: Deal }) {
     const taken = chosen.flatMap((scopeId) => (shots[scopeId] ?? []).map((shot) => ({ scopeId, shot })));
     const linePhotos = [];
     for (const { scopeId, shot } of taken) {
-      const documentId = local ? undefined : await uploadPhoto(deal.id, await shrinkPhoto(shot.file));
+      const small = await shrinkPhoto(shot.file);
+      const documentId = local ? undefined : await uploadPhoto(deal.id, small);
       if (!local && !documentId) { setSending(false); return; }
-      linePhotos.push({ scopeId, name: shot.file.name, ...(shot.takenAt ? { takenAt: shot.takenAt } : {}), ...(shot.lat !== undefined ? { lat: shot.lat, lng: shot.lng } : {}), ...(documentId ? { documentId } : {}) });
+      // Fingerprints, so the team sees a photo that was sent before (lib/photo-checks.ts).
+      linePhotos.push({ scopeId, name: shot.file.name, ...(shot.takenAt ? { takenAt: shot.takenAt } : {}), ...(shot.lat !== undefined ? { lat: shot.lat, lng: shot.lng } : {}), ...(documentId ? { documentId } : {}), ...(shot.prints ?? {}) });
     }
     const photoIds = linePhotos.flatMap((photo) => (photo.documentId ? [photo.documentId] : []));
-    const done = await dispatch({ t: "requestDraw", dealId: deal.id, by: viewerName, note, contact, photos: linePhotos.map((photo) => photo.name), photoIds: local ? undefined : photoIds, lines: asked, linePhotos });
+    const done = await dispatch({ t: "requestDraw", dealId: deal.id, by: viewerName, note, contact, photos: linePhotos.map((photo) => photo.name), photoIds: local ? undefined : photoIds, lines: asked, linePhotos, path: chosenPath });
     setSending(false);
     if (done) reset();
   };
@@ -120,7 +132,8 @@ export function DrawPanel({ deal }: { deal: Deal }) {
           {draws.map((draw) => (
             <li key={draw.id} className="py-2 text-sm" data-testid="my-draw">
               <div className="flex flex-wrap items-center justify-between gap-2"><b>{usd(draw.status === "funded" || draw.status === "approved" ? draw.approved ?? 0 : drawTotal(draw))}</b><Badge tone={DRAW_STATUS[draw.status].tone}>{DRAW_STATUS[draw.status].label}</Badge></div>
-              <div className="text-xs text-muted-foreground">Requested {usd(drawTotal(draw))} on {shortDate(draw.requestedAt)}{draw.reason ? ` · ${draw.reason}` : ""}</div>
+              <div className="text-xs text-muted-foreground">Requested {usd(drawTotal(draw))} on {shortDate(draw.requestedAt)}{draw.path ? ` · ${PATH_LABEL[draw.path].toLowerCase()}` : ""}{draw.fee ? ` (${usd(draw.fee)} fee, kept from the draw)` : ""}{draw.reason ? ` · ${draw.reason}` : ""}</div>
+              {draw.escalated && <div className="text-xs text-warn" data-testid="draw-escalated">Sent on to an inspector: {draw.escalated.reason}</div>}
               {awaitingDecision(draw) && now && <div className="mt-1 text-xs text-foreground" data-testid="draw-decide-by">{decideByText(draw, targets.drawDecision, now)}</div>}
               <DrawLienChecklist deal={deal} draw={draw} side="borrower" />
             </li>
@@ -211,6 +224,11 @@ export function DrawPanel({ deal }: { deal: Deal }) {
                 {asked.map((line) => <li key={line.scopeId} className="flex flex-wrap items-baseline justify-between gap-x-3 py-1.5"><span className="min-w-0">{lineOf(line.scopeId).division} <small className="text-xs text-muted-foreground">· {Math.round((line.claimedPct ?? 0) * 100)}% done · {(shots[line.scopeId] ?? []).length} photo{(shots[line.scopeId] ?? []).length === 1 ? "" : "s"}</small></span><b className="tabular-nums">{usd(line.requested)}</b></li>)}
               </ul>
               <label className="block"><span className="label">What was finished</span><textarea data-testid="draw-note" rows={2} className="desk-input h-auto! py-2" value={note} onChange={(event) => setNote(event.target.value)} /></label>
+              <fieldset className="space-y-2" data-testid="draw-path">
+                <legend className="label">How should we check the work?</legend>
+                <label className={`flex items-start gap-2 text-sm ${deskWhy ? "text-muted-foreground" : ""}`}><input type="radio" name="draw-path" className="mt-1" data-testid="draw-path-desk" disabled={Boolean(deskWhy)} checked={chosenPath === "desk"} onChange={() => setPath("desk")} /><span><b className="font-medium">Photo review</b>: the team checks your photos, usually the same business day{fees.desk ? `. ${usd(fees.desk)}, kept from the draw` : ""}.{deskWhy && <small className="block text-xs" data-testid="draw-desk-why">Not for this draw: {deskWhy}</small>}</span></label>
+                <label className="flex items-start gap-2 text-sm"><input type="radio" name="draw-path" className="mt-1" data-testid="draw-path-inspector" checked={chosenPath === "inspector"} onChange={() => setPath("inspector")} /><span><b className="font-medium">Inspector visit</b>: an inspector comes to the property, usually within two business days{fees.inspector ? `. ${usd(fees.inspector)}, kept from the draw` : ""}.</span></label>
+              </fieldset>
               <label className="block"><span className="label">Who should the inspector call?</span><input data-testid="draw-contact" className="desk-input" placeholder="Name and phone" value={contact} onChange={(event) => setContact(event.target.value)} /></label>
               <label className="flex items-start gap-2 text-sm"><input data-testid="draw-certify" type="checkbox" className="mt-1" checked={certified} onChange={(event) => setCertified(event.target.checked)} /> I certify this work is finished as described and the photos are of this property. Funds go to the verified bank account on file.</label>
               {error && <p role="alert" className="text-sm text-bad">{error}</p>}

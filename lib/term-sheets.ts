@@ -10,6 +10,7 @@ import { addDays, daysBetween, defaultRate, servicingTermsOf } from "./servicing
 import { buyDownOptions } from "./buy-down";
 import { usuryCheck, USURY } from "./usury";
 import { ratePercent } from "./format";
+import { closingTaxes } from "./florida-taxes";
 
 /** PLACEHOLDER until GT sets it (Spec B16): the days a term sheet stays open. */
 export const TERM_SHEET_DAYS = 7;
@@ -209,6 +210,9 @@ export function sheetContent(deal: Deal, sheet: TermSheet, lender = "LendHous"):
   if (t.brokerFee) terms.push(["Broker's fee", `${t.brokerPoints}% (${money(t.brokerFee)}), paid by the borrower to the broker at closing`]);
   terms.push(["Term", rental ? "30 years" : `${t.termMonths} months from closing`]);
   terms.push([rental ? "Monthly payment" : "First monthly payment (estimated)", money(t.monthlyPayment)], ["Cash to close (estimated)", money(t.cashToClose)]);
+  // Florida's taxes on recording the mortgage are set by law, so they're stated exactly (lib/florida-taxes.ts).
+  const taxes = closingTaxes(deal.app, t.noteAmount);
+  if (taxes) terms.push(["Florida taxes on the mortgage", `Doc stamps ${money(taxes.stamps)} and intangible tax ${money(taxes.intangible)}, paid when it's recorded (part of the cash to close)`]);
   terms.push(["Prepayment", t.prepay]);
   if (!rental) terms.push(["Extensions", `Up to ${cfg.extensions.maxCount}, of up to ${cfg.extensions.monthsEach} months each, at ${cfg.extensions.feePoints}% of the loan amount each`]);
   terms.push(["Late charge", `${servicing.lateFeePct * 100}% of a payment more than ${servicing.graceDays} days late`], ["Default rate", `${percent(defaultRate(t.rate, servicing))} a year`]);

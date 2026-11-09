@@ -12,6 +12,7 @@ import { ratePercent } from "@/lib/format";
 import { evaluate } from "@/lib/engine";
 import { cashToCloseParts, CITIZENSHIP_LABEL, CREDIT_LABEL, dealProblem, EXITS, EXPERIENCE_LABEL, indicativeTerms, LOAN_TYPES, PRICED, PROPERTY_TYPES, PURPOSES, quoteApplication, quoteProblem, quoteSummary, type LoanType, type Quote, type QuoteDeal } from "@/lib/quote";
 import { embedChannel, type QuoteStep } from "@/lib/quote-funnel";
+import { closingTaxes } from "@/lib/florida-taxes";
 
 type Draft = {
   submitter: "borrower" | "broker"; broker: { name: string; company: string; email: string; phone: string };
@@ -287,6 +288,8 @@ function TermsCard({ deal, pricing, onPoints }: { deal: QuoteDeal; pricing: Pric
   if (!terms) return <p data-testid="quote-review">A loan officer prices {LOAN_TYPES[deal.loanType].toLowerCase()} loans by hand. Save the request and they&apos;ll be in touch shortly.</p>;
   if (!terms.eligible) return <p data-testid="quote-review">This one needs a closer look before we can put numbers on it: {terms.hardStops[0] ?? "a ratio is outside our limits"}. Save it and a loan officer will call you about it.</p>;
   const parts = cashToCloseParts(deal, terms, pricing);
+  const quoted = quoteApplication(deal);
+  const deedTaxes = quoted ? closingTaxes(quoted, terms.noteAmount) : null;
   const [low, high] = terms.rateRange;
   return (
     <div className="quote-terms" data-testid="quote-terms">
@@ -306,6 +309,7 @@ function TermsCard({ deal, pricing, onPoints }: { deal: QuoteDeal; pricing: Pric
           {parts.map((part) => <li key={part.label}><span>{part.label}</span><b>{usd(part.amount)}</b></li>)}
           <li className="quote-cash-total"><span>Cash to close</span><b>{usd(terms.cashToClose)}</b></li>
         </ul>
+        {deedTaxes?.deed ? <p className="quote-small" data-testid="quote-deed-stamps">Florida&apos;s doc stamps on the deed, about {usd(deedTaxes.deed)}, are usually the seller&apos;s; your contract decides who pays them.</p> : null}
         {terms.holdback > 0 && <p className="quote-small">The {deal.loanType === "ground_up" ? "construction" : "renovation"} money ({usd(terms.holdback)}) is held back and paid to you in draws as the work is done, so plan to fund the first stage yourself.</p>}
       </details>
       {terms.ratios.length > 0 && <p className="quote-small">{terms.ratios.map((ratio) => `${ratio.label} ${(ratio.key === "dscr" ? ratio.actual.toFixed(2) + "x" : `${(ratio.actual * 100).toFixed(1)}%`)}`).join(" · ")}. {PRICED[deal.loanType] === "dscr" ? "Assumes taxes and insurance of about 3% of the value a year." : ""}</p>}

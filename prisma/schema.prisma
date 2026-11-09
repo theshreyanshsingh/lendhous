@@ -324,6 +324,13 @@ model PlatformSettings {
   lateFeesToInvestors           Boolean?
   // Lets visitors book a call on /book. Unset counts as on.
   allowCallBooking              Boolean?
+  // The last day Congress has authorized the federal flood program (NFIP) through; FEMA can't sell or renew policies after
+  // it until Congress acts (lib/florida-insurance.ts). An owner updates it in Settings.
+  nfipAuthorizedThrough         String   @default("2026-12-11")
+  // What a draw's check costs the borrower, kept from the money released: an inspector's visit, or the team's review of the
+  // borrower's photos (lib/draw-review.ts). 0 charges nothing.
+  drawFeeInspectionCents        Int      @default(0)
+  drawFeeDeskCents              Int      @default(0)
   updatedAt                     DateTime @updatedAt
 }
 
