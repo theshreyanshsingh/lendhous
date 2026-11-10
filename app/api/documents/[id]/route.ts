@@ -23,7 +23,12 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   if (document.ownerType === "LEAD") { if (viewFor(user.roleCodes) !== "admin" || !allowed("view_pipeline")) return refused(); }
   // A brokerage's own papers: for the brokerage, and the team that approves brokers.
   else if (document.ownerType === "BROKER") { if (!(viewFor(user.roleCodes) === "admin" ? allowed("manage_brokers") : viewFor(user.roleCodes) === "broker" && firmOf(user) === document.ownerId)) return refused(); }
-  else if (!canOpenFile((await readBook()).book, user, document.ownerId, allowed)) return refused();
+  else {
+    // The loan it was uploaded to, or another loan it's filed on: a copy carried over or reused from an earlier loan.
+    const book = (await readBook()).book;
+    const filedOn = book.deals.filter((deal) => deal.id !== document.ownerId && deal.docs.some((doc) => doc.documentId === document.id)).map((deal) => deal.id);
+    if (![document.ownerId, ...filedOn].some((dealId) => canOpenFile(book, user, dealId, allowed))) return refused();
+  }
   const view = new URL(request.url).searchParams.get("view");
   // A thumbnail is a glance at a photo on a draw or of the property. Opening it, like opening any other file, is what gets logged.
   if (view !== "thumb" || (document.documentType !== "draw_photo" && document.documentType !== "property_photo")) await audit({ actorId: user.id, action: "document.opened", entityType: "Document", entityId: document.id, after: { [document.ownerType === "LEAD" ? "leadId" : "dealId"]: document.ownerId } });

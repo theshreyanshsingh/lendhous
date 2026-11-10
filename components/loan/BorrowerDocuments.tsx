@@ -5,8 +5,11 @@ import { Badge, Section } from "@/components/ui";
 import { docBadge, OWN_DOC_ID, ownDocProblem, splitDocs, uploadLabel } from "@/lib/borrower-docs";
 import type { Deal, Doc } from "@/lib/mockData";
 import { useStore } from "@/lib/store";
+import { BulkUpload } from "./BulkUpload";
 
 const newDocId = () => `own-${Math.random().toString(36).slice(2, 12)}`;
+const CATEGORY_ORDER = ["Identity", "Entity", "Property", "Liquidity", "Experience", "Credit", "Closing", "Other"];
+const CATEGORY_WORDS: Record<string, string> = { Identity: "You and your guarantors", Entity: "Your company", Property: "The property and the deal", Liquidity: "Your money", Experience: "Your track record", Credit: "Credit", Closing: "For closing", Other: "Things you added" };
 
 /**
  * The borrower's documents for a loan, as two lists: what's still to send (anything sent back first, with what the team
@@ -15,7 +18,16 @@ const newDocId = () => `own-${Math.random().toString(36).slice(2, 12)}`;
  * send, the list folds to one line, since it's history by then.
  */
 export function BorrowerDocuments({ deal, settled = false }: { deal: Deal; settled?: boolean }) {
-  const { uploadDoc, dispatch, viewerName } = useStore();
+  const { s, uploadDoc, dispatch, viewerName } = useStore();
+  // The same document already sent on another of the borrower's loans, newest first, to use here instead of uploading again.
+  const onFile = (doc: Doc) => s.deals.filter((other) => other.id !== deal.id && other.borrowerId === deal.borrowerId).sort((a, b) => b.closingDate.localeCompare(a.closingDate)).flatMap((other) => other.docs.filter((item) => item.id === doc.id && (item.documentId || item.fileName) && item.status !== "rejected").map((item) => ({ other, item })))[0];
+  const reuse = async (doc: Doc) => {
+    const found = onFile(doc);
+    if (!found) return;
+    setBusy(doc.id);
+    if (await dispatch({ t: "reuseDocument", dealId: deal.id, docId: doc.id, fromDealId: found.other.id, by: viewerName })) setNotice(`${doc.name}: the copy from ${found.other.loanNumber} is sent. You'll find it under Submitted.`);
+    setBusy(null);
+  };
   const { toDo, submitted } = splitDocs(deal.docs);
   const [tab, setTab] = useState<"todo" | "submitted">(toDo.length ? "todo" : "submitted");
   const [unfolded, setUnfolded] = useState(false);
@@ -64,9 +76,16 @@ export function BorrowerDocuments({ deal, settled = false }: { deal: Deal; settl
         )}
         {x.fileName && (x.documentId ? <a href={`/api/documents/${x.documentId}`} className="mt-2 block truncate text-xs text-link underline underline-offset-2" data-testid="doc-file">📎 {x.fileName}</a> : <p className="mt-2 truncate text-xs text-muted-foreground">📎 {x.fileName}</p>)}
         {x.carriedFrom && <p className="mt-1 text-xs text-good" data-testid="doc-carried">On file from your loan {x.carriedFrom}</p>}
+        {x.reusedFrom && <p className="mt-1 text-xs text-muted-foreground" data-testid="doc-reused">The copy from your loan {x.reusedFrom}</p>}
+        {(x.status === "requested" || x.status === "rejected") && onFile(x) && <button type="button" disabled={Boolean(busy)} className="mt-2 mr-2 text-xs text-link underline underline-offset-2 max-sm:min-h-11" data-testid="doc-reuse" onClick={() => void reuse(x)}>Use the one from {onFile(x)!.other.loanNumber} ({onFile(x)!.item.fileName})</button>}
         {(x.status === "requested" || x.status === "rejected" || x.status === "uploaded") && <button type="button" disabled={Boolean(busy)} className={`${x.status === "uploaded" ? "btn-ghost" : "btn-primary"} mt-2 h-9! px-3! text-xs! max-sm:h-11! max-sm:w-full max-sm:text-sm!`} onClick={() => { setTarget(x.id); fileRef.current?.click(); }}>{busy === x.id ? <><Loader2 className="size-3.5 animate-spin" aria-hidden="true" />Sending…</> : uploadLabel(x)}</button>}
       </li>
     );
+  };
+  // Each list in folders by what the papers are about, in the order a file is put together.
+  const grouped = (docs: Doc[]) => {
+    const folders = [...new Set([...CATEGORY_ORDER, ...docs.map((doc) => doc.category)])].filter((category) => docs.some((doc) => doc.category === category));
+    return <div className="space-y-3">{folders.map((category) => <div key={category} data-testid="docs-folder"><p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{CATEGORY_WORDS[category] ?? category}</p><ul className="space-y-2">{docs.filter((doc) => doc.category === category).map(card)}</ul></div>)}</div>;
   };
   const accepted = deal.docs.filter((x) => x.status === "accepted").length;
   if (settled && !toDo.length && !unfolded) {
@@ -92,11 +111,13 @@ export function BorrowerDocuments({ deal, settled = false }: { deal: Deal; settl
         {notice && <p className="mb-3 rounded-[2px] bg-good/10 p-2 text-sm text-good" role="status" data-testid="docs-notice">✓ {notice}</p>}
         <div className="mb-3 flex flex-wrap gap-2" role="tablist" aria-label="Documents">{tabButton("todo", "To do", toDo.length)}{tabButton("submitted", "Submitted", submitted.length)}</div>
         {/* Both lists stay on the page, so a document just sent is still there to find; only the chosen one shows. */}
+        {/* Above both lists, so it stays put (with what it just sent) as items move from To do to Submitted. */}
+        <div className="mb-3"><BulkUpload deal={deal} /></div>
         <div className={tab === "todo" ? "" : "hidden"} role="tabpanel" data-testid="docs-todo">
-          {toDo.length ? <ul className="space-y-2">{toDo.map(card)}</ul> : <p className="rounded-[2px] bg-good/10 p-3 text-sm text-good">Nothing to send right now: everything we asked for is in.</p>}
+          {toDo.length ? grouped(toDo) : <p className="rounded-[2px] bg-good/10 p-3 text-sm text-good">Nothing to send right now: everything we asked for is in.</p>}
         </div>
         <div className={tab === "submitted" ? "" : "hidden"} role="tabpanel" data-testid="docs-submitted">
-          {submitted.length ? <ul className="space-y-2">{submitted.map(card)}</ul> : <p className="text-sm text-muted-foreground">Nothing sent yet.</p>}
+          {submitted.length ? grouped(submitted) : <p className="text-sm text-muted-foreground">Nothing sent yet.</p>}
         </div>
         <div className="mt-4 rounded-[2px] border border-dashed border-rule p-3" data-testid="add-own-doc">
           <p className="text-sm font-medium">Have something we didn&apos;t ask for?</p>

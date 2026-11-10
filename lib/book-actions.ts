@@ -74,7 +74,7 @@ const buyBox = z.object({
 });
 
 const schema = z.discriminatedUnion("t", [
-  z.object({ t: z.literal("submitApp"), app: application, address: text(200), city: text(100), zip: text(10), entityName: text(200), exitStrategy: text(40), closingDate: date.optional(), client: z.object({ name: text(120), borrowerId: id.optional(), brokerId: id.optional(), brokerPoints: z.number().min(0).max(5).optional() }).optional(), source: text(40).optional(), sponsor: sponsor.optional(), refinances: id.optional() }),
+  z.object({ t: z.literal("submitApp"), app: application, address: text(200), city: text(100), zip: text(10), entityName: text(200), exitStrategy: text(40), closingDate: date.optional(), client: z.object({ name: text(120), borrowerId: id.optional(), brokerId: id.optional(), brokerPoints: z.number().min(0).max(5).optional() }).optional(), source: text(40).optional(), sponsor: sponsor.optional(), refinances: id.optional() , clientFills: z.boolean().optional() }),
   z.object({ t: z.literal("setExitPlan"), dealId: id, by: z.string().max(120), plan: z.object({ choice: z.enum(["sell", "refi_lendhous", "refi_other", "extend", "payoff"]), confidence: z.enum(["sure", "likely", "unsure"]), listPrice: money.optional(), saleBy: date.optional(), lender: text(120).optional(), note: text(500) }) }),
   z.object({ t: z.literal("saveSponsor"), dealId: id, sponsor }),
   z.object({ t: z.literal("verifyTrackDeal"), dealId: id, trackId: id, verified: z.boolean() }),
@@ -97,6 +97,7 @@ const schema = z.discriminatedUnion("t", [
   z.object({ t: z.literal("decideFirmScreening"), kind: z.enum(["partner", "buyer", "broker"]), firmId: id, screeningId: id, decision: z.enum(["cleared", "match"]), reason: text(1000).min(1), by: z.string().max(120) }),
   z.object({ t: z.literal("docStatus"), dealId: id, docId: id, status: z.enum(["requested", "uploaded", "in_review", "accepted", "rejected", "waived"]), note: text(300).optional() }),
   z.object({ t: z.literal("addOwnDoc"), dealId: id, docId: id, name: text(120), by: z.string().max(120) }),
+  z.object({ t: z.literal("reuseDocument"), dealId: id, docId: id, fromDealId: id, by: z.string().max(120) }),
   z.object({ t: z.literal("setAgent"), dealId: id, role: z.enum(["title", "insurance"]), by: z.string().max(120), contact: z.object({ name: text(160), company: text(160), email: text(160), phone: text(160) }) }),
   z.object({ t: z.literal("route"), dealId: id, route: z.enum(["in_house", "partner", "split"]), inHouseAmount: money }),
   z.object({ t: z.literal("sendTeaser"), dealId: id, partnerIds: z.array(id).min(1).max(50) }),

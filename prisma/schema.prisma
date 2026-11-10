@@ -230,6 +230,21 @@ model AuditEvent {
   @@index([createdAt])
 }
 
+// A browser's push subscription (lib/push.ts): where a person's notifications go to their phone or computer. The keys let
+// that browser decrypt what's sent; the push service (Google, Apple, Mozilla, Microsoft) only relays it.
+model PushSubscription {
+  id         String    @id @default(uuid()) @map("_id")
+  userId     String
+  endpoint   String    @unique
+  p256dh     String
+  auth       String
+  userAgent  String    @default("")
+  createdAt  DateTime  @default(now())
+  lastSentAt DateTime?
+
+  @@index([userId])
+}
+
 model Notification {
   id        String    @id @default(uuid()) @map("_id")
   toEmail   String

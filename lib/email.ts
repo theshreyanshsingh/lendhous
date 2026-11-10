@@ -5,6 +5,7 @@ import { encryptField } from "@/lib/crypto";
 import { notDeleted, prisma } from "@/lib/prisma";
 import { deliverable, deskRecipients, resolveMailTransport, type MailTransport } from "@/lib/mail-config";
 import { noticeContext } from "@/lib/notifications";
+import { pushMessage, pushReady, pushTo } from "./push";
 
 type Attachment = { filename: string; content: Buffer };
 
@@ -36,11 +37,14 @@ async function deliver(transport: MailTransport, toEmail: string, subject: strin
   }
 }
 
-export async function notify(toEmail: string, subject: string, body: string, options: { eventCode?: string; legal?: boolean; replyTo?: string } = {}) {
+export async function notify(toEmail: string, subject: string, body: string, options: { eventCode?: string; legal?: boolean; replyTo?: string; url?: string } = {}) {
   const user = await prisma.user.findUnique({ where: { email: toEmail }, select: { id: true, notifyEmail: true, notifyInApp: true } });
   const legal = Boolean(options.legal);
   const sendEmail = legal || !user || user.notifyEmail;
   const keepInApp = legal || !user || user.notifyInApp;
+  // To their phone or computer, where they turned notifications on there, whatever their email choice (lib/push.ts). A
+  // failure never stops the rest.
+  if (user && pushReady()) await pushTo(user.id, pushMessage(subject, body, options.url ?? "/admin/account/notifications", options.eventCode)).catch(() => 0);
   if (!sendEmail && !keepInApp) return;
   const transport = deliverable(toEmail) ? resolveMailTransport() : "log";
   let delivery: string = sendEmail ? transport : "skipped";

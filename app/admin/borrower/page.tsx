@@ -7,6 +7,7 @@ import { useStore, est } from "@/lib/store";
 import { fundedBalances } from "@/lib/engine";
 import Tracker from "@/components/Tracker";
 import { PageIntro } from "@/components/page-intro";
+import { PushToggle } from "@/components/PushToggle";
 import { Badge, usd, productLabel, statusLabel, Stat } from "@/components/ui";
 import { BorrowerLetters } from "@/components/BorrowerLetters";
 import { ReferAFriend } from "@/components/ReferAFriend";
@@ -31,6 +32,7 @@ export default function BorrowerHome() {
         <div className="min-w-0"><PageIntro eyebrow="Welcome back" title={viewerName} lede="Your applications and funded loans. Open one to see its next step and upload documents." /></div>
         <Link href="/admin/apply" className="btn-primary mb-6">+ Apply for a loan</Link>
       </div>
+      <PushToggle offer />
       {tasks.length > 0 && (
         <div className="glass flex flex-wrap items-center justify-between gap-3 border-warn/30 bg-warn/12 p-4 text-sm text-warn" data-testid="docs-owed">
           <p className="min-w-0 flex-1 basis-48"><b>{tasks.length} document{tasks.length > 1 ? "s" : ""} needed</b> across your loans.<span className="max-md:hidden"> Open a loan to upload.</span></p>

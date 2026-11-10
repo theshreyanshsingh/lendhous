@@ -1527,7 +1527,9 @@ describe("partners' money between loans", () => {
       return result.after;
     };
     await act(partner, { t: "setRollover", partnerId: firm.id, choice: "all", by: "" });
-    const today = new Date().toISOString().slice(0, 10);
+    // The servicing day is Florida's, which runs behind UTC in the evening.
+    const { servicingDate } = await import("@/lib/servicing");
+    const today = servicingDate(new Date());
     const loan = (await readBook()).book.deals.find((deal) => deal.id === "roll-loan")!;
     await act(staff, { t: "recordPayoff", dealId: "roll-loan", amount: payoffOn(loan, today).quote.total, receivedOn: today, method: "wire", reference: "PO-1", by: "" });
     let book = (await readBook()).book;
@@ -1652,6 +1654,36 @@ describe("Florida rules from Settings", () => {
     expect((await readBook()).book.draws.find((item) => item.id === draw.id)).toMatchObject({ path: "inspector", fee: 225, escalated: { by: "Uma Desk" } });
     await prisma.platformSettings.update({ where: { id: "default" }, data: { drawFeeDeskCents: 0, drawFeeInspectionCents: 0 } });
     resetSettingsCache();
+    vi.restoreAllMocks();
+  });
+});
+
+describe("a broker's client filling in their own details", () => {
+  it("goes in without the client's profile, gets the client a link, and keeps a browser's push subscription once", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const { demoBook } = await import("@/lib/book");
+    const { readBook, runAction } = await import("@/lib/book-store");
+    const { createApplicationLink, linkSummaries } = await import("@/lib/application-links");
+    const { draftFromDeal } = await import("@/lib/borrower-application");
+    const d3 = demoBook().deals.find((deal) => deal.id === "d3")!;
+    const broker = { id: "brk-user-db", name: "Bea Broker", roleCodes: ["BROKER" as const], organizationId: "brk-a" };
+    const firm = demoBook().brokers.find((item) => item.id === "brk-a")!;
+    await prisma.bookRecord.upsert({ where: { id: "brokers:brk-a" }, create: { id: "brokers:brk-a", kind: "brokers", data: JSON.parse(JSON.stringify(firm)) }, update: {} });
+    const submitted = await runAction(broker, { t: "submitApp", app: d3.app, address: "88 Client Fills Ave", city: "Miami", zip: "33130", entityName: "Client Fills LLC", exitStrategy: "Sell", client: { name: "Casey Client", brokerId: "brk-a", brokerPoints: 1 }, clientFills: true });
+    if ("error" in submitted) throw new Error(submitted.error);
+    const deal = (await readBook()).book.deals.find((item) => item.address === "88 Client Fills Ave")!;
+    expect(deal).toMatchObject({ brokerId: "brk-a", status: "submitted" });
+    expect(deal.sponsor).toBeUndefined();
+    await createApplicationLink({ dealId: deal.id, recipient: { name: "Casey Client", email: "casey@example.com" }, officer: "Bea Broker (Sample Brokerage)", sentById: broker.id, draft: draftFromDeal(deal, "casey@example.com") });
+    expect((await linkSummaries({ dealIds: [deal.id] }))[0]).toMatchObject({ state: "open", to: "Casey Client" });
+    // One row per browser: the same endpoint signing in as someone else moves to them.
+    const endpoint = "https://fcm.googleapis.com/fcm/send/db-test";
+    await prisma.pushSubscription.create({ data: { userId: "user-1", endpoint, p256dh: "B".repeat(87), auth: "a".repeat(22) } });
+    await expect(prisma.pushSubscription.create({ data: { userId: "user-2", endpoint, p256dh: "B".repeat(87), auth: "a".repeat(22) } })).rejects.toThrow();
+    await prisma.pushSubscription.upsert({ where: { endpoint }, create: { userId: "user-2", endpoint, p256dh: "B".repeat(87), auth: "a".repeat(22) }, update: { userId: "user-2" } });
+    expect(await prisma.pushSubscription.findMany({ where: { endpoint } })).toMatchObject([{ userId: "user-2" }]);
+    await prisma.pushSubscription.deleteMany({ where: { endpoint } });
+    await prisma.applicationLink.deleteMany({ where: { dealId: deal.id } });
     vi.restoreAllMocks();
   });
 });

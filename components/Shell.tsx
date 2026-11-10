@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { BarChart3, Bell, Briefcase, ChevronDown, ChevronsUpDown, CloudLightning, Gavel, FileCheck, FileText, TriangleAlert, Percent, Building2, ClipboardList, FilePlus, Hammer, Inbox, Landmark, LayoutDashboard, ListChecks, BookOpen, Lock, LogOut, Menu, MessageSquare, ReceiptText, RotateCcw, ScrollText, Settings, Store, Tag, Upload, UserRound, Users, type LucideIcon } from "lucide-react";
+import { BarChart3, Bell, Briefcase, ChevronDown, ChevronsUpDown, CloudLightning, FolderOpen, Gavel, FileCheck, FileText, TriangleAlert, Percent, Building2, ClipboardList, FilePlus, Hammer, Inbox, Landmark, LayoutDashboard, ListChecks, BookOpen, Lock, LogOut, Menu, MessageSquare, ReceiptText, RotateCcw, ScrollText, Settings, Store, Tag, Upload, UserRound, Users, type LucideIcon } from "lucide-react";
 import { logout } from "@/actions/auth";
 import { attentionCounts } from "@/lib/attention";
 import { activeWatches } from "@/lib/storms";
@@ -27,7 +27,7 @@ const FOLDED_KEY = "lendhous-nav-folded";
 // Layout follows UPB Capital's AppShell: fixed left sidebar on desktop, a sheet on mobile. The signed-in
 // account's role picks the workspace; there is no switching between them.
 const nav: Record<View, NavItem[]> = {
-  borrower: [{ href: "/admin/borrower", label: "My loans", icon: LayoutDashboard }, { href: "/admin/apply", label: "Apply for a loan", icon: FilePlus }],
+  borrower: [{ href: "/admin/borrower", label: "My loans", icon: LayoutDashboard }, { href: "/admin/borrower/documents", label: "My documents", icon: FolderOpen }, { href: "/admin/apply", label: "Apply for a loan", icon: FilePlus }],
   admin: [{ href: "/admin", label: "Pipeline", icon: ClipboardList }, { href: "/admin/leads", label: "Website leads", icon: Inbox }, { href: "/admin/capital", label: "Capital", icon: Landmark, section: "Money" }, { href: "/admin/loan-sales", label: "Loan sales", icon: Tag, section: "Money" }, { href: "/admin/draws", label: "Draws", icon: Hammer, section: "Servicing" }, { href: "/admin/servicing", label: "Loan servicing", icon: ReceiptText, section: "Servicing" }],
   partner: [{ href: "/admin/partner", label: "Deal feed", icon: BookOpen }, { href: "/admin/partner/portfolio", label: "My portfolio", icon: Briefcase }],
   buyer: [{ href: "/admin/buyer", label: "Loans for sale", icon: Store }, { href: "/admin/buyer/portfolio", label: "My loans & offers", icon: Briefcase }],
@@ -38,6 +38,7 @@ function active(path: string, href: string) {
   if (href === "/admin") return path === "/admin" || path.startsWith("/admin/deals");
   if (href === "/admin/buyer") return path === href || path.startsWith("/admin/buyer/loans");
   if (href === "/admin/broker") return path === href || path.startsWith("/admin/broker/deals");
+  if (href === "/admin/borrower") return path === href || (path.startsWith("/admin/borrower/") && !path.startsWith("/admin/borrower/documents"));
   return path === href || path.startsWith(`${href}/`);
 }
 

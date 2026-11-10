@@ -11,6 +11,7 @@ import type { Deal } from "@/lib/mockData";
 import { canSendDeals, FEE_STATE, feeOf, PROTECTION_MONTHS, referralPath } from "@/lib/brokers";
 import { est, useStore } from "@/lib/store";
 import { BrokerBrandForm, BrokerLetters, BrokerStanding } from "@/components/BrokerProgram";
+import { BrokerEarnings } from "@/components/BrokerClient";
 
 const CLOSED = ["funded", "servicing_current", "servicing_delinquent", "matured", "default", "paid_off"];
 // Declined or withdrawn: no longer in process, and never earned a fee.
@@ -70,6 +71,7 @@ export default function BrokerHome() {
         <div className="glass p-4"><Stat label="Fees earned" value={<span className="text-good" data-testid="fees-earned">{usd(total("paid") + total("unpaid"))}</span>} sub={total("unpaid") ? <span className="text-warn" data-testid="fees-unpaid">{usd(total("unpaid"))} not paid yet</span> : "all paid"} /></div>
       </div>
       <BrokerStanding firm={firm} />
+      <BrokerEarnings deals={mine} />
       {firm.referralCode && <ReferralLink code={firm.referralCode} />}
       {firm.referralCode && <EmbedSnippet referral={firm.referralCode} title="A quote on your own website">Paste this into a page on your site. Visitors see LendHous&apos;s terms on their deal there, and a quote they save is yours, the same as through your link.</EmbedSnippet>}
       <div className="grid gap-4 lg:grid-cols-2"><BrokerBrandForm firm={firm} /><BrokerLetters firm={firm} /></div>
@@ -84,6 +86,7 @@ export default function BrokerHome() {
                 <Badge tone={CLOSED.includes(deal.status) ? "green" : ENDED.includes(deal.status) ? "slate" : "blue"}>{statusLabel(deal.status)}</Badge>
               </div>
               <div className="my-4"><Tracker status={deal.status} /></div>
+              {!deal.sponsor && ["submitted", "initial_review", "underwriting"].includes(deal.status) && <p className="-mt-2 mb-3 text-xs text-warn" data-testid="broker-deal-client">Waiting on your client&apos;s details: open the deal to see their link.</p>}
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 <Stat label="Loan" value={usd(est(deal.app).noteAmount)} />
                 <Stat label="Your fee" value={usd(brokerFee(deal))} sub={<span data-testid="broker-fee-state">{points(deal.brokerPoints)} · {FEE_STATE[feeOf(deal).state]}</span>} />

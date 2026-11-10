@@ -15,6 +15,7 @@ import { surveyProblem } from "./surveys";
 import { cureError, defaultError, executeError, extensionFee, extensionRequestError, payoffError, payoffOn, PRE_FUNDING, reopenTo, closureReason, DEFAULT_KINDS } from "./loan-exits";
 import { canAdvance, nextStage } from "./loan-stages";
 import { modificationPreview, modificationWords, proposalProblem, signProblem } from "./modifications";
+import { reuseProblem } from "./doc-sorting";
 import { deskProblem, deskReviewProblem, drawFees, toSend, type DrawPath } from "./draw-review";
 import { ADVANCE_KINDS, BANKRUPTCY_ENDS, COLLECTIONS, DELIVERY_METHODS, inBankruptcy, NOTICE_KINDS, owedAtTitle, stepLabel, stepProblem } from "./collections";
 import { issueProblem, latestLetter, letterFigures, receivedOnFor } from "./payoffs";
@@ -36,7 +37,8 @@ import { addDays, balanceOf, DEMO_SERVICING_DAY, firstDueDate, ledger, maturityO
 export interface Book { partnerId: string; buyerId: string; brokerId: string; borrowerId: string; loanPrefix: string; deals: Deal[]; bids: Bid[]; partners: Partner[]; buyers: LoanBuyer[]; brokers: Broker[]; sales: LoanSale[]; offers: LoanOffer[]; draws: DrawRequest[]; photoRequests: PhotoRequest[]; payoffs: PayoffRequest[]; messages: LoanMessage[]; sources: CapitalSource[]; conditionLibrary: ConditionTemplate[]; /** Storms whose forecast cone has covered funded loans (lib/storms.ts). Staff only. */ storms: StormWatch[]; audit: { at: string; text: string }[]; sample?: boolean; /** A borrower's own referrals, summed up for them: friends' loans are never in their book (lib/referrals.ts). */ myReferrals?: MyReferral[]; /** The pricing its loans use, as sent to a browser. Not part of the records. */ pricing?: PricingPayload }
 
 export type BookAction =
-  | { t: "submitApp"; app: Application; address: string; city: string; zip: string; entityName: string; exitStrategy: string; closingDate?: string; client?: { name: string; borrowerId?: string; brokerId?: string; brokerPoints?: number }; source?: string; sponsor?: Sponsor; refinances?: string }
+  /** clientFills: a broker's client fills in their own guarantors, past deals and credit answers on an application link. */
+  | { t: "submitApp"; app: Application; address: string; city: string; zip: string; entityName: string; exitStrategy: string; closingDate?: string; client?: { name: string; borrowerId?: string; brokerId?: string; brokerPoints?: number }; source?: string; sponsor?: Sponsor; refinances?: string; clientFills?: boolean }
   | { t: "setExitPlan"; dealId: string; plan: Omit<ExitPlan, "by" | "at">; by: string }
   | { t: "saveSponsor"; dealId: string; sponsor: Sponsor }
   /** A signed borrower application, applied to a loan already started. Only the server does it, from the signed link. */
@@ -246,6 +248,8 @@ export type BookAction =
   | { t: "uploadDoc"; dealId: string; docId: string; fileName: string; documentId?: string }
   | { t: "docStatus"; dealId: string; docId: string; status: DocStatus; note?: string }
   | { t: "addOwnDoc"; dealId: string; docId: string; name: string; by: string }
+  /** A document the borrower already sent on another of their loans, sent again for this one (lib/doc-sorting.ts). */
+  | { t: "reuseDocument"; dealId: string; docId: string; fromDealId: string; by: string }
   | { t: "setAgent"; dealId: string; role: AgentRole; contact: AgentInput; by: string }
   | { t: "route"; dealId: string; route: "in_house" | "partner" | "split"; inHouseAmount: number }
   | { t: "sendTeaser"; dealId: string; partnerIds: string[] }
@@ -600,6 +604,13 @@ function apply(s: Book, a: BookAction): Book {
       const income = (item: Application) => (item.product === "dscr" ? `${item.rentalType ?? "long_term"}:${item.strIncomeSource ?? ""}` : "");
       const docs = income(app) === income(deal.app) ? deal.docs : [...deal.docs.filter((doc) => !["lease", "str-income"].includes(doc.id) || doc.status !== "requested"), ...needsList(app, deal.sponsor).filter((doc) => ["lease", "str-income"].includes(doc.id) && !deal.docs.some((have) => have.id === doc.id && have.status !== "requested"))];
       return { ...s, deals: upd(a.dealId, (d) => ({ ...d, app, scope, docs })), audit: log(`${deal.loanNumber}: underwriting numbers updated`) };
+    }
+    case "reuseDocument": {
+      const deal = s.deals.find((d) => d.id === a.dealId);
+      const from = s.deals.find((d) => d.id === a.fromDealId);
+      const source = from?.docs.find((doc) => doc.id === a.docId);
+      if (!deal || reuseProblem(deal, deal.docs.find((doc) => doc.id === a.docId), from, source)) return s;
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, docs: d.docs.map((doc) => (doc.id === a.docId ? { ...doc, status: "uploaded" as const, fileName: source!.fileName, documentId: source!.documentId, uploadedAt: now(), reusedFrom: from!.loanNumber, teamNote: undefined } : doc)) })), audit: log(`${deal.loanNumber}: ${a.by} sent the ${source!.name.toLowerCase()} already on file for ${from!.loanNumber}`) };
     }
     case "addOwnDoc": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;

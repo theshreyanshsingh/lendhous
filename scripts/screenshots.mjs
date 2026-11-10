@@ -1656,6 +1656,51 @@ ok("recording the photo review readies it to approve, as an inspection would", (
 await reviewed.getByTestId("approve-draw").click();
 ok("once approved, it says what to send after the fee", (await seen(page.getByTestId("draw-approved").filter({ hasText: "the $100 fee is kept" }))));
 
+// 10f. Documents, a broker's client and notifications: a batch of papers filed by their names, one sent again from another
+// loan, the borrower's own documents page, a broker's deal left to the client to fill in, the broker's fees, and the
+// switch for notifications on a phone.
+await actAs(SEATS.borrower);
+await page.goto(BASE + "/admin/borrower/d18");
+await page.getByTestId("bulk-input").setInputFiles([{ name: "Chase statement Sept.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 sample") }, { name: "Insurance binder.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 sample 2") }, { name: "IMG_2041.jpg", mimeType: "image/jpeg", buffer: PHOTO }]);
+ok("a batch of papers is filed by their names, with the one that doesn't fit to name", (await page.getByTestId("bulk-where").nth(0).inputValue()) === "bank" && (await page.getByTestId("bulk-where").nth(1).inputValue()) === "insurance" && (await page.getByTestId("bulk-name").inputValue()) === "IMG 2041");
+await page.getByTestId("bulk-name").fill("Front of the house");
+await shot(page, "30-borrower-bulk-upload.png");
+await page.getByTestId("bulk-send").click();
+ok("and they all go in one go", await seen(page.getByTestId("bulk-note").filter({ hasText: "3 documents sent" })));
+ok("the papers are in folders by what they're about", (await page.getByTestId("docs-folder").count()) >= 2);
+await page.getByTestId("doc-track").getByTestId("doc-reuse").click();
+ok("one already sent on another loan is sent again in a tap", await seen(page.getByTestId("docs-notice").filter({ hasText: "the copy from LH-DEMO-1002 is sent" })));
+await page.getByTestId("docs-tab-submitted").click();
+ok("and shows under Submitted as that loan's copy", await seen(page.getByTestId("doc-reused").filter({ hasText: "LH-DEMO-1002" })));
+await page.goto(BASE + "/admin/borrower/documents");
+ok("the borrower's own documents page has every file across their loans, in folders", (await page.getByTestId("my-docs-folder").count()) >= 3 && (await page.getByTestId("my-doc").count()) >= 10);
+await page.getByTestId("my-docs-search").fill("operating");
+ok("and finds one by its name", (await page.getByTestId("my-doc").count()) >= 1 && (await page.getByTestId("my-doc").first().innerText()).includes("Operating agreement"));
+await page.getByTestId("my-docs-search").fill("");
+await shot(page, "30b-borrower-my-documents.png");
+await page.goto(BASE + "/admin/account/notifications");
+await page.waitForFunction(() => document.querySelector('[data-testid="push-toggle"]')?.getAttribute("data-state") !== "checking", null, { timeout: 5000 }).catch(() => {});
+ok("notifications on the phone can be turned on from the Notifications page", ["off", "on", "install", "unsupported", "blocked", "unavailable"].includes(await page.getByTestId("push-toggle").getAttribute("data-state")));
+await actAs(SEATS.broker);
+await page.goto(BASE + "/admin/broker");
+ok("the broker sees each deal's fee, its status and the year's total", (await seen(page.getByTestId("broker-my-fees"))) && (await page.getByTestId("broker-fees-year").innerText()).includes("1099-NEC"));
+await page.goto(BASE + "/admin/broker/new");
+for (let i = 0; i < 4; i++) await page.getByTestId("next").click();
+await page.getByTestId("client-name").fill("Riley Lets-Me-Fill (FAKE)");
+await page.getByTestId("client-fills").check();
+ok("a broker can leave the client's guarantors, past deals and credit answers to the client", (await seen(page.getByTestId("client-email"))) && (await page.getByTestId("guarantor-name-0").count()) === 0);
+for (let i = 0; i < 3; i++) await page.getByTestId("next").click();
+ok("and is told the client gets the link", (await page.getByTestId("client-link-note").innerText()).includes("link"));
+for (const c of ["bp", "noo", "consent", "true"]) await page.getByTestId(`cert-${c}`).check();
+await shot(page, "30c-broker-client-fills.png");
+await page.getByTestId("submit").click();
+await page.waitForURL("**/admin/broker");
+const fillsDeal = page.getByTestId("broker-deal").filter({ hasText: "Riley Lets-Me-Fill (FAKE)" });
+ok("the deal goes in, marked as waiting on the client's details", (await seen(fillsDeal)) && (await fillsDeal.getByTestId("broker-deal-client").isVisible()));
+await fillsDeal.click();
+ok("and its page says where the client's details stand", await seen(page.getByTestId("client-details")));
+await actAs(SEATS.staff);
+
 // 11. Real records: the audit log, notifications, and a forgotten password
 await page.goto(BASE + "/admin/audit");
 ok("the owner can read the audit log", (await page.getByTestId("audit-row").count()) > 0);

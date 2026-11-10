@@ -12,6 +12,7 @@ import EstimatePanel from "@/components/EstimatePanel";
 import { StepSwap } from "@/components/motion";
 import { allAnswered, DeclarationFields, emptyProfile, GuarantorFields, toSponsor, TrackRecordFields } from "@/components/SponsorForm";
 import { productLabel } from "@/components/ui";
+import { submitForClient } from "@/actions/broker-clients";
 
 const steps = ["Loan type", "Property", "Deal numbers", "Loan request", "Borrower & guarantors", "Past deals", "Credit questions", "Review & submit"];
 const REVIEW = steps.length - 1;
@@ -49,7 +50,9 @@ export default function ApplicationWizard({ mode = "borrower", prefill }: { mode
   const [certs, setCerts] = useState({ bp: false, noo: false, consent: false, true: false });
   const [profile, setProfile] = useState<ReturnType<typeof emptyProfile>>(() => ({ ...emptyProfile(), guarantors: [{ name: prefill?.name ?? "", ownershipPct: 100, fico: 700, citizenship: "us" }] }));
   // Staff starting a loan from a phone call may not have this yet; the borrower is then asked for it on their loan page.
+  // A broker can leave it to their client, who gets a secure link to fill it in and sign (actions/broker-clients.ts).
   const [collect, setCollect] = useState(!staff);
+  const clientFills = broker && !collect;
   const sponsor = useMemo(() => toSponsor(profile), [profile]);
   const [a, setA] = useState<Application>({ product: prefill?.product ?? "fix_flip", purpose: "purchase", county: prefill && prefill.state !== "FL" ? "Out of state" : prefill?.county || "Broward", state: prefill?.state ?? "FL", propertyType: "sfr", occupancy: "vacant", purchasePrice: prefill?.purchasePrice ?? 300_000, rehab: prefill?.rehab ?? 100_000, arv: prefill ? prefill.arv ?? prefill.purchasePrice + prefill.rehab : 550_000, requestedAmount: prefill?.requestedAmount, interestReserve: "none", accrual: "full_boat", fico: 720, verifiedDeals: 3, liquidity: 150_000, valuationSource: "borrower_estimate", monthlyRent: 3_200, taxesAnnual: 6_000, insuranceAnnual: 4_800, hoaMonthly: 0, groundUpBuilds: 0 });
   const set = (p: Partial<Application>) => setA((x) => ({ ...x, ...p }));
@@ -73,6 +76,7 @@ export default function ApplicationWizard({ mode = "borrower", prefill }: { mode
     ] : []),
   ].filter((item): item is string => Boolean(item));
   const needsClient = (broker || staff) && !client.name.trim();
+  const needsClientEmail = clientFills && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(client.email.trim());
   // The broker's quote PDF for their client, priced on the server on today's numbers.
   const downloadQuote = async () => {
     setQuoting(true); setQuoteNote("");
@@ -87,7 +91,14 @@ export default function ApplicationWizard({ mode = "borrower", prefill }: { mode
   };
   const submit = async () => {
     setSending(true);
-    const action = { t: "submitApp" as const, app: priced, address: addr.address, city: addr.city, zip: addr.zip, entityName: addr.entityName, exitStrategy: addr.exit, client: broker ? { name: client.name.trim(), brokerId: s.brokerId, brokerPoints: client.points } : staff ? { name: client.name.trim() } : undefined, source: staff ? "staff" : undefined, sponsor: collect ? sponsor : undefined };
+    const action = { t: "submitApp" as const, app: priced, address: addr.address, city: addr.city, zip: addr.zip, entityName: addr.entityName, exitStrategy: addr.exit, client: broker ? { name: client.name.trim(), brokerId: s.brokerId, brokerPoints: client.points } : staff ? { name: client.name.trim() } : undefined, source: staff ? "staff" : undefined, sponsor: collect ? sponsor : undefined, ...(clientFills ? { clientFills: true } : {}) };
+    if (clientFills && !local) {
+      const reply = await submitForClient({ action, clientEmail: client.email });
+      applyReply(reply);
+      setSending(false);
+      if (reply.dealId) router.push(`/admin/broker/deals/${reply.dealId}`);
+      return;
+    }
     if (staff && !local) {
       const reply = await startLoan({ action, clientEmail: client.email, invite: client.invite, leadId: prefill?.leadId });
       applyReply(reply);
@@ -164,6 +175,8 @@ export default function ApplicationWizard({ mode = "borrower", prefill }: { mode
               {broker && <>
                 <label className="block"><span className="label">Client&apos;s name</span><input data-testid="client-name" className="desk-input" value={client.name} onChange={(x) => setClient({ ...client, name: x.target.value })} /></label>
                 <label className="block"><span className="label">Your fee (points, paid at closing)</span><input data-testid="client-points" className="desk-input" type="number" inputMode="decimal" min={0} max={5} step={0.25} value={client.points} onChange={(x) => setClient({ ...client, points: Number(x.target.value) || 0 })} /></label>
+                <label className="flex items-start gap-2 text-sm sm:col-span-2"><input type="checkbox" className="mt-1" data-testid="client-fills" checked={clientFills} onChange={(x) => setCollect(!x.target.checked)} /><span>My client fills in their own guarantors, past deals and credit questions. We email them a secure link to do it and sign; you see when they have.</span></label>
+                {clientFills && <label className="block sm:col-span-2"><span className="label">Client&apos;s email, for the link</span><input data-testid="client-email" type="email" className="desk-input" value={client.email} onChange={(x) => setClient({ ...client, email: x.target.value })} /></label>}
               </>}
               <label className="block"><span className="label">Borrowing entity (LLC)</span><input className="desk-input" placeholder="e.g. Sunrise Holdings LLC" value={addr.entityName} onChange={(x) => setAddr({ ...addr, entityName: x.target.value })} /></label>
               <label className="block"><span className="label">State the LLC was formed in</span><input className="desk-input" data-testid="entity-state" maxLength={2} value={profile.entityState} onChange={(x) => setProfile({ ...profile, entityState: x.target.value.replace(/[^a-zA-Z]/g, "").toUpperCase() })} /></label>
@@ -171,15 +184,15 @@ export default function ApplicationWizard({ mode = "borrower", prefill }: { mode
               <Num label="Earnest money already paid" value={a.earnestMoney} onChange={(v) => set({ earnestMoney: v })} />
               {staff && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={!!a.repeatBorrower} onChange={(x) => set({ repeatBorrower: x.target.checked })} /> Paid a LendHous loan before this system (counts as one; loans here are counted on their own)</label>}
               {staff && <label className="flex items-start gap-2 text-sm sm:col-span-2"><input type="checkbox" className="mt-1" data-testid="collect-profile" checked={collect} onChange={(x) => setCollect(x.target.checked)} /> I have the guarantors, past deals and credit answers now. Otherwise the borrower is asked for them on their loan page.</label>}
-              {staff && !collect && <>
+              {(staff || broker) && !collect && <>
                 <Num testid="fico" label="Credit score (estimate)" value={a.fico} onChange={(v) => set({ fico: v ?? 0 })} />
                 <Num testid="deals" label="Completed deals, last 36 months (estimate)" value={a.verifiedDeals} onChange={(v) => set({ verifiedDeals: v ?? 0 })} />
               </>}
             </div>
             {collect && <GuarantorFields guarantors={profile.guarantors} onChange={(guarantors) => setProfile({ ...profile, guarantors })} />}
           </div>)}
-          {step === 5 && (collect ? <TrackRecordFields deals={profile.trackRecord} onChange={(trackRecord) => setProfile({ ...profile, trackRecord })} /> : <p className="text-sm text-muted-foreground">The borrower lists their past deals on their loan page.</p>)}
-          {step === 6 && (collect ? <DeclarationFields answers={profile.answers} onChange={(answers) => setProfile({ ...profile, answers })} /> : <p className="text-sm text-muted-foreground">The borrower answers the credit questions on their loan page.</p>)}
+          {step === 5 && (collect ? <TrackRecordFields deals={profile.trackRecord} onChange={(trackRecord) => setProfile({ ...profile, trackRecord })} /> : <p className="text-sm text-muted-foreground">{clientFills ? "Your client lists their past deals on the secure link we email them." : "The borrower lists their past deals on their loan page."}</p>)}
+          {step === 6 && (collect ? <DeclarationFields answers={profile.answers} onChange={(answers) => setProfile({ ...profile, answers })} /> : <p className="text-sm text-muted-foreground">{clientFills ? "Your client answers the credit questions on the same link, and signs the application there." : "The borrower answers the credit questions on their loan page."}</p>)}
           {step === REVIEW && (<div className="space-y-4 text-sm">
             <div className="grid gap-2 rounded-lg bg-muted p-3 sm:grid-cols-2" data-testid="review-summary">
               <div><b>{productLabel[a.product]}</b> · {a.purpose.replace("_", " ")}</div><div>{addr.address || "(no address)"} {addr.city} · {a.county}</div>
@@ -205,13 +218,15 @@ export default function ApplicationWizard({ mode = "borrower", prefill }: { mode
               : <p className="text-xs text-muted-foreground" data-testid="submit-real">{staff ? "This creates the loan in the pipeline." : "This goes to the LendHous team, who will be in touch."}</p>}
             {missing.length > 0 && <p role="alert" className="text-sm text-bad" data-testid="submit-missing">Still needed: {missing.join(", ")}.</p>}
             {needsClient && <p role="alert" className="text-sm text-bad">Add {staff ? "the borrower's" : "your client's"} name on the Borrower &amp; guarantors step.</p>}
+            {!local && needsClientEmail && <p role="alert" className="text-sm text-bad">Add your client&apos;s email on the Borrower &amp; guarantors step, for the link.</p>}
+            {clientFills && <p className="text-sm text-muted-foreground" data-testid="client-link-note">{local ? "In a real account, your client gets the link by email once you submit. Demo accounts send nothing." : `We'll email ${client.name.trim() || "your client"} the secure link as soon as you submit. The deal shows on your page with whether they've filled it in.`}</p>}
           </div>)}
         </div>
         </StepSwap>
         <div className="flex justify-between gap-2">
           <button className="btn-ghost" disabled={step === 0} onClick={() => move(step - 1)}>Back</button>
           {step < REVIEW ? <button data-testid="next" className="btn-primary" disabled={!canNext} onClick={() => move(step + 1)}>Continue</button>
-            : <button data-testid="submit" className="btn-primary" disabled={sending || !e.eligible || !certs.bp || !certs.noo || !certs.consent || !certs.true || needsClient || missing.length > 0} onClick={() => void submit()}>{sending ? "Sending…" : staff ? "Create loan" : "Submit application"}</button>}
+            : <button data-testid="submit" className="btn-primary" disabled={sending || !e.eligible || !certs.bp || !certs.noo || !certs.consent || !certs.true || needsClient || (!local && needsClientEmail) || missing.length > 0} onClick={() => void submit()}>{sending ? "Sending…" : staff ? "Create loan" : "Submit application"}</button>}
         </div>
       </div>
       <div className="lg:sticky lg:top-5 lg:self-start">

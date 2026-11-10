@@ -21,6 +21,8 @@ export interface Doc {
   acceptedOn?: string;
   /** The earlier loan it was accepted on, when it carried over. */
   carriedFrom?: string;
+  /** The loan whose copy the borrower chose to send for this one, for the team to review again (lib/doc-sorting.ts). */
+  reusedFrom?: string;
   /** When the borrower last sent it, which starts the review clock (lib/sla.ts). */
   uploadedAt?: string;
   /** Only if it applies to this borrower: shown as such, and listed after what's needed. */
@@ -578,6 +580,9 @@ export const DEMO_BUYER_ID = "buy-a";
 /** The brokerage the demo broker seat (bea.broker@lendhous.test) acts for. */
 export const DEMO_BROKER_ID = "brk-a";
 
+/** The demo's sample file names for documents that are in, so a borrower's own documents page has something to show. */
+const DEMO_FILES: Record<string, string> = { id: "Drivers license.pdf", entity: "Operating agreement.pdf", ein: "EIN letter CP-575.pdf", contract: "Purchase contract.pdf", sow: "Scope of work.xlsx", bank: "Bank statements.pdf", insurance: "Insurance binder.pdf", track: "Settlement statements.pdf" };
+const withDemoFile = (doc: Doc): Doc => (doc.status === "requested" || doc.status === "waived" ? doc : { ...doc, fileName: DEMO_FILES[doc.id] });
 const stdDocs = (overrides: Partial<Record<string, DocStatus>> = {}): Doc[] => [
   { id: "id", name: "Government ID (each guarantor)", category: "Identity", status: overrides.id ?? "accepted" },
   { id: "entity", name: "LLC Articles + Operating Agreement", category: "Entity", status: overrides.entity ?? "accepted" },
@@ -587,7 +592,7 @@ const stdDocs = (overrides: Partial<Record<string, DocStatus>> = {}): Doc[] => [
   { id: "bank", name: "Bank statements (2 most recent months)", category: "Liquidity", status: overrides.bank ?? "requested" },
   { id: "insurance", name: "Insurance binder (lender as mortgagee)", category: "Closing", status: overrides.insurance ?? "requested" },
   { id: "track", name: "Track record proof (HUD / closing statements)", category: "Experience", status: overrides.track ?? "requested" },
-];
+].map(withDemoFile);
 
 const fundedDocs = stdDocs({ ein: "accepted", sow: "accepted", bank: "accepted", insurance: "accepted", track: "accepted" });
 

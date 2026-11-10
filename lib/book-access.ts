@@ -26,6 +26,7 @@ import { currentPricing, pricingPayload } from "./pricing-versions";
 import { shortDay } from "./format";
 import { addDays, advancesOwed, ledger, ledgerOf, openDefault, SERVICED, servicingDate } from "./servicing";
 import { proposalProblem, signProblem } from "./modifications";
+import { reuseProblem } from "./doc-sorting";
 import { deskProblem, deskReviewProblem } from "./draw-review";
 import { COLLECTIONS, defaultNotice, inBankruptcy, openBankruptcy, stayProblem, stepProblem } from "./collections";
 import { viewFor, type MemberAccess, type Permission } from "./permissions";
@@ -266,7 +267,7 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       if (action.sponsor) {
         const problem = sponsorProblem(action.sponsor);
         if (problem) return no(problem);
-      } else if (view === "borrower" || view === "broker") return no("Add the guarantors, past deals and declarations.");
+      } else if (view === "borrower" || (view === "broker" && !action.clientFills)) return no("Add the guarantors, past deals and declarations, or have your client fill them in.");
       if (!evaluate(action.sponsor ? withSponsor(action.app, action.sponsor, new Date()) : action.app).eligible) return no("This loan isn't eligible as entered.");
       // Staff's repeat-borrower mark is for loans from before this system; borrowers' and brokers' loans are counted instead.
       const { repeatBorrower: _mark, ...counted } = action.app;
@@ -383,10 +384,20 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
     case "addDocRequest":
       if (!dealOf(action.dealId)) return no(GONE);
       return staffOnly("review_documents", "manage_conditions");
+    case "reuseDocument": {
+      // Only the borrower, between their own loans: the file is theirs on both.
+      const deal = dealOf(action.dealId);
+      const from = dealOf(action.fromDealId);
+      if (!deal || !from) return no(GONE);
+      if (!(view === "borrower" && deal.borrowerId === viewer.id && from.borrowerId === viewer.id)) return no(NOT_ALLOWED);
+      const refused = reuseProblem(deal, deal.docs.find((doc) => doc.id === action.docId), from, from.docs.find((doc) => doc.id === action.docId));
+      return refused ? no(refused) : ok({ ...action, by: viewer.name });
+    }
     case "addOwnDoc": {
       const deal = dealOf(action.dealId);
       if (!deal) return no(GONE);
-      if (!(view === "borrower" && deal.borrowerId === viewer.id)) return no(NOT_ALLOWED);
+      // The borrower, or their broker sending papers for them.
+      if (!ownsDeal(deal)) return no(NOT_ALLOWED);
       if (isClosedApplication(deal.status) || deal.status === "paid_off") return no("This loan isn't taking documents any more.");
       if (!OWN_DOC_ID.test(action.docId) || deal.docs.some((doc) => doc.id === action.docId)) return no("That didn't go through. Try again.");
       const problem = ownDocProblem(action.name);

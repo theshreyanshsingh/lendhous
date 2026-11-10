@@ -646,14 +646,16 @@ export async function sendAlerts(before: Book, after: Book, action: BookAction) 
       }
       if (alert.to === "user") {
         const account = alert.userId ? await prisma.user.findUnique({ where: { id: alert.userId }, select: { email: true, deletedAt: true } }) : null;
-        if (account && !account.deletedAt) await notify(account.email, alert.subject, alert.body + link, { eventCode: alert.event });
+        if (account && !account.deletedAt) await notify(account.email, alert.subject, alert.body + link, { eventCode: alert.event, url: "/admin/borrower" });
         continue;
       }
       const deal = after.deals.find((item) => item.id === alert.dealId);
       const accounts = alert.to === "borrower"
         ? await prisma.user.findMany({ where: { id: deal?.borrowerId ?? "" }, select: { email: true } })
         : await prisma.user.findMany({ where: { OR: [{ id: (alert.to === "broker" ? deal?.brokerId : alert.firmId) ?? "" }, { organizationId: (alert.to === "broker" ? deal?.brokerId : alert.firmId) ?? "" }] }, select: { email: true } });
-      for (const account of accounts) await notify(account.email, alert.subject, alert.body + link, { eventCode: alert.event });
+      // A notification on a phone opens the page it's about (lib/push.ts).
+      const url = alert.to === "borrower" && deal ? `/admin/borrower/${deal.id}` : alert.to === "broker" && deal ? `/admin/broker/deals/${deal.id}` : alert.to === "partner" ? "/admin/partner/portfolio" : alert.to === "buyer" ? "/admin/buyer/portfolio" : undefined;
+      for (const account of accounts) await notify(account.email, alert.subject, alert.body + link, { eventCode: alert.event, ...(url ? { url } : {}) });
     } catch (error) {
       console.error("[lendhous-alerts] could not send an alert:", error);
     }

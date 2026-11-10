@@ -12,7 +12,7 @@ const CHROME = process.env.CHROME || (process.platform === "darwin" ? "/Applicat
 const PASSWORD = "Lendhous2026!";
 const PUBLIC = ["/", "/start", "/programs", "/rates", "/rewards", "/book", "/florida", "/florida/broward", "/programs/fix-flip", "/about", "/resources", "/resources/first-investment", "/calculators", "/payoff", "/disclosures", "/login", "/login/signup", "/login/forgot", "/apply/demo", "/verify/demo", "/embed/quote"];
 const SEATS = {
-  borrower: ["alex.sample@lendhous.test", ["/admin/borrower", "/admin/borrower/d1", "/admin/borrower/d2", "/admin/borrower/d18", "/admin/apply", "/admin/account/security"]],
+  borrower: ["alex.sample@lendhous.test", ["/admin/borrower", "/admin/borrower/documents", "/admin/account/notifications", "/admin/borrower/d1", "/admin/borrower/d2", "/admin/borrower/d18", "/admin/apply", "/admin/account/security"]],
   staff: ["olivia.owner@lendhous.test", ["/admin", "/admin/deals/d1", "/admin/deals/d2?tab=Documents", "/admin/deals/d13?tab=Servicing", "/admin/deals/d10?tab=Servicing", "/admin/leads", "/admin/servicing", "/admin/collections", "/admin/deals/d7?tab=Closing", "/admin/draws", "/admin/storms", "/admin/reports", "/admin/members", "/admin/settings", "/admin/pricing", "/admin/letters", "/admin/capital", "/admin/loan-sales", "/admin/new-loan"]],
   partner: ["pia.partner@lendhous.test", ["/admin/partner", "/admin/partner/portfolio", "/admin/partner/teasers/d3"]],
   buyer: ["bella.buyer@lendhous.test", ["/admin/buyer", "/admin/buyer/portfolio"]],

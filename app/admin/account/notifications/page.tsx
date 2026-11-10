@@ -1,5 +1,6 @@
 import { markNoticesRead, saveNoticePreferences } from "@/actions/notifications";
 import { PageIntro } from "@/components/page-intro";
+import { PushToggle } from "@/components/PushToggle";
 import { SubmitButton } from "@/components/submit-button";
 import { requireUser } from "@/lib/auth";
 import { recentNotices } from "@/lib/notifications";
@@ -30,6 +31,10 @@ export default async function NotificationsPage() {
             </li>
           ))}
         </ul>
+      </section>
+      <section className="glass min-w-0 p-4 sm:p-5">
+        <h2 className="eyebrow">On this phone or computer</h2>
+        <div className="mt-3"><PushToggle /></div>
       </section>
       <section className="glass min-w-0 p-4 sm:p-5">
         <h2 className="eyebrow">How we reach you</h2>
