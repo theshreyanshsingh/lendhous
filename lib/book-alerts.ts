@@ -1,5 +1,6 @@
 // Who hears about what. Competitors' borrowers get told when their loan moves; so do these, and so does the team.
 // Only names the loan number and what happened: details stay behind sign-in.
+import { brokerMilestones } from "./broker-milestones";
 import { serviceDay, type Book, type BookAction } from "@/lib/book";
 import { notify, notifyTeam } from "@/lib/email";
 import { TEAM_ROLE_LABEL, teamEmails } from "@/lib/loan-team";
@@ -75,7 +76,9 @@ function staleLetterAlerts(before: Book, after: Book): Alert[] {
 
 /** The alerts one action causes. Pure, so it can be tested. */
 export function alertsFor(before: Book, after: Book, action: BookAction): Alert[] {
-  const all = [...actionAlerts(before, after, action), ...staleLetterAlerts(before, after), ...referralAlerts(before, after)];
+  // Every step of a brokered loan reaches its broker, whichever change made it (lib/broker-milestones.ts).
+  const milestones = brokerMilestones(before, after).map((item): Alert => ({ to: "broker", ...item }));
+  const all = [...actionAlerts(before, after, action), ...staleLetterAlerts(before, after), ...referralAlerts(before, after), ...milestones];
   // The automatic stay: nothing that asks a borrower in bankruptcy to pay goes to them or their broker (lib/collections.ts).
   const stayed = (alert: Alert) => (alert.to === "borrower" || alert.to === "broker") && PAUSED_IN_BANKRUPTCY.has(alert.event) && inBankruptcy(after.deals.find((deal) => deal.id === alert.dealId) ?? {});
   return all.filter((alert) => !stayed(alert));
@@ -187,6 +190,23 @@ function actionAlerts(before: Book, after: Book, action: BookAction): Alert[] {
       const draw = after.draws.find((item) => item.id === action.drawId);
       const deal = draw && loan(draw.dealId);
       return deal && draw?.override ? [{ to: "team", subject: `Draw cleared past its holds: ${deal.loanNumber}`, body: `${action.by} cleared the draw to be released despite: ${draw.override.holds.join(" ")} Why: ${draw.override.reason}`, event: "lien.override" }] : [];
+    }
+    case "checkTaxes": {
+      // One step reached per loan tonight (lib/property-taxes.ts): the borrower is asked to pay or send the receipt, and the team gets one list.
+      const reached = after.deals.flatMap((deal) => {
+        const added = (deal.taxes?.reminded ?? []).filter((key) => !before.deals.find((item) => item.id === deal.id)?.taxes?.reminded?.includes(key));
+        return added.map((key) => ({ deal, year: key.split(":")[0], stage: key.split(":")[1] }));
+      });
+      if (!reached.length) return [];
+      const told: Record<string, (year: string) => string> = {
+        due_soon: (year) => `Your ${year} property taxes on the property securing your loan are due by March 31, and delinquent on April 1. If they're paid, please send us the receipt; if not, please pay them by then.`,
+        delinquent: (year) => `Our records show the ${year} property taxes on the property securing your loan haven't been paid, and they were due by March 31. Unpaid Florida taxes lead to a tax certificate being sold on the property by June 1. Please pay them now and send us the receipt.`,
+        certificate: (year) => `The ${year} property taxes on the property securing your loan are still unpaid, and a tax certificate is sold or about to be sold on it. Please call your LendHous team today.`,
+      };
+      return [
+        ...reached.map(({ deal, year, stage }): Alert => ({ to: "borrower", dealId: deal.id, subject: `Property taxes: ${deal.loanNumber}`, body: told[stage]?.(year) ?? "", event: `taxes.${stage}` })),
+        { to: "team", subject: `Property taxes to check: ${reached.length}`, body: `${reached.map(({ deal, year, stage }) => `${deal.loanNumber} (${deal.address}): ${year} taxes ${stage === "due_soon" ? "due by March 31" : stage === "delinquent" ? "delinquent" : "tax certificate sold or due"}`).join("\n")}\n\nCheck each on the county tax collector's site and record it on the loan's Servicing tab.`, event: "taxes.check" },
+      ];
     }
     case "checkInsurance":
       return after.deals.flatMap((deal): Alert[] => {

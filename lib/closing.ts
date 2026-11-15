@@ -2,7 +2,9 @@
 // money goes to. Wire fraud is the biggest single loss a lender like this can take, so instructions are only entered in
 // the portal, a second person confirms them by calling a number found independently, any change has to be confirmed
 // again, and a loan can't fund until that's done.
-import type { Deal, Doc, WireInstruction } from "./mockData";
+import type { Deal, Doc, DrawRequest, WireInstruction } from "./mockData";
+import { sellerCheckNeeded } from "./seller-checks";
+import { drawAmount, latestTitleUpdate, searchFrom } from "./title-updates";
 
 /** The bank routing number's own check digit (ABA): catches a mistyped or made-up number before anyone calls about it. */
 export function routingValid(routing: string) {
@@ -74,10 +76,11 @@ export function titleLinkState(deal: Pick<Deal, "titleLink" | "status"> | undefi
 
 /**
  * What the title company sees: only what closing one loan needs. Names for vesting, the property, the amount and date,
- * the checklist, whether wire instructions are on file (never the numbers back), and funding and recording. Nothing
- * about credit, the borrower's profile, payments or other documents.
+ * the checklist, whether wire instructions are on file (never the numbers back), and funding and recording. After
+ * funding, the title searches asked for before draws. Nothing about credit, the borrower's profile, payments or other
+ * documents.
  */
-export function titleView(deal: Deal, noteAmount: number) {
+export function titleView(deal: Deal, noteAmount: number, draws: DrawRequest[] = []) {
   const wire = activeWire(deal);
   return {
     loanNumber: deal.loanNumber, borrower: deal.borrowerName, entity: deal.entityName, address: `${deal.address}, ${deal.city} ${deal.zip}`,
@@ -86,6 +89,12 @@ export function titleView(deal: Deal, noteAmount: number) {
     wire: wire ? { bankName: wire.bankName, beneficiary: wire.beneficiary, account: maskAccount(wire.account), verified: Boolean(wire.verification), enteredAt: wire.enteredAt } : null,
     fundsReceived: deal.closing?.fundsReceived ?? null, recording: deal.closing?.recording ?? null,
     funded: !["submitted", "initial_review", "underwriting", "term_sheet_issued", "term_sheet_accepted", "conditions", "clear_to_close", "closing"].includes(deal.status),
+    // A sale of land, or by an owner who lives elsewhere and owes nothing on it: the closer checks who's selling (lib/seller-checks.ts).
+    sellerCheck: sellerCheckNeeded(deal) ? { done: deal.closing?.sellerVerified ? { method: deal.closing.sellerVerified.method, at: deal.closing.sellerVerified.at } : null } : null,
+    updates: draws.filter((draw) => draw.dealId === deal.id && draw.titleCheck?.asked && draw.status !== "funded" && draw.status !== "rejected").map((draw) => {
+      const latest = latestTitleUpdate(draw);
+      return { drawId: draw.id, askedAt: draw.titleCheck!.asked!.at, amount: drawAmount(draw), since: searchFrom(deal) ?? null, answered: latest ? { clean: latest.clean, through: latest.through, found: latest.found, at: latest.at } : null };
+    }),
   };
 }
 export type TitleView = ReturnType<typeof titleView>;

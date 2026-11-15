@@ -35,12 +35,15 @@ export async function saveSettings(formData: FormData) {
     // Whole dollars, up to $2,000 each; blank or 0 charges nothing.
     drawFeeInspectionCents: clamp(formData.get("drawFeeInspection") || "0", 0, 2000, before.drawFeeInspectionCents / 100) * 100,
     drawFeeDeskCents: clamp(formData.get("drawFeeDesk") || "0", 0, 2000, before.drawFeeDeskCents / 100) * 100,
+    // Whole dollars, up to $1,000,000; blank or 0 asks on every draw.
+    titleCheckDraws: formData.get("titleCheckDraws") === "on",
+    titleCheckMinDrawCents: clamp(formData.get("titleCheckMinDraw") || "0", 0, 1_000_000, before.titleCheckMinDrawCents / 100) * 100,
     // Each target in hours; anything outside 1 to 240 keeps what was there.
     slaTargets: Object.fromEntries(SLA_KEYS.map((key) => { const was = targetsFrom(before.slaTargets as never)[key].hours; return [key, clamp(formData.get(`sla-${key}`), 1, 240, was)]; })),
   };
   await prisma.platformSettings.upsert({ where: { id: "default" }, create: { id: "default", ...data }, update: data });
   resetSettingsCache();
-  await audit({ actorId: actor.id, action: "settings.updated", entityType: "PlatformSettings", entityId: "default", before: { offerSampleData: before.offerSampleData, allowSignup: before.allowSignup, staffIdleMinutes: before.staffIdleMinutes, retentionYears: before.retentionYears, lenderAddress: before.lenderAddress, lenderPhone: before.lenderPhone, slaTargets: before.slaTargets, paymentInstructions: before.paymentInstructions, referralBonusCents: before.referralBonusCents, reviewUrl: before.reviewUrl, allowCallBooking: before.allowCallBooking, lateFeesToInvestors: before.lateFeesToInvestors, nfipAuthorizedThrough: before.nfipAuthorizedThrough, drawFeeInspectionCents: before.drawFeeInspectionCents, drawFeeDeskCents: before.drawFeeDeskCents }, after: data });
+  await audit({ actorId: actor.id, action: "settings.updated", entityType: "PlatformSettings", entityId: "default", before: { offerSampleData: before.offerSampleData, allowSignup: before.allowSignup, staffIdleMinutes: before.staffIdleMinutes, retentionYears: before.retentionYears, lenderAddress: before.lenderAddress, lenderPhone: before.lenderPhone, slaTargets: before.slaTargets, paymentInstructions: before.paymentInstructions, referralBonusCents: before.referralBonusCents, reviewUrl: before.reviewUrl, allowCallBooking: before.allowCallBooking, lateFeesToInvestors: before.lateFeesToInvestors, nfipAuthorizedThrough: before.nfipAuthorizedThrough, drawFeeInspectionCents: before.drawFeeInspectionCents, drawFeeDeskCents: before.drawFeeDeskCents, titleCheckDraws: before.titleCheckDraws, titleCheckMinDrawCents: before.titleCheckMinDrawCents }, after: data });
   revalidatePath("/admin", "layout");
   redirect("/admin/settings?notice=settings_saved");
 }

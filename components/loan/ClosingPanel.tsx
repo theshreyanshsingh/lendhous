@@ -6,6 +6,7 @@ import type { ClosingAgent, Deal, WireInstruction } from "@/lib/mockData";
 import { est, useStore } from "@/lib/store";
 import { closingTaxes } from "@/lib/florida-taxes";
 import { TitleLinkPanel } from "./TitleLinkPanel";
+import { SellerIdentity } from "./SellerIdentity";
 import { PartnerFunds } from "./PartnerFunds";
 import { Badge, Section, shortDate, statusLabel, usd } from "@/components/ui";
 
@@ -56,6 +57,7 @@ export function ClosingPanel({ deal }: { deal: Deal }) {
       </Section>
 
       <TitleLinkPanel deal={deal} />
+      <SellerIdentity deal={deal} />
 
       {taxes && (
         <Section title="Florida taxes at recording">

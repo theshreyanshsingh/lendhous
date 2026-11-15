@@ -9,6 +9,7 @@ import { PageIntro } from "@/components/page-intro";
 import { Badge, Stat, k, points, productLabel, statusLabel, usd } from "@/components/ui";
 import type { Deal } from "@/lib/mockData";
 import { canSendDeals, FEE_STATE, feeOf, PROTECTION_MONTHS, referralPath } from "@/lib/brokers";
+import { brokerNumbers } from "@/lib/broker-milestones";
 import { est, useStore } from "@/lib/store";
 import { BrokerBrandForm, BrokerLetters, BrokerStanding } from "@/components/BrokerProgram";
 import { BrokerEarnings } from "@/components/BrokerClient";
@@ -70,6 +71,7 @@ export default function BrokerHome() {
         <div className="glass p-4"><Stat label="Fees expected" value={usd(total("expected"))} sub="loans in process" /></div>
         <div className="glass p-4"><Stat label="Fees earned" value={<span className="text-good" data-testid="fees-earned">{usd(total("paid") + total("unpaid"))}</span>} sub={total("unpaid") ? <span className="text-warn" data-testid="fees-unpaid">{usd(total("unpaid"))} not paid yet</span> : "all paid"} /></div>
       </div>
+      <BrokerNumbers deals={mine} />
       <BrokerStanding firm={firm} />
       <BrokerEarnings deals={mine} />
       {firm.referralCode && <ReferralLink code={firm.referralCode} />}
@@ -97,5 +99,24 @@ export default function BrokerHome() {
         })}
       </div>
     </div>
+  );
+}
+
+/** The brokerage's own track with LendHous (lib/broker-milestones.ts): how fast its deals move and how many fund. */
+function BrokerNumbers({ deals }: { deals: Deal[] }) {
+  const numbers = brokerNumbers(deals);
+  if (!numbers.submitted) return null;
+  const days = (value: number | null) => (value === null ? "—" : `${value} day${value === 1 ? "" : "s"}`);
+  return (
+    <section className="glass p-4" data-testid="broker-numbers">
+      <h2 className="eyebrow">Your numbers</h2>
+      <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Stat label="To a term sheet" value={days(numbers.daysToTermSheet)} sub="average, from submitting" />
+        <Stat label="To funding" value={days(numbers.daysToFunding)} sub="average, from submitting" />
+        <Stat label="Pull-through" value={numbers.pullThrough === null ? "—" : `${numbers.pullThrough}%`} sub={`${numbers.funded} funded of ${numbers.funded + numbers.lost} decided`} />
+        <Stat label="Conditions open" value={numbers.openConditions} sub={`on ${numbers.inProcess} loan${numbers.inProcess === 1 ? "" : "s"} in process`} />
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground">You&apos;re emailed at each step of every deal: review, underwriting, the term sheet, documents in, conditions, closing, funding, each draw and the payoff.</p>
+    </section>
   );
 }

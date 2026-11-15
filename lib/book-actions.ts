@@ -113,6 +113,33 @@ const schema = z.discriminatedUnion("t", [
   z.object({ t: z.literal("setBrokerPoints"), dealId: id, points: z.number().finite().min(0).max(5) }),
   z.object({ t: z.literal("brokerFeePaid"), dealId: id, amount: money, on: date, reference: text(160), by: z.string().max(120) }),
   z.object({ t: z.literal("saveLastSale"), dealId: id, price: money, on: date, by: z.string().max(120) }),
+  z.object({ t: z.literal("saveInvestorStatus"), kind: z.enum(["partner", "buyer"]), firmId: id, by: z.string().max(120), status: z.object({
+    entity: z.enum(["individual", "llc", "corporation", "partnership", "trust", "fund", "other"]),
+    basis: z.enum(["accredited_investor", "licensed_lender", "depository_institution", "reit", "insurance_company", "real_estate_company", "none"]),
+    how: text(40).optional(), evidence: z.enum(["self_certified", "verified"]), verifiedBy: text(300).optional(), on: date, expiresOn: date, signedName: text(120).optional(), foreignPrincipal: z.boolean().optional(),
+  }) }),
+  z.object({ t: z.literal("saveSb264"), dealId: id, by: z.string().max(120), answers: z.object({
+    people: z.array(z.object({ name: text(160), domicile: text(8), status: z.enum(["citizen", "permanent_resident", "other"]), visa: z.enum(["non_tourist", "asylum", "none"]) })).max(20),
+    entityCountry: text(8), acres: z.number().positive().max(100_000).optional(), militaryWithin5: z.enum(["yes", "no", "unknown"]), sensitiveWithin10: z.enum(["yes", "no", "unknown"]), agricultural: z.boolean(),
+  }) }),
+  z.object({ t: z.literal("saveCondo"), dealId: id, by: z.string().max(120), condo: z.object({
+    association: text(200), stories: z.number().int().min(1).max(120), units: z.number().int().min(1).max(5000), coYear: z.number().int().min(1800).max(2100), at25: z.boolean(),
+    milestone: z.object({ phase1On: date.optional(), phase2On: date.optional(), repairsDone: z.boolean().optional() }).optional(), sirsOn: date.optional(),
+    reservesPaused: z.boolean(), assessment: z.object({ monthly: money, endsOn: date.optional() }).optional(), associationLoan: z.boolean(), websitePosted: z.boolean(),
+  }) }),
+  z.object({ t: z.literal("saveTaxParcels"), dealId: id, parcels: z.array(text(60)).max(20) }),
+  z.object({ t: z.literal("recordTaxCheck"), dealId: id, checkId: id, by: z.string().max(120), check: z.object({
+    parcel: text(60).min(1), year: z.number().int().min(2000).max(2100), amount: optionalMoney, status: z.enum(["paid", "unpaid", "delinquent", "certificate_sold"]),
+    paidOn: date.optional(), checkedOn: date, note: text(500),
+  }) }),
+  z.object({ t: z.literal("saveSeller"), dealId: id, by: z.string().max(120), seller: z.object({
+    name: text(200), mailingAddress: text(300), absentee: z.boolean(), freeAndClear: z.boolean(), ownedSince: date.optional(),
+    contact: z.enum(["in_person", "video", "phone", "written_only", "none"]), notary: z.enum(["title_company", "online_notary", "seller_chosen", "unknown"]),
+    proceeds: z.enum(["own_account", "other_account", "unknown"]), rushed: z.boolean(),
+    rollLetter: z.object({ sentOn: date, answer: z.enum(["confirmed", "denied"]).optional(), answeredOn: date.optional() }).optional(),
+  }) }),
+  z.object({ t: z.literal("verifySeller"), dealId: id, method: z.enum(["in_person_id", "id_and_selfie", "online_notary"]), note: text(500), by: z.string().max(120) }),
+  z.object({ t: z.literal("recordTitleUpdate"), drawId: id, updateId: id, clean: z.boolean(), through: date, found: text(1000), by: z.string().max(120), via: z.literal("team") }),
   z.object({ t: z.literal("postInvestorUpdate"), dealId: id, updateId: id, text: text(2000), by: z.string().max(120) }),
   z.object({ t: z.literal("saveProperties"), dealId: id, by: z.string().max(120), properties: z.array(z.object({ id, address: text(200), city: text(100), zip: text(10), county: text(60), propertyType: z.enum(["sfr", "2_4", "condo", "townhome"]), value: money, monthlyRent: money, taxesAnnual: money, insuranceAnnual: money, hoaMonthly: money.optional() })).max(20) }),
   z.object({ t: z.literal("releaseProperty"), dealId: id, propertyId: id, on: date, amount: money, reference: text(80), by: z.string().max(120) }),
@@ -217,7 +244,7 @@ const schema = z.discriminatedUnion("t", [
 ]);
 
 /**
- * The action if it is well formed, or null. assignLoanTeam, brokerApplied, referLoan, referFriend, uploadDoc, conditionFile, addPropertyPhotos, lienWaiverReceived, affidavitReceived, recordAdverseNotice, linkBorrower,
+ * The action if it is well formed, or null. checkTaxes, recordFileCheck, askTitleUpdate, assignLoanTeam, brokerApplied, referLoan, referFriend, uploadDoc, conditionFile, addPropertyPhotos, lienWaiverReceived, affidavitReceived, recordAdverseNotice, linkBorrower,
  * settleLoans, checkTermSheets, checkInsurance, insuranceRenewal, firmScreened, submitPayoffRequest and payoffLetterDelivered aren't here: only the server
  * starts those.
  */

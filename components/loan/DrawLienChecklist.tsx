@@ -115,7 +115,7 @@ export function DrawLienChecklist({ deal, draw, side }: { deal: Deal; draw: Draw
       </ul>
       {side === "team" && (
         <div className="border-t border-border pt-2" data-testid="draw-holds">
-          {open.length ? <ul className="space-y-0.5 text-xs text-warn">{open.map((hold) => <li key={hold}>{hold}</li>)}</ul> : <p className="text-xs text-good">Nothing under the lien law or the insurance holds this draw{draw.override ? " (an owner released it past the rest)" : ""}.</p>}
+          {open.length ? <ul className="space-y-0.5 text-xs text-warn">{open.map((hold) => <li key={hold}>{hold}</li>)}</ul> : <p className="text-xs text-good">Nothing under the lien law, the insurance or the title search holds this draw{draw.override ? " (an owner released it past the rest)" : ""}.</p>}
           {draw.override && <p className="mt-1 text-xs text-muted-foreground" data-testid="draw-override">Released past {draw.override.holds.length} hold{draw.override.holds.length === 1 ? "" : "s"} by {draw.override.by} on {shortDate(draw.override.at)}: {draw.override.reason}</p>}
           {holds.length > 0 && open.length > 0 && (!overriding ? <button type="button" className={`btn-ghost ${small} mt-2`} data-testid="override-holds" onClick={() => setOverriding(true)}>Release past these (owner)</button> : (
             <div className="mt-2 flex flex-wrap items-end gap-2">

@@ -7,6 +7,7 @@ import { isMine, needsOfficer } from "./loan-team";
 import type { Deal } from "./mockData";
 import { firmHeld, latestScreening } from "./ofac";
 import { insuranceLapsed, openRenewals } from "./insurance";
+import { taxStage, taxTask } from "./property-taxes";
 import { dueOf, staleLetter } from "./payoffs";
 import { noticeOwed } from "./adverse-action";
 import { needsExitAnswer } from "./exit-plans";
@@ -89,6 +90,11 @@ export function workQueue(book: Book, viewer: { id: string; email?: string }, no
     const modification = openModification(deal);
     if (modification) add({ key: `modification:${deal.id}`, label: modification.status === "proposed" ? "Decide the loan modification" : "Get the loan modification signed", href: tab(deal, "Servicing"), deal, since: modification.proposedAt, priority: 7 });
     if (insuranceLapsed(deal, today)) add({ key: `insurance:${deal.id}`, label: "Insurance lapsed: get the renewal", href: tab(deal, "Servicing"), deal, priority: 5 });
+    // Property taxes (lib/property-taxes.ts). A missing parcel number waits for the run-up to the tax deadline, so every
+    // loan from before this doesn't crowd the queue at once.
+    const taxes = taxStage(deal, today);
+    const season = today.slice(5, 7) >= "02" && today.slice(5, 7) <= "05";
+    if (taxes && (taxes !== "no_parcel" || season)) add({ key: `taxes:${deal.id}`, label: taxTask(deal, today)!, href: tab(deal, "Servicing"), deal, priority: taxes === "certificate" ? 4 : taxes === "delinquent" ? 5 : 7 });
     const renewals = openRenewals(deal);
     if (renewals.length) add({ key: `renewal:${deal.id}`, label: `Check ${renewals.length === 1 ? "an insurance renewal" : `${renewals.length} insurance renewals`}`, href: tab(deal, "Servicing"), deal, since: oldest(renewals.map((item) => item.at)), priority: 12 });
     if (deal.status === "matured" && !bankruptcy) add({ key: `matured:${deal.id}`, label: "Past maturity", href: tab(deal, "Servicing"), deal, priority: 6 });

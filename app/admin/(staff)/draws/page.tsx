@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { DRAW_STATUS, drawTotal } from "@/components/loan/DrawPanel";
 import { DrawLienChecklist } from "@/components/loan/DrawLienChecklist";
+import { TitleSearch } from "@/components/loan/TitleSearch";
 import { PhotoRequests } from "@/components/loan/PhotoRequests";
 import { PageIntro } from "@/components/page-intro";
 import { Badge, Section, Stat, k, shortDate, usd } from "@/components/ui";
@@ -135,6 +136,7 @@ function DrawCard({ draw, deal }: { draw: DrawRequest; deal: Deal }) {
         </tbody>
       </table>
       <div className="mt-3 border-t border-border pt-3"><PhotoRequests deal={deal} draw={draw} /></div>
+      <TitleSearch deal={deal} draw={draw} />
       <DrawLienChecklist deal={deal} draw={draw} side="team" />
       </div>
       {draw.status === "inspected" && (

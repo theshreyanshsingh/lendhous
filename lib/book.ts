@@ -25,13 +25,15 @@ import { insuranceChecks, insuranceFileOf, policiesOf, policyProblem, policyWord
 import { addProblem, changeProblem, DEFAULT_LIBRARY, fromTemplate, libraryOf, missingStandard, templateProblem, templatesFor, type ConditionInput } from "./conditions";
 import { chosenTerms, draftSheet, exceptionDecisionProblem, exceptionReasons, exceptionRequestProblem, issueProblem as sheetProblem, latestSheet, matrixOf, pricedApp, respondProblem, startingTerms, termSheetChecks, type Prepay } from "./term-sheets";
 import { optionAt } from "./buy-down";
-import { DEMO_TEAM, seedDeals, seedBids, seedDraws, seedLoanSales, seedLoanOffers, seedMessages, seedPhotoRequests, DEMO_SPONSORS, capitalSources, partners as seedPartners, brokers as seedBrokers, loanBuyers, BORROWER_ID, DEMO_PARTNER_ID, DEMO_BUYER_ID, DEMO_BROKER_ID, type Broker, type ClosingAgent, type Closure, type Deal, type DefaultKind, type Bid, type DrawRequest, type DrawRequestLine, type DrawPhoto, type DrawCall, type FloodMap, type PortfolioProperty, type PropertyRelease, type RolloverChoice, type ShareTransfer, type LoanExtension, type LoanMessage, type Screening, type WireInstruction, type Partner, type PayoffChannel, type PayoffLetter, type PayoffRequest, type NoticeToOwner, type LienWaiver, type ConditionTemplate, type LoanCondition, type DocStatus, type CapitalSource, type LoanBuyer, type LoanOffer, type LoanSale, type LoanPayment, type LoanStatus, type TeamMember, type PaymentMethod, type PhotoRequest, type RequestPhoto, type ScopeLine, type Sponsor, type StageEntry, type PolicyKind, type InsurancePolicy, type InsuranceRenewal, type ChangeOrder, type AdvanceKind, type Bankruptcy, type ContactChannel, type ContactOutcome, type DeliveryMethod, type ForeclosureStep, type LoanModification, type NoticeKind, type Payoff } from "./mockData";
+import { DEMO_TEAM, seedDeals, seedBids, seedDraws, seedLoanSales, seedLoanOffers, seedMessages, seedPhotoRequests, DEMO_SPONSORS, capitalSources, partners as seedPartners, brokers as seedBrokers, loanBuyers, BORROWER_ID, DEMO_PARTNER_ID, DEMO_BUYER_ID, DEMO_BROKER_ID, type FileCheck, type SellerIdMethod, type TaxCheck, type Broker, type ClosingAgent, type Closure, type Deal, type DefaultKind, type Bid, type DrawRequest, type DrawRequestLine, type DrawPhoto, type DrawCall, type FloodMap, type PortfolioProperty, type PropertyRelease, type RolloverChoice, type ShareTransfer, type LoanExtension, type LoanMessage, type Screening, type WireInstruction, type Partner, type PayoffChannel, type PayoffLetter, type PayoffRequest, type NoticeToOwner, type LienWaiver, type ConditionTemplate, type LoanCondition, type DocStatus, type CapitalSource, type LoanBuyer, type LoanOffer, type LoanSale, type LoanPayment, type LoanStatus, type TeamMember, type PaymentMethod, type PhotoRequest, type RequestPhoto, type ScopeLine, type Sponsor, type StageEntry, type PolicyKind, type InsurancePolicy, type InsuranceRenewal, type ChangeOrder, type AdvanceKind, type Bankruptcy, type ContactChannel, type ContactOutcome, type DeliveryMethod, type ForeclosureStep, type LoanModification, type NoticeKind, type Payoff } from "./mockData";
 import { closingShare, creditOf, currentBids, drawCallsFor, moveShare, payoffProceeds, ROLLOVER, transferProblem, transferQuote } from "./capital-moves";
 import { portfolioApp, releaseQuote, scheduleProblem } from "./portfolio";
 import { applyFloodMap, withFloodFollowUps } from "./flood-zones";
 import { afterCheck, freshInspectionNeeded, type StormCheck, type StormWatch } from "./storms";
 import { BASE_VERSION, currentPricing, type PricingPayload } from "./pricing-versions";
 import { TEAM_ROLE_LABEL, type TeamRole } from "./loan-team";
+import { pdfFlags } from "./pdf-flags";
+import { cleanParcels, TAX_STATUS, taxReminder } from "./property-taxes";
 import { addDays, balanceOf, DEMO_SERVICING_DAY, firstDueDate, ledger, maturityOf, openDefault, paymentsMade, payoffFor, recastPayment, SERVICED, servicingDate, settle } from "./servicing";
 
 export interface Book { partnerId: string; buyerId: string; brokerId: string; borrowerId: string; loanPrefix: string; deals: Deal[]; bids: Bid[]; partners: Partner[]; buyers: LoanBuyer[]; brokers: Broker[]; sales: LoanSale[]; offers: LoanOffer[]; draws: DrawRequest[]; photoRequests: PhotoRequest[]; payoffs: PayoffRequest[]; messages: LoanMessage[]; sources: CapitalSource[]; conditionLibrary: ConditionTemplate[]; /** Storms whose forecast cone has covered funded loans (lib/storms.ts). Staff only. */ storms: StormWatch[]; audit: { at: string; text: string }[]; sample?: boolean; /** A borrower's own referrals, summed up for them: friends' loans are never in their book (lib/referrals.ts). */ myReferrals?: MyReferral[]; /** The pricing its loans use, as sent to a browser. Not part of the records. */ pricing?: PricingPayload }
@@ -104,6 +106,27 @@ export type BookAction =
   /** What NHC's latest forecast cones cover. Only the server reads NHC's files, or a demo seat its sample storm. */
   | { t: "recordStormCheck"; at: string; storms: StormCheck[] }
   | { t: "saveLastSale"; dealId: string; price: number; on: string; by: string }
+  /** The property's tax parcels, and what the county shows for one parcel's bill (lib/property-taxes.ts). */
+  | { t: "saveTaxParcels"; dealId: string; parcels: string[] }
+  | { t: "recordTaxCheck"; dealId: string; checkId: string; check: Omit<TaxCheck, "id" | "by" | "at">; by: string }
+  /** Answers for Florida's limits on buyers from countries of concern (lib/sb264.ts). */
+  | { t: "saveSb264"; dealId: string; answers: import("./sb264").Sb264Input; by: string }
+  /** A condo's building: its inspections, reserve study and the association's debts (lib/condo-check.ts). */
+  | { t: "saveCondo"; dealId: string; condo: import("./condo-check").CondoInput; by: string }
+  /** The nightly check: loans whose taxes reached a new step this tax year are marked reminded, and the alerts go out. */
+  | { t: "checkTaxes"; asOf: string }
+  /** What kind of investor a partner or buyer is (lib/investor-status.ts): the firm's own word, or the team's record. */
+  | { t: "saveInvestorStatus"; kind: "partner" | "buyer"; firmId: string; status: import("./investor-status").StatusInput; by: string }
+  /** The seller on a purchase, from the tax roll, the deed and the contract (lib/seller-checks.ts). */
+  | { t: "saveSeller"; dealId: string; seller: import("./seller-checks").SellerInput; by: string }
+  /** The title company, through its link, or the team on its word: the seller's identity was checked independently. */
+  | { t: "verifySeller"; dealId: string; method: SellerIdMethod; note: string; by: string }
+  /** One PDF's own record of how it was made, read by the server as it stores the file (lib/pdf-signals.ts). */
+  | { t: "recordFileCheck"; dealId: string; check: FileCheck }
+  /** The title company is asked to search the records since recording before a draw goes out. Only the server asks: it emails the link (lib/title-updates.ts). */
+  | { t: "askTitleUpdate"; drawId: string; to: string; by: string }
+  /** What that search found, from the title company's link or recorded by the team. */
+  | { t: "recordTitleUpdate"; drawId: string; updateId: string; clean: boolean; through: string; found: string; fileName?: string; documentId?: string; by: string; via: "title" | "team" }
   | { t: "postInvestorUpdate"; dealId: string; updateId: string; text: string; by: string }
   | { t: "setWorkout"; dealId: string; on: boolean; note: string; by: string }
   | { t: "answerSurvey"; dealId: string; stage: "funded" | "paid_off"; score: number; comment: string }
@@ -402,6 +425,11 @@ export function demoBook(): Book {
     ] };
     // The newest application bought from a seller who paid far less five months ago: the price-jump check flags it.
     if (d.id === "d16") deals[i] = { ...deals[i], lastSale: { price: Math.round(d.app.purchasePrice / 1.45 / 1000) * 1000, on: "2026-06-02", by: "Pat Processor (FAKE)", at: "2026-10-31T15:00:00Z" } };
+    // A bank statement on the Fort Lauderdale flip last saved by an online PDF editor (lib/pdf-flags.ts).
+    if (d.id === "d16") {
+      const facts = { software: ["Sample Bank eStatements 9.1 (FAKE)", "iLovePDF"], created: "2026-09-30T13:00:00.000Z", modified: "2026-10-28T21:14:00.000Z", saves: 1, encrypted: false, signed: false };
+      deals[i] = { ...deals[i], fileChecks: [{ documentId: "demo-file-d16-bank", fileName: "September statement (FAKE).pdf", label: "Bank statements", at: "2026-10-29T14:00:00Z", software: facts.software, created: facts.created, modified: facts.modified, saves: 1, flags: pdfFlags(facts, "Bank statements", "2026-10-29T14:00:00Z") }] };
+    }
     // The loans the demo partner and buyer hold have an update from the team.
     if (d.id === "d11") deals[i] = { ...deals[i], investorUpdates: [{ id: "iu-demo-11", text: "Paying on time. The borrower expects to refinance into a rental loan in the spring (FAKE).", by: "Cam Capital (FAKE)", at: "2026-10-15T14:00:00Z" }] };
     if (d.id === "d14") deals[i] = { ...deals[i], investorUpdates: [{ id: "iu-demo-14", text: "Cabinets are back-ordered; the borrower asked for a 3-month extension, under review (FAKE).", by: "Sam Servicer (FAKE)", at: "2026-10-28T18:00:00Z" }] };
@@ -425,6 +453,14 @@ export function demoBook(): Book {
       const input = { ...startingTerms(d), rate: matrixOf(d.app).rate[0] - 0.5 };
       deals[i] = { ...d, pricingException: { rate: input.rate, points: input.points, termMonths: input.termMonths, reasons: exceptionReasons(d.app, input), note: "Fourth loan with us, all paid early; a competing offer at this rate (FAKE)", requestedBy: "Uma Underwriter (FAKE)", requestedAt: "2026-10-30T15:00:00-07:00", status: "pending" } };
     }
+    // The lot behind the Palm Beach build, from an owner who lives out of state and owes nothing on it (lib/seller-checks.ts).
+    if (d.id === "d5") deals[i] = { ...deals[i], seller: { name: "Morgan Faraway (FAKE)", mailingAddress: "88 Sample Ave, Albany NY 12207 (FAKE)", absentee: true, freeAndClear: true, ownedSince: "2004-03-15", contact: "written_only", notary: "seller_chosen", proceeds: "unknown", rushed: true, by: "Pat Processor (FAKE)", at: "2026-10-30T15:00:00Z" } };
+    // Property taxes (lib/property-taxes.ts): the Coral Springs portfolio's two parcels paid; the loan behind on payments
+    // has a tax certificate sold on it, which comes ahead of the mortgage.
+    const taxCheck = (parcel: string, status: TaxCheck["status"], amount: number, note = ""): TaxCheck => ({ id: `tax-demo-${parcel}`, parcel, year: 2025, amount, status, paidOn: status === "paid" ? "2025-11-24" : undefined, checkedOn: "2026-10-20", note, by: "Pat Processor (FAKE)", at: "2026-10-20T15:00:00Z" });
+    if (d.id === "d10") deals[i] = { ...deals[i], taxes: { parcels: ["48-42-32-01-0010", "48-42-32-01-0020"], checks: [taxCheck("48-42-32-01-0010", "paid", 4_100), taxCheck("48-42-32-01-0020", "paid", 3_050)] } };
+    if (d.id === "d14") deals[i] = { ...deals[i], taxes: { parcels: ["06-42-43-11-0140"], checks: [taxCheck("06-42-43-11-0140", "paid", 5_210)] } };
+    if (d.id === "d13") deals[i] = { ...deals[i], taxes: { parcels: ["12-34-56-78-0130"], checks: [taxCheck("12-34-56-78-0130", "certificate_sold", 6_125.4, "Certificate 2026-4417 sold June 1 (FAKE)")], reminded: ["2025:certificate"] } };
   }
   const quoted = payoffFor(deals.find((d) => d.id === "d11")!, "2026-11-15");
   // One from a borrower's portal, due in two days, and one from a title company whose authorization still needs a look.
@@ -574,7 +610,7 @@ function apply(s: Book, a: BookAction): Book {
     case "saveClosing": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
       // What title has confirmed stays, whatever the form sends.
-      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, closing: { ...a.closing, fundsReceived: d.closing?.fundsReceived, recording: d.closing?.recording } })), audit: log(`${deal.loanNumber}: closing agent set to ${a.closing.company}`) };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, closing: { ...a.closing, fundsReceived: d.closing?.fundsReceived, recording: d.closing?.recording, sellerVerified: d.closing?.sellerVerified } })), audit: log(`${deal.loanNumber}: closing agent set to ${a.closing.company}`) };
     }
     case "enterWire": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
@@ -742,6 +778,66 @@ function apply(s: Book, a: BookAction): Book {
     case "saveLastSale": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
       return { ...s, deals: upd(a.dealId, (d) => ({ ...d, lastSale: { price: Math.round(a.price), on: a.on, by: a.by, at: now() } })), audit: log(`${deal.loanNumber}: last recorded sale entered by ${a.by}`) };
+    }
+    case "saveInvestorStatus": {
+      const status = { ...a.status, how: a.status.basis === "accredited_investor" ? a.status.how : undefined, verifiedBy: a.status.evidence === "verified" ? a.status.verifiedBy?.trim() : undefined, signedName: a.status.signedName?.trim() || undefined, by: a.by, at: now() };
+      const list = a.kind === "partner" ? s.partners : s.buyers;
+      const firm = list.find((item) => item.id === a.firmId);
+      if (!firm) return s;
+      const saved = list.map((item) => (item.id === a.firmId ? { ...item, investorStatus: status } : item));
+      return { ...s, ...(a.kind === "partner" ? { partners: saved as typeof s.partners } : { buyers: saved as typeof s.buyers }), audit: log(`${firm.name}: investor status ${status.evidence === "verified" ? "verified" : "certified"} (${status.basis}) by ${a.by}`) };
+    }
+    case "saveSb264": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const sb264 = { ...a.answers, people: a.answers.people.map((person) => ({ ...person, name: person.name.trim() })), by: a.by, at: now() };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, sb264 })), audit: log(`${deal.loanNumber}: SB 264 answers recorded by ${a.by}`) };
+    }
+    case "saveCondo": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const condo = { ...a.condo, association: a.condo.association.trim(), assessment: a.condo.assessment?.monthly ? a.condo.assessment : undefined, by: a.by, at: now() };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, condo })), audit: log(`${deal.loanNumber}: condo building check recorded by ${a.by}`) };
+    }
+    case "saveTaxParcels": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const parcels = cleanParcels(a.parcels);
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, taxes: { checks: d.taxes?.checks ?? [], reminded: d.taxes?.reminded, parcels } })), audit: log(`${deal.loanNumber}: tax parcels set to ${parcels.join(", ") || "none"}`) };
+    }
+    case "recordTaxCheck": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const check: TaxCheck = { ...a.check, id: a.checkId, parcel: a.check.parcel.trim().toUpperCase(), note: a.check.note.trim(), paidOn: a.check.status === "paid" ? a.check.paidOn : undefined, by: a.by, at: now() };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, taxes: { parcels: d.taxes?.parcels ?? [], reminded: d.taxes?.reminded, checks: [...(d.taxes?.checks ?? []), check].slice(-100) } })), audit: log(`${deal.loanNumber}: ${check.year} taxes on parcel ${check.parcel} checked: ${TAX_STATUS[check.status].toLowerCase()} (${a.by})`) };
+    }
+    case "checkTaxes": {
+      const due = s.deals.map((d) => ({ d, key: taxReminder(d, a.asOf) })).filter((item): item is { d: Deal; key: string } => Boolean(item.key));
+      if (!due.length) return s;
+      const keys = new Map(due.map((item) => [item.d.id, item.key]));
+      return { ...s, deals: s.deals.map((d) => (keys.has(d.id) ? { ...d, taxes: { ...d.taxes!, reminded: [...(d.taxes?.reminded ?? []), keys.get(d.id)!] } } : d)) };
+    }
+    case "saveSeller": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const seller = { ...a.seller, name: a.seller.name.trim(), mailingAddress: a.seller.mailingAddress.trim(), by: a.by, at: now() };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, seller })), audit: log(`${deal.loanNumber}: seller's details entered by ${a.by}`) };
+    }
+    case "verifySeller": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (!deal.closing) return s;
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, closing: { ...d.closing!, sellerVerified: { method: a.method, note: a.note.trim(), by: a.by, at: now() } } })), audit: log(`${deal.loanNumber}: seller's identity confirmed by ${a.by}`) };
+    }
+    case "recordFileCheck": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const warned = a.check.flags.some((flag) => flag.level === "warn");
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, fileChecks: [...(d.fileChecks ?? []).filter((item) => item.documentId !== a.check.documentId), a.check].slice(-200) })), audit: warned ? log(`${deal.loanNumber}: ${a.check.fileName} shows signs of editing`) : s.audit };
+    }
+    case "askTitleUpdate": {
+      const draw = s.draws.find((d) => d.id === a.drawId)!;
+      const deal = s.deals.find((d) => d.id === draw.dealId)!;
+      return { ...s, draws: s.draws.map((d) => (d.id === a.drawId ? { ...d, titleCheck: { updates: d.titleCheck?.updates ?? [], asked: { by: a.by, at: now(), to: a.to } } } : d)), audit: log(`${deal.loanNumber}: title search since recording asked for by ${a.by}`) };
+    }
+    case "recordTitleUpdate": {
+      const draw = s.draws.find((d) => d.id === a.drawId)!;
+      const deal = s.deals.find((d) => d.id === draw.dealId)!;
+      const update = { id: a.updateId, clean: a.clean, through: a.through, found: a.clean ? "" : a.found.trim(), ...(a.fileName ? { fileName: a.fileName, documentId: a.documentId } : {}), by: a.by, at: now(), via: a.via };
+      return { ...s, draws: s.draws.map((d) => (d.id === a.drawId ? { ...d, titleCheck: { ...d.titleCheck, updates: [...(d.titleCheck?.updates ?? []), update] } } : d)), audit: log(`${deal.loanNumber}: title search through ${a.through} ${a.clean ? "came back clean" : "found something recorded"} (${a.by})`) };
     }
     case "postInvestorUpdate": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;

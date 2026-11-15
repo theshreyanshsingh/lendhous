@@ -24,3 +24,13 @@ export function downloadCsv(name: string, rows: Row[]) {
   link.click();
   URL.revokeObjectURL(url);
 }
+
+/** Any text as a file to save, such as a tape's JSON. */
+export function downloadFile(name: string, text: string, type: string) {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  link.click();
+  URL.revokeObjectURL(url);
+}

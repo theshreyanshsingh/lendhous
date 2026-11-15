@@ -7,6 +7,8 @@ import { evaluate, recommendRoute, matchPartner, fullBoatReserve, dutchReserve, 
 import { currentPricing, pricingFor } from "@/lib/pricing-versions";
 import { activeWire, maskAccount, wireVerified } from "@/lib/closing";
 import { PRE_FUNDING } from "@/lib/loan-exits";
+import { investorBlocker } from "@/lib/investor-status";
+import { serviceDay } from "@/lib/book";
 import { canAdvance, nextStage } from "@/lib/loan-stages";
 import { SERVICED } from "@/lib/servicing";
 import { teaserOf } from "@/lib/teaser";
@@ -31,6 +33,9 @@ import { InsurancePanel } from "@/components/loan/InsurancePanel";
 import { BudgetControls } from "@/components/loan/BudgetControls";
 import { InvestorUpdates } from "@/components/loan/InvestorUpdates";
 import { RiskChecks } from "@/components/loan/RiskChecks";
+import { PropertyTaxes } from "@/components/loan/PropertyTaxes";
+import { CondoBuilding } from "@/components/loan/CondoBuilding";
+import { Sb264Panel } from "@/components/loan/Sb264Panel";
 import { ShareTransfers } from "@/components/loan/ShareTransfers";
 import { PropertySchedule } from "@/components/loan/PropertySchedule";
 import { ReleaseProperty } from "@/components/loan/ReleaseProperty";
@@ -244,6 +249,7 @@ export default function DealWorkspace() {
           <Section title="Automated flags & hard stops">
             {e.hardStops.length + e.flags.length === 0 ? <p className="text-sm text-good">No flags.</p> : <ul className="space-y-1 text-sm">{e.hardStops.map((h) => <li key={h} className="rounded-md bg-bad/10 px-2 py-1 text-bad">⛔ {h}</li>)}{e.flags.map((f) => <li key={f} className="rounded-md bg-warn/12 px-2 py-1 text-warn">⚠ {f}</li>)}</ul>}
           </Section>
+          {d.app.propertyType === "condo" && <div className="md:col-span-2"><CondoBuilding deal={d} /></div>}
           <div className="md:col-span-2"><RiskChecks deal={d} /></div>
         </div>
       )}
@@ -280,8 +286,8 @@ export default function DealWorkspace() {
             <Section title="Matched partners (buy box)">
               <ul className="divide-y divide-border">{matches.map(({ p, m }) => (
                 <li key={p.id} className="flex items-start gap-2 py-2">
-                  <input type="checkbox" className="mt-1" disabled={!p.ndaSigned || m.match === 0 || d.teaserSentTo.includes(p.id)} checked={sel.includes(p.id) || d.teaserSentTo.includes(p.id)} onChange={(ev) => setSel(ev.target.checked ? [...sel, p.id] : sel.filter((x) => x !== p.id))} />
-                  <div className="min-w-0 flex-1"><div className="flex justify-between gap-2 text-sm"><span className="min-w-0 font-medium">{p.name}</span><span className="font-semibold">{m.match}%</span></div><div className="text-[11px] text-muted-foreground">{!p.ndaSigned ? "NDA not signed: can't receive teasers" : m.reasons.join(" · ")}{d.teaserSentTo.includes(p.id) && " · teaser sent"}</div></div>
+                  <input type="checkbox" className="mt-1" disabled={!p.ndaSigned || m.match === 0 || d.teaserSentTo.includes(p.id) || Boolean(investorBlocker(p, serviceDay(s)))} checked={sel.includes(p.id) || d.teaserSentTo.includes(p.id)} onChange={(ev) => setSel(ev.target.checked ? [...sel, p.id] : sel.filter((x) => x !== p.id))} />
+                  <div className="min-w-0 flex-1"><div className="flex justify-between gap-2 text-sm"><span className="min-w-0 font-medium">{p.name}</span><span className="font-semibold">{m.match}%</span></div><div className="text-[11px] text-muted-foreground">{!p.ndaSigned ? "NDA not signed: can't receive teasers" : investorBlocker(p, serviceDay(s)) ? `${investorBlocker(p, serviceDay(s))}: can't receive teasers` : m.reasons.join(" · ")}{d.teaserSentTo.includes(p.id) && " · teaser sent"}</div></div>
                 </li>))}</ul>
               <button className="btn-primary mt-2" data-testid="send-teaser" disabled={sel.length === 0} onClick={() => { dispatch({ t: "sendTeaser", dealId: d.id, partnerIds: sel }); setSel([]); }}>Send blind teaser to {sel.length || "…"}</button>
             </Section>
@@ -301,7 +307,7 @@ export default function DealWorkspace() {
 
       {tab === "Term sheet" && <TermSheetBuilder deal={d} />}
       {tab === "Conditions" && <ConditionsPanel deal={d} />}
-      {tab === "Credit review" && <div className="space-y-4"><ApplicationRecord deal={d} /><ApplicationOnFile deal={d} /><OfacPanel deal={d} /><CreditReview deal={d} /></div>}
+      {tab === "Credit review" && <div className="space-y-4"><ApplicationRecord deal={d} /><ApplicationOnFile deal={d} /><OfacPanel deal={d} /><Sb264Panel deal={d} /><CreditReview deal={d} /></div>}
       {tab === "Closing" && <div className="space-y-4"><ClosingPanel deal={d} />{INSURED.includes(d.status) && <InsurancePanel deal={d} />}{(d.app.product === "fix_flip" || d.app.product === "ground_up" || d.lienFile) && <LienProtection deal={d} />}<OfacPanel deal={d} /></div>}
       {tab === "Servicing" && (SERVICED.includes(d.status) || d.status === "paid_off") && <LoanLedger deal={d} />}
       {tab === "Servicing" && d.status === "reo" && <div className="space-y-4"><ForeclosurePanel deal={d} /><CollectionsPanel deal={d} /></div>}
@@ -309,6 +315,7 @@ export default function DealWorkspace() {
       {tab === "Servicing" && SERVICED.includes(d.status) && <BudgetControls deal={d} side="team" />}
       {tab === "Servicing" && (SERVICED.includes(d.status) || d.status === "paid_off" || d.status === "reo") && <InvestorUpdates deal={d} />}
       {tab === "Servicing" && SERVICED.includes(d.status) && <InsurancePanel deal={d} />}
+      {tab === "Servicing" && SERVICED.includes(d.status) && <PropertyTaxes deal={d} />}
       {tab === "Servicing" && SERVICED.includes(d.status) && <ExitPlanCard deal={d} side="team" />}
       {tab === "Servicing" && (SERVICED.includes(d.status) || d.status === "paid_off" || d.status === "reo") && <TeamLoanStatements deal={d} />}
 

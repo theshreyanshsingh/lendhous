@@ -1516,7 +1516,7 @@ describe("partners' money between loans", () => {
       { id: "bids:roll-bid", kind: "bids", data: bid("roll-bid", "roll-loan", firm.id, "accepted") },
       { id: "bids:move-bid", kind: "bids", data: bid("move-bid", "move-loan", firm.id, "accepted") },
       { id: `partners:${firm.id}`, kind: "partners", data: JSON.parse(JSON.stringify({ id: firm.id, name: "Roll Capital", ndaSigned: true, buyBox: demo.partners[0].buyBox, screening: { ...screening, subjects: [{ role: "firm", name: "Roll Capital", hits: [] }] } })) },
-      { id: `partners:${other.id}`, kind: "partners", data: JSON.parse(JSON.stringify({ id: other.id, name: "Taker Capital", ndaSigned: true, buyBox: demo.partners[0].buyBox, screening: { ...screening, checkedAt: new Date().toISOString(), subjects: [{ role: "firm", name: "Taker Capital", hits: [] }] } })) },
+      { id: `partners:${other.id}`, kind: "partners", data: JSON.parse(JSON.stringify({ id: other.id, name: "Taker Capital", ndaSigned: true, buyBox: demo.partners[0].buyBox, investorStatus: demo.partners[0].investorStatus, screening: { ...screening, checkedAt: new Date().toISOString(), subjects: [{ role: "firm", name: "Taker Capital", hits: [] }] } })) },
     ] });
     const staff = { id: "staff-cap", name: "Cara Capital", roleCodes: ["ADMIN_OWNER" as const] };
     const partner = { id: "rhea", name: "Rhea Roll", roleCodes: ["PARTNER_LENDER" as const], organizationId: firm.id };

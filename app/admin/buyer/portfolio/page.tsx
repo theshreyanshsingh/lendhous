@@ -1,6 +1,9 @@
 "use client";
 import Link from "next/link";
 import { holdingOf, tapeOf } from "@/lib/loan-sale";
+import { tapeRow } from "@/lib/loan-tape";
+import { serviceDay } from "@/lib/book";
+import { TapeDownload } from "@/components/TapeDownload";
 import type { LoanBuyer } from "@/lib/mockData";
 import { useStore } from "@/lib/store";
 import { PageIntro } from "@/components/page-intro";
@@ -37,6 +40,7 @@ function Holdings({ me }: { me: LoanBuyer }) {
         <div className="glass p-4"><Stat label="Average yield" value={invested ? `${weighted.toFixed(2)}%` : "—"} sub="weighted by price paid" /></div>
       </div>
       <div className="glass p-4" data-testid="buyer-received"><Stat label="Paid to you so far" value={usd(received, 2)} sub="since you bought each loan, after servicing" /></div>
+      {owned.length > 0 && <div className="glass flex flex-wrap items-center justify-between gap-2 px-3 py-2" data-testid="owned-tape"><span className="text-xs text-muted-foreground">The full tape of the loans you own, with names and addresses.</span><TapeDownload rows={owned.map(({ sale }) => sale.tape ?? tapeRow(s.deals.find((deal) => deal.id === sale.dealId)!, "full", serviceDay(s), sale))} version="full" asOf={serviceDay(s)} what="owned" testId="owned-tape" /></div>}
       <PortfolioCharts investor={{ type: "buyer", id: me.id }} />
       <Section title={`Loans you own (${owned.length})`}>
         {owned.length === 0 && <p className="text-sm text-muted-foreground">No loans yet. <Link className="text-link underline" href="/admin/buyer">See what&apos;s for sale</Link>.</p>}

@@ -28,6 +28,13 @@ import { addDays, advancesOwed, ledger, ledgerOf, openDefault, SERVICED, servici
 import { proposalProblem, signProblem } from "./modifications";
 import { reuseProblem } from "./doc-sorting";
 import { deskProblem, deskReviewProblem } from "./draw-review";
+import { tapeRow } from "./loan-tape";
+import { sellerProblem, verifySellerProblem } from "./seller-checks";
+import { investorBlocker, ownStatusBlocker, statusProblem } from "./investor-status";
+import { titleUpdateProblem } from "./title-updates";
+import { taxCheckProblem } from "./property-taxes";
+import { condoProblem } from "./condo-check";
+import { sb264Problem } from "./sb264";
 import { COLLECTIONS, defaultNotice, inBankruptcy, openBankruptcy, stayProblem, stepProblem } from "./collections";
 import { viewFor, type MemberAccess, type Permission } from "./permissions";
 import { approveProblem, canSendDeals, feePaidProblem } from "./brokers";
@@ -93,7 +100,7 @@ const quietPayoff = (payoff: PayoffRequest): PayoffRequest => ({
 
 /** Removes what identifies the borrower, for a partner or buyer who hasn't closed on the loan. */
 function blind(deal: Deal): Deal {
-  return { ...deal, insurance: undefined, friendReferral: undefined, surveys: undefined, investorUpdates: undefined, workout: undefined, lastSale: undefined, geo: undefined, stormHold: undefined, transfers: undefined, drawCalls: undefined, releases: undefined, properties: deal.properties?.map(({ id, county, zip, propertyType, value, monthlyRent, taxesAnnual, insuranceAnnual, hoaMonthly, released }) => ({ id, address: "", city: "", zip: `${zip.slice(0, 3)}xx`, county, propertyType, value, monthlyRent, taxesAnnual, insuranceAnnual, hoaMonthly, released })), borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined, closure: undefined, defaults: undefined, extensions: undefined, modifications: undefined, contacts: undefined, promises: undefined, notices: undefined, bankruptcies: undefined, advances: undefined, advancesRepaid: undefined, foreclosure: undefined, reo: undefined, paidOff: undefined, closing: undefined, wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, termSheets: undefined, pricingException: undefined, conditions: undefined, lienFile: undefined, completed: undefined, revenue: undefined, adverseAction: undefined, legalHold: undefined, propertyPhotos: undefined, partnerFunding: undefined, agents: undefined, ...quietPayments(deal, false) };
+  return { ...deal, insurance: undefined, friendReferral: undefined, surveys: undefined, investorUpdates: undefined, workout: undefined, lastSale: undefined, seller: undefined, fileChecks: undefined, taxes: undefined, condo: undefined, sb264: undefined, geo: undefined, stormHold: undefined, transfers: undefined, drawCalls: undefined, releases: undefined, properties: deal.properties?.map(({ id, county, zip, propertyType, value, monthlyRent, taxesAnnual, insuranceAnnual, hoaMonthly, released }) => ({ id, address: "", city: "", zip: `${zip.slice(0, 3)}xx`, county, propertyType, value, monthlyRent, taxesAnnual, insuranceAnnual, hoaMonthly, released })), borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined, closure: undefined, defaults: undefined, extensions: undefined, modifications: undefined, contacts: undefined, promises: undefined, notices: undefined, bankruptcies: undefined, advances: undefined, advancesRepaid: undefined, foreclosure: undefined, reo: undefined, paidOff: undefined, closing: undefined, wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, termSheets: undefined, pricingException: undefined, conditions: undefined, lienFile: undefined, completed: undefined, revenue: undefined, adverseAction: undefined, legalHold: undefined, propertyPhotos: undefined, partnerFunding: undefined, agents: undefined, ...quietPayments(deal, false) };
 }
 
 /** The conditions that are the borrower's to meet (Spec B17), without who on the team handled them or why one was waived. */
@@ -138,7 +145,7 @@ const clientInsurance = (deal: Deal): Partial<Deal> => ({
 
 /** What only the team sees on a loan it shares with a client. Wire instructions never leave the team: a client who sees them is a client who can be sent fake ones. */
 function forClient(deal: Deal): Deal {
-  return { ...deal, ...latestForClient(deal), ...clientConditions(deal), ...clientRecords(deal), ...clientAgents(deal), ...clientInsurance(deal), ...clientCollections(deal), partnerFunding: undefined, transfers: undefined, drawCalls: undefined, allocations: [], teaserSentTo: [], route: undefined, capitalStatus: "not_started", contractorIsGtAffiliate: undefined, source: "", fundingApprovers: undefined, creditReview: undefined, ...quietPayments(deal, true), ...quietExits(deal), wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, friendReferral: undefined, surveys: undefined, investorUpdates: undefined, workout: undefined, lastSale: undefined };
+  return { ...deal, ...latestForClient(deal), ...clientConditions(deal), ...clientRecords(deal), ...clientAgents(deal), ...clientInsurance(deal), ...clientCollections(deal), partnerFunding: undefined, transfers: undefined, drawCalls: undefined, allocations: [], teaserSentTo: [], route: undefined, capitalStatus: "not_started", contractorIsGtAffiliate: undefined, source: "", fundingApprovers: undefined, creditReview: undefined, ...quietPayments(deal, true), ...quietExits(deal), wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, friendReferral: undefined, surveys: undefined, investorUpdates: undefined, workout: undefined, lastSale: undefined, seller: undefined, fileChecks: undefined, taxes: undefined, sb264: undefined };
 }
 
 /**
@@ -170,7 +177,7 @@ function scopeRecords(book: Book, viewer: Viewer): Book {
   if (view === "borrower") {
     const mine = book.deals.filter((deal) => deal.borrowerId === viewer.id);
     const ids = new Set(mine.map((deal) => deal.id));
-    return { ...empty, borrowerId: viewer.id, deals: mine.map((deal) => ({ ...forClient(deal), surveys: deal.surveys, brokerId: undefined, brokerPoints: undefined })), draws: book.draws.filter((draw) => ids.has(draw.dealId)).map((draw) => ({ ...draw, approvers: [], override: undefined })), photoRequests: book.photoRequests.filter((request) => ids.has(request.dealId)), payoffs: book.payoffs.filter((payoff) => ids.has(payoff.dealId)).map(quietPayoff), messages: shared(ids), myReferrals: referralsBy(book.deals, viewer.id) };
+    return { ...empty, borrowerId: viewer.id, deals: mine.map((deal) => ({ ...forClient(deal), surveys: deal.surveys, brokerId: undefined, brokerPoints: undefined })), draws: book.draws.filter((draw) => ids.has(draw.dealId)).map((draw) => ({ ...draw, approvers: [], override: undefined, titleCheck: undefined })), photoRequests: book.photoRequests.filter((request) => ids.has(request.dealId)), payoffs: book.payoffs.filter((payoff) => ids.has(payoff.dealId)).map(quietPayoff), messages: shared(ids), myReferrals: referralsBy(book.deals, viewer.id) };
   }
 
   if (view === "broker") {
@@ -201,7 +208,11 @@ function scopeRecords(book: Book, viewer: Viewer): Book {
     const sales = book.sales.filter((sale) => sale.status === "listed" || sale.soldTo === me.id || offered.has(sale.id));
     const owned = new Set(sales.filter((sale) => sale.soldTo === me.id).map((sale) => sale.dealId));
     const deals = book.deals.filter((deal) => sales.some((sale) => sale.dealId === deal.id));
-    return { ...empty, buyerId: me.id, buyers: [ownRecord(me)], offers, sales: sales.map(hideBuyer), deals: deals.map((deal) => (owned.has(deal.id) ? forHolder(deal) : blind(deal))) };
+    // Each sale carries its tape row worked out here from the whole loan, since the buyer's copy of a loan it doesn't own
+    // leaves out what the tape still needs (extensions, modifications, insurance dates), and names no one.
+    const day = serviceDay(book);
+    const withTape = (sale: LoanSale): LoanSale => { const deal = book.deals.find((item) => item.id === sale.dealId); return deal ? { ...hideBuyer(sale), tape: tapeRow(deal, owned.has(deal.id) ? "full" : "blind", day, sale) } : hideBuyer(sale); };
+    return { ...empty, buyerId: me.id, buyers: [ownRecord(me)], offers, sales: sales.map(withTape), deals: deals.map((deal) => (owned.has(deal.id) ? forHolder(deal) : blind(deal))) };
   }
   return empty;
 }
@@ -531,6 +542,70 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       if (action.on > serviceDay(book)) return no("The sale date can't be in the future.");
       return staffOnlyAllowed("review_documents", "manage_conditions", "issue_term_sheet") ? ok({ ...action, by: viewer.name }) : no(NOT_ALLOWED);
     }
+    case "saveInvestorStatus": {
+      const firmRecord = (action.kind === "partner" ? book.partners : book.buyers).find((item) => item.id === action.firmId);
+      if (!firmRecord) return no(GONE);
+      // A firm certifies its own status, on its word; the team records either kind for any firm.
+      const own = (view === "partner" && action.kind === "partner") || (view === "buyer" && action.kind === "buyer") ? firm === action.firmId : false;
+      if (!own && !staffOnlyAllowed("route_capital", "manage_capital")) return no(NOT_ALLOWED);
+      const problem = statusProblem(action.status, serviceDay(book), own ? "firm" : "team");
+      return problem ? no(problem) : ok({ ...action, by: viewer.name });
+    }
+    case "saveSb264": {
+      if (!staffOnlyAllowed("review_documents", "manage_conditions", "issue_term_sheet")) return no(NOT_ALLOWED);
+      const problem = sb264Problem(dealOf(action.dealId), action.answers);
+      return problem ? no(problem) : ok({ ...action, by: viewer.name });
+    }
+    case "saveCondo": {
+      if (!staffOnlyAllowed("review_documents", "manage_conditions", "issue_term_sheet")) return no(NOT_ALLOWED);
+      const problem = condoProblem(dealOf(action.dealId), action.condo, serviceDay(book));
+      return problem ? no(problem) : ok({ ...action, by: viewer.name });
+    }
+    case "saveTaxParcels": {
+      if (!dealOf(action.dealId)) return no(GONE);
+      return staffOnly("service_loans");
+    }
+    case "recordTaxCheck": {
+      if (!staffOnlyAllowed("service_loans")) return no(NOT_ALLOWED);
+      const problem = taxCheckProblem(dealOf(action.dealId), { ...action.check, parcel: action.check.parcel.trim().toUpperCase() }, serviceDay(book));
+      return problem ? no(problem) : ok({ ...action, by: viewer.name });
+    }
+    case "checkTaxes":
+      // Only the nightly job runs it.
+      return trusted ? ok() : no(NOT_ALLOWED);
+    case "saveSeller": {
+      if (!staffOnlyAllowed("review_documents", "manage_conditions", "issue_term_sheet")) return no(NOT_ALLOWED);
+      const problem = sellerProblem(dealOf(action.dealId), action.seller, serviceDay(book));
+      return problem ? no(problem) : ok({ ...action, by: viewer.name });
+    }
+    case "verifySeller": {
+      const deal = dealOf(action.dealId);
+      const problem = verifySellerProblem(deal, action.method, PRE_FUNDING);
+      if (problem) return no(problem);
+      if (trusted) return ok();
+      // The team records the title company's word, so it says whose word it is.
+      if (!staffOnlyAllowed("manage_conditions", "approve_funding")) return no(NOT_ALLOWED);
+      if (!action.note.trim()) return no("Say who at the title company or closing attorney's office checked the seller, and when.");
+      return ok({ ...action, by: viewer.name });
+    }
+    case "recordFileCheck":
+      // Only the server reads the files it stores.
+      if (!trusted) return no(NOT_ALLOWED);
+      return dealOf(action.dealId) ? ok() : no(GONE);
+    case "askTitleUpdate": {
+      // Only the server asks, because asking emails the title company a new link.
+      if (!trusted) return no("Ask from the draw on the Draws page.");
+      const draw = book.draws.find((item) => item.id === action.drawId);
+      return draw && draw.status !== "funded" && draw.status !== "rejected" ? ok() : no("That draw has already been decided.");
+    }
+    case "recordTitleUpdate": {
+      const draw = book.draws.find((item) => item.id === action.drawId);
+      const problem = titleUpdateProblem(draw && dealOf(draw.dealId), draw, action, serviceDay(book));
+      if (problem) return no(problem);
+      if (trusted) return ok();
+      if (!staffOnlyAllowed("approve_draw", "assign_inspection", "manage_conditions")) return no(NOT_ALLOWED);
+      return ok({ ...action, by: viewer.name, via: "team", fileName: undefined, documentId: undefined });
+    }
     case "postInvestorUpdate": {
       const problem = updateProblem(dealOf(action.dealId), action.text);
       return problem ? no(problem) : staffOnlyAllowed("manage_capital", "service_loans") ? ok({ ...action, text: action.text.trim(), by: viewer.name }) : no(NOT_ALLOWED);
@@ -602,13 +677,16 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       if (action.t === "sendTeaser") {
         const held = book.partners.filter((item) => action.partnerIds.includes(item.id) && firmHeld(item));
         if (held.length) return no(`${held.map((item) => item.name).join(", ")} ${held.length === 1 ? "has" : "have"} a possible or confirmed OFAC match. Nothing goes to them until it's reviewed.`);
+        // A teaser offers a share of a loan, so the firm's investor status comes first (lib/investor-status.ts).
+        const uncertified = book.partners.filter((item) => action.partnerIds.includes(item.id)).map((item) => investorBlocker(item, serviceDay(book))).filter(Boolean);
+        if (uncertified.length) return no(`${uncertified.join(". ")}.`);
       }
       return staffOnly("route_capital");
     case "acceptBid": {
       const bid = book.bids.find((item) => item.id === action.bidId);
       if (!bid || bid.status !== "submitted") return no("That bid is no longer open.");
       // A partner's commitment is money LendHous takes, so the firm is screened first.
-      const screened = firmOfacBlocker(book.partners.find((item) => item.id === bid.partnerId));
+      const screened = firmOfacBlocker(book.partners.find((item) => item.id === bid.partnerId)) ?? investorBlocker(book.partners.find((item) => item.id === bid.partnerId), serviceDay(book));
       if (screened) return no(`${screened}.`);
       return staffOnly("route_capital");
     }
@@ -672,6 +750,9 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       const deal = dealOf(action.bid.dealId);
       if (view !== "partner" || !me?.ndaSigned || !deal?.teaserSentTo.includes(me.id)) return no(NOT_ALLOWED);
       if (firmHeld(me)) return no(FIRM_HELD);
+      // Offering to fund a share is buying a share of a mortgage loan (lib/investor-status.ts).
+      const uncertified = ownStatusBlocker(me, serviceDay(book));
+      if (uncertified) return no(uncertified);
       if (book.bids.some((bid) => bid.dealId === deal.id && bid.partnerId === me.id)) return no("You've already responded to this deal.");
       return ok({ ...action, bid: { ...action.bid, partnerId: me.id } });
     }
@@ -696,6 +777,8 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       const me = book.buyers.find((buyer) => buyer.id === firm);
       if (view !== "buyer" || !me?.ndaSigned) return no(NOT_ALLOWED);
       if (firmHeld(me)) return no(FIRM_HELD);
+      const uncertified = ownStatusBlocker(me, serviceDay(book));
+      if (uncertified) return no(uncertified);
       if (book.sales.find((sale) => sale.id === action.saleId)?.status !== "listed") return no("That loan is no longer for sale.");
       if (book.offers.some((offer) => offer.saleId === action.saleId && offer.buyerId === me.id && offer.status === "submitted")) return no("You already have an offer on this loan.");
       return ok({ ...action, buyerId: me.id });
@@ -705,7 +788,7 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       if (!offer || offer.status !== "submitted") return no("That offer is no longer open.");
       if (book.sales.find((sale) => sale.id === offer.saleId)?.status !== "listed") return no("That loan is no longer for sale.");
       // Selling a loan takes the buyer's money: a clean screening from the last few days.
-      const screened = action.accept ? firmOfacBlocker(book.buyers.find((item) => item.id === offer.buyerId), serviceDay(book)) : null;
+      const screened = action.accept ? firmOfacBlocker(book.buyers.find((item) => item.id === offer.buyerId), serviceDay(book)) ?? investorBlocker(book.buyers.find((item) => item.id === offer.buyerId), serviceDay(book)) : null;
       if (screened) return no(`${screened}.`);
       return staffOnly("route_capital", "manage_capital");
     }

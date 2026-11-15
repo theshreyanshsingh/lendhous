@@ -14,6 +14,9 @@ import { notify } from "@/lib/email";
 import { evaluate } from "@/lib/engine";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import { createTitleLink, deleteTitleLink, openTitleLink, titleActor } from "@/lib/title-links";
+import { drawAmount, searchFrom } from "@/lib/title-updates";
+import { ID_METHODS } from "@/lib/seller-checks";
+import type { SellerIdMethod } from "@/lib/mockData";
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // From an accepted term sheet until the mortgage is recorded.
@@ -119,4 +122,59 @@ export async function titleRecordMortgage(token: string, raw: unknown): Promise<
   return { view: viewOf(result.after, link.deal.id) };
 }
 
-const viewOf = (book: Book, dealId: string) => { const deal = book.deals.find((item) => item.id === dealId)!; return titleView(deal, evaluate(deal.app).noteAmount); };
+/**
+ * The title company confirms how it checked the seller's identity, on a sale of land or by an owner who lives elsewhere
+ * (lib/seller-checks.ts). Funding waits for it.
+ */
+export async function titleVerifySeller(token: string, raw: unknown): Promise<TitleReply> {
+  const { link, error } = await titleLink(token);
+  if (!link) return { error };
+  const parsed = z.object({ method: z.string(), note: z.string().trim().max(500) }).safeParse(raw);
+  if (!parsed.success || !(parsed.data.method in ID_METHODS)) return { error: "Choose how you checked the seller's identity." };
+  const result = await runAction(titleActor(link.deal), { t: "verifySeller", dealId: link.deal.id, method: parsed.data.method as SellerIdMethod, note: parsed.data.note, by: titleActor(link.deal).name }, { trusted: true });
+  if ("error" in result) return { error: result.error };
+  await sendAlerts(result.before, result.after, result.action);
+  await audit({ actorId: null, action: "closing.seller_verified", entityType: "LoanBook", entityId: link.deal.id });
+  return { view: viewOf(result.after, link.deal.id) };
+}
+
+/**
+ * Asks the title company to search the records since the mortgage was recorded, before a draw goes out (lib/title-updates.ts).
+ * The closing link has usually run out by the first draw, so a new one goes with the request and replaces any older one.
+ */
+export async function askTitleForUpdate(drawId: string): Promise<StaffReply> {
+  const viewer = await requireUser();
+  if (isDemoEmail(viewer.email)) return { error: "Demo accounts keep their records in the browser." };
+  const allowed = await permissionCheck(viewer);
+  if (!(allowed("approve_draw") || allowed("assign_inspection") || allowed("manage_conditions"))) return { error: "Your account can't ask for title searches." };
+  if (!(await consumeRateLimit(`title-send:${viewer.id}`, 30, 60 * 60 * 1000))) return { error: "Too many requests for now. Wait a while and try again." };
+  const { book } = await readBook();
+  const draw = book.draws.find((item) => item.id === drawId);
+  if (!draw || draw.status === "funded" || draw.status === "rejected") return { error: "That draw has already been decided." };
+  const deal = book.deals.find((item) => item.id === draw.dealId);
+  if (!deal || !SENDABLE.includes(deal.status)) return { error: "That loan is no longer open." };
+  const email = (deal.closing?.email ?? "").trim().toLowerCase();
+  if (!deal.closing?.company || !EMAIL.test(email)) return { error: "Save the title company and its closer's email on the loan's Closing tab first." };
+  const name = deal.closing.contact.trim() || deal.closing.company;
+  const expiresAt = new Date(Date.now() + TITLE_LINK_DAYS * 86_400_000).toISOString();
+  const sentBy = `${viewer.name} at LendHous`;
+  const opened = await runAction(viewer, { t: "openTitleLink", dealId: deal.id, sentTo: name, email, sentBy, expiresAt }, { trusted: true });
+  if ("error" in opened) return { error: opened.error };
+  const link = await createTitleLink(deal.id, expiresAt);
+  const asked = await runAction(viewer, { t: "askTitleUpdate", drawId, to: email, by: viewer.name }, { trusted: true });
+  if ("error" in asked) return { error: asked.error };
+  const since = searchFrom(deal);
+  const amount = `$${drawAmount(draw).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+  const body = [
+    `Hi ${name.split(" ")[0]},`,
+    `Before we release a construction draw of ${amount} on ${deal.entityName}'s loan on ${deal.address}, ${deal.city} (your file ${deal.closing.fileNumber || "number not given"}), please search the official records for anything recorded against the property since ${since ? `the mortgage was recorded on ${longDate(`${since}T12:00:00Z`)}` : "our mortgage was recorded"}: liens, judgments, lis pendens, a new notice of commencement or a deed.`,
+    "Tell us what you find, and upload your search or date-down if you have one, through this secure link:",
+    link,
+    `It works until ${longDate(expiresAt)} and replaces any link we sent before. Please don't forward it.`,
+  ].join("\n\n");
+  await notify(email, `Title search before a draw: ${deal.address}, ${deal.city}`, body, { eventCode: "closing.title_update" });
+  await audit({ actorId: viewer.id, action: "closing.title_update_asked", entityType: "LoanBook", entityId: deal.id });
+  return { book: scopeBook(asked.after, viewer), link };
+}
+
+const viewOf = (book: Book, dealId: string) => { const deal = book.deals.find((item) => item.id === dealId)!; return titleView(deal, evaluate(deal.app).noteAmount, book.draws); };

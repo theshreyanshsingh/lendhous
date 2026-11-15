@@ -20,6 +20,8 @@ const DEFAULTS: Omit<PlatformSettings, "updatedAt"> = {
   nfipAuthorizedThrough: "2026-12-11",
   drawFeeInspectionCents: 0,
   drawFeeDeskCents: 0,
+  titleCheckDraws: null,
+  titleCheckMinDrawCents: 0,
 };
 
 let cached: { at: number; value: Omit<PlatformSettings, "updatedAt"> } | null = null;

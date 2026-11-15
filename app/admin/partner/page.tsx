@@ -7,6 +7,7 @@ import { PageIntro } from "@/components/page-intro";
 import { Badge, GradeBadge, ColorDot, usd, pct, productLabel } from "@/components/ui";
 import { EmptyArt } from "@/components/art/HouseArt";
 import { PropertyPicture } from "@/components/PropertyPicture";
+import { InvestorStatusPanel } from "@/components/InvestorStatus";
 
 export default function PartnerFeed() {
   const { s, dispatch } = useStore();
@@ -27,6 +28,7 @@ export default function PartnerFeed() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-2"><div className="min-w-0"><PageIntro eyebrow={me.name} title="Deal feed" lede="Blind teasers routed to you, sorted by buy-box match." /></div>
         <div className="glass mb-6 min-w-0 px-3 py-2 text-xs text-muted-foreground">Buy box: {me.buyBox.products.map((p) => productLabel[p]).join(", ")} · {me.buyBox.states.join("/")} · {usd(me.buyBox.minLoan)}–{usd(me.buyBox.maxLoan)} · min FICO {me.buyBox.minFico}</div></div>
+      <div className="glass p-4"><InvestorStatusPanel kind="partner" firm={me} side="firm" /></div>
       {feed.length === 0 && <div className="glass flex flex-col items-center gap-2 p-8 text-center text-sm text-muted-foreground" data-testid="no-teasers"><EmptyArt className="h-24 w-32" />No teasers yet. They appear here when LendHous sends you a deal that fits your buy box.</div>}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {feed.map((d) => {

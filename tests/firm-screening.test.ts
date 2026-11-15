@@ -104,7 +104,10 @@ describe("reviewing a firm's possible match", () => {
     expect(check(b, owner, decide("cleared", " "))).toMatchObject({ error: expect.stringMatching(/what you compared/) });
     const cleared = run(b, owner, decide("cleared")).after;
     expect(cleared.partners.find((firm) => firm.id === "p-d")!.screening).toMatchObject({ status: "cleared", decided: { by: "owner name" } });
-    expect(check(cleared, owner, { t: "sendTeaser", dealId: "d1", partnerIds: ["p-d"] })).not.toHaveProperty("error");
+    // Cleared of the sanctions list, it still needs its investor status before a teaser goes to it (lib/investor-status.ts).
+    expect(check(cleared, owner, { t: "sendTeaser", dealId: "d1", partnerIds: ["p-d"] })).toMatchObject({ error: expect.stringMatching(/hasn't certified what kind of investor/) });
+    const certified = { ...cleared, partners: cleared.partners.map((firm) => (firm.id === "p-d" ? { ...firm, investorStatus: b.partners.find((item) => item.id === "p-a")!.investorStatus } : firm)) };
+    expect(check(certified, owner, { t: "sendTeaser", dealId: "d1", partnerIds: ["p-d"] })).not.toHaveProperty("error");
     expect(check(cleared, owner, decide("match"))).toMatchObject({ error: expect.stringMatching(/no open match/) });
     const matched = run(b, owner, decide("match"));
     expect(alertsFor(b, matched.after, matched.action)).toMatchObject([{ to: "team", event: "ofac.match", body: expect.stringMatching(/within 10 business days \(31 CFR 501\.603, 501\.604\)/) }]);

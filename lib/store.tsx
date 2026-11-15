@@ -9,7 +9,7 @@ import { setInvestorFees } from "./investor-statements";
 import { applyRules, DEMO_RULES, type BookRules } from "./settings-rules";
 
 // Demo seats share one demo book in the browser, so a bid placed as the partner seat shows up for the staff seats.
-const KEY = "lendhous-demo-v4";
+const KEY = "lendhous-demo-v5";
 // Any other account can load the same book for itself. It stays with that account, in that browser.
 const sampleKey = (accountId: string) => `lendhous-sample-v3:${accountId}`;
 

@@ -183,11 +183,117 @@ export interface Deal {
   refinances?: string;
   /** The borrower's title/escrow and insurance agents, as they gave them (lib/borrower-docs.ts). */
   agents?: Partial<Record<import("./borrower-docs").AgentRole, import("./borrower-docs").AgentContact>>;
+  /** Who's selling the property on a purchase, for the checks against someone posing as the owner (lib/seller-checks.ts). */
+  seller?: SellerFile;
+  /** What each PDF sent for the loan says about the software that made and saved it (lib/pdf-signals.ts). Team only. */
+  fileChecks?: FileCheck[];
+  /** The property's tax parcels and each year's bill as last checked with the county (lib/property-taxes.ts). */
+  taxes?: { parcels: string[]; checks: TaxCheck[]; reminded?: string[] };
+  /** A condo's building: its age, inspections, reserves and the association's debts (lib/condo-check.ts). */
+  condo?: CondoFile;
+  /** Answers for Florida's limits on buyers from countries of concern, SB 264 (lib/sb264.ts). */
+  sb264?: Sb264Answers;
+}
+/** Each buyer's domicile and status, where the borrowing entity is from, and the property's answers (lib/sb264.ts). */
+export interface Sb264Answers {
+  people: { name: string; domicile: string; status: "citizen" | "permanent_resident" | "other"; visa: "non_tourist" | "asylum" | "none" }[];
+  /** Where the borrowing entity is organized or has its main place of business: "US", or a country's code. */
+  entityCountry: string;
+  acres?: number;
+  militaryWithin5: "yes" | "no" | "unknown";
+  /** Within 10 miles of a military installation or critical infrastructure facility (692.201). */
+  sensitiveWithin10: "yes" | "no" | "unknown";
+  agricultural: boolean;
+  by: string; at: string;
+}
+/** What the processor finds on a condo's building, from the association's documents and the local building department. */
+export interface CondoFile {
+  association: string;
+  /** Habitable stories, and the units in the association. */
+  stories: number; units: number;
+  /** The year of the building's certificate of occupancy. */
+  coYear: number;
+  /** The local building department wants the first milestone inspection at 25 years (near salt water, for one). */
+  at25: boolean;
+  /** The last milestone inspection's phase 1, and a phase 2 where phase 1 found substantial structural deterioration. */
+  milestone?: { phase1On?: string; phase2On?: string; repairsDone?: boolean };
+  /** The last structural integrity reserve study. */
+  sirsOn?: string;
+  reservesPaused: boolean;
+  /** The unit's share of a special assessment still being paid. */
+  assessment?: { monthly: number; endsOn?: string };
+  associationLoan: boolean;
+  /** Its official records are on a website, as an association of 25 or more units must post them. */
+  websitePosted: boolean;
+  by: string; at: string;
+}
+/** One parcel's tax bill for a year, as someone found it on the county tax collector's site on a day. */
+export interface TaxCheck {
+  id: string; parcel: string; year: number; amount?: number;
+  status: "paid" | "unpaid" | "delinquent" | "certificate_sold";
+  paidOn?: string; checkedOn: string; note: string; by: string; at: string;
+}
+/**
+ * The seller on a purchase, as the processor finds it in the tax roll, the deed and the contract. Someone posing as the
+ * owner of a lot that's owned free and clear by someone who lives elsewhere is the commonest seller fraud in Florida.
+ */
+export interface SellerFile {
+  name: string;
+  /** Where the tax roll sends the owner's bill. */
+  mailingAddress: string;
+  /** The tax roll sends the bill somewhere other than the property. */
+  absentee: boolean;
+  /** No mortgage on record, so no lender's payoff vouches for the owner. */
+  freeAndClear: boolean;
+  /** The day the seller took title, from the deed. */
+  ownedSince?: string;
+  /** How anyone on the deal has reached the seller. */
+  contact: SellerContact;
+  /** Who notarizes the seller's deed. */
+  notary: SellerNotary;
+  /** Whether the seller's money goes to an account in the seller's own name. */
+  proceeds: "own_account" | "other_account" | "unknown";
+  /** The seller is pressing for a fast close or an all-cash buyer. */
+  rushed: boolean;
+  /** A letter to the owner at the tax roll's address asking them to confirm the sale, and their answer. */
+  rollLetter?: { sentOn: string; answer?: "confirmed" | "denied"; answeredOn?: string };
+  by: string; at: string;
+}
+export type SellerContact = "in_person" | "video" | "phone" | "written_only" | "none";
+export type SellerNotary = "title_company" | "online_notary" | "seller_chosen" | "unknown";
+export type SellerIdMethod = "in_person_id" | "id_and_selfie" | "online_notary";
+/** One PDF's own record of how it was made: the software, its dates and how often it was saved again. */
+export interface FileCheck {
+  documentId: string; fileName: string;
+  /** What it was sent as: the document, condition or policy. */
+  label: string;
+  at: string;
+  software: string[];
+  created?: string; modified?: string;
+  /** Times it was saved again after it was first made. */
+  saves: number;
+  encrypted?: boolean; signed?: boolean;
+  flags: { level: "warn" | "note"; text: string }[];
+}
+/** A title company's search of the records since the mortgage was recorded, for one draw (lib/title-updates.ts). */
+export interface TitleUpdate {
+  id: string;
+  /** Nothing new recorded against the property. */
+  clean: boolean;
+  /** The last day of the records searched. */
+  through: string;
+  /** What was found, when something was. */
+  found: string;
+  fileName?: string; documentId?: string;
+  by: string; at: string;
+  via: "title" | "team";
 }
 export interface ClosingAgent {
   company: string; contact: string; phone: string; email: string; fileNumber: string;
   /** The title company's word that the loan money reached its escrow account (Spec T3). */
   fundsReceived?: { amount: number; on: string; by: string; at: string };
+  /** The seller's identity, checked by the title company without relying on contact details the seller gave (lib/seller-checks.ts). */
+  sellerVerified?: { method: SellerIdMethod; note: string; by: string; at: string };
   /** Where the mortgage was recorded, once it was. */
   recording?: { on: string; reference: string; by: string; at: string };
 }
@@ -370,6 +476,8 @@ export interface DrawRequest {
   escalated?: { by: string; at: string; reason: string };
   /** The contractor's sign-off through their photo link that the work on these lines is done as the photos show. */
   contractorSigned?: { name: string; at: string; requestId: string };
+  /** The title company's search since recording, asked for before this draw goes out (lib/title-updates.ts). */
+  titleCheck?: { asked?: { by: string; at: string; to: string }; updates: TitleUpdate[] };
 }
 export interface LienFile {
   contractor?: string;
@@ -548,6 +656,27 @@ export interface CapitalSource { id: string; name: string; type: "gt_balance_she
 export interface InvestorChecks {
   principals?: string[];
   screening?: Screening;
+  /** What kind of investor the firm is, which decides whether selling it a loan or a share is licensed activity (lib/investor-status.ts). */
+  investorStatus?: InvestorStatus;
+}
+/** The kinds of investor Florida's definition of an institutional investor names (Fla. Stat. 494.001), or none of them. */
+export type InvestorBasis = "accredited_investor" | "licensed_lender" | "depository_institution" | "reit" | "insurance_company" | "real_estate_company" | "none";
+export type InvestorEntity = "individual" | "llc" | "corporation" | "partnership" | "trust" | "fund" | "other";
+export interface InvestorStatus {
+  entity: InvestorEntity;
+  basis: InvestorBasis;
+  /** For an accredited investor, which test it meets (SEC Rule 501(a)). */
+  how?: string;
+  /** The firm's own word, or checked: a CPA's, attorney's, broker-dealer's or adviser's letter, or a verification service. */
+  evidence: "self_certified" | "verified";
+  verifiedBy?: string;
+  /** The day it was certified or verified, and the day it runs out. */
+  on: string; expiresOn: string;
+  /** The name typed by the person certifying for the firm. */
+  signedName?: string;
+  /** Organized in, run from or owned by someone domiciled in a country of concern (SB 264, lib/sb264.ts). */
+  foreignPrincipal?: boolean;
+  by: string; at: string;
 }
 /** What a partner wants done with its money when a loan it holds pays off (lib/capital-moves.ts). */
 export type RolloverChoice = "send" | "principal" | "all";
@@ -569,7 +698,11 @@ export interface DrawCall { id: string; drawId: string; partnerId: string; amoun
 /** A firm that buys funded loans from LendHous. Partner lenders fund deals before closing; these buy them after. */
 export interface LoanBuyer extends InvestorChecks { id: string; name: string; ndaSigned: boolean; buyBox: BuyBox }
 /** A funded loan LendHous has put up for sale. Prices are a percent of the unpaid balance (100 = par). */
-export interface LoanSale { id: string; dealId: string; askPct: number; listedAt: string; status: "listed" | "sold" | "withdrawn"; soldTo?: string; soldPct?: number; soldAt?: string }
+export interface LoanSale {
+  id: string; dealId: string; askPct: number; listedAt: string; status: "listed" | "sold" | "withdrawn"; soldTo?: string; soldPct?: number; soldAt?: string;
+  /** The loan's tape row, worked out by the server from the whole loan for a buyer who sees only part of it (lib/loan-tape.ts). */
+  tape?: Record<string, string | number>;
+}
 export interface LoanOffer { id: string; saleId: string; buyerId: string; pricePct: number; note: string; atAsk: boolean; status: "submitted" | "accepted" | "declined"; at: string }
 
 export const BORROWER_ID = "b-alex";
@@ -654,8 +787,8 @@ export const capitalSources: CapitalSource[] = [
 ];
 
 export const loanBuyers: LoanBuyer[] = [
-  { id: DEMO_BUYER_ID, name: "Harbor Note Fund (FAKE)", ndaSigned: true, buyBox: { products: ["fix_flip", "bridge", "dscr", "ground_up"], states: ["FL", "GA"], minLoan: 150_000, maxLoan: 1_500_000, maxLTARV: 0.72, minFico: 680, minTier: 1, targetYield: 9 } },
-  { id: "buy-b", name: "Sample Whole Loan Capital (FAKE)", ndaSigned: true, buyBox: { products: ["bridge", "dscr"], states: ["FL"], minLoan: 200_000, maxLoan: 2_000_000, maxLTV: 0.75, minFico: 700, minTier: 1, targetYield: 8 } },
+  { id: DEMO_BUYER_ID, name: "Harbor Note Fund (FAKE)", ndaSigned: true, investorStatus: { entity: "fund", basis: "accredited_investor", how: "all_owners", evidence: "verified", verifiedBy: "Sample Verify Co. (FAKE), letter of April 2, 2026", on: "2026-04-02", expiresOn: "2027-04-02", by: "Cam Capital (FAKE)", at: "2026-04-03T14:00:00Z" }, buyBox: { products: ["fix_flip", "bridge", "dscr", "ground_up"], states: ["FL", "GA"], minLoan: 150_000, maxLoan: 1_500_000, maxLTARV: 0.72, minFico: 680, minTier: 1, targetYield: 9 } },
+  { id: "buy-b", name: "Sample Whole Loan Capital (FAKE)", ndaSigned: true, investorStatus: { entity: "corporation", basis: "insurance_company", evidence: "self_certified", on: "2026-02-01", expiresOn: "2027-02-01", signedName: "Sample Treasurer (FAKE)", by: "Sample Treasurer (FAKE)", at: "2026-02-01T15:00:00Z" }, buyBox: { products: ["bridge", "dscr"], states: ["FL"], minLoan: 200_000, maxLoan: 2_000_000, maxLTV: 0.75, minFico: 700, minTier: 1, targetYield: 8 } },
 ];
 
 export const seedLoanSales: LoanSale[] = [
@@ -689,7 +822,7 @@ export const seedDraws: DrawRequest[] = [
   { id: "draw-1", dealId: "d2", requestedAt: "2026-10-20T09:15:00-07:00", by: "Alex Sample (FAKE)", note: "Cabinets are in and the flooring is down.", contact: "Alex Sample, (555) 010-0100", photos: ["kitchen-cabinets.jpg", "new-flooring.jpg"], lines: [{ scopeId: "kitchen", requested: 12_000, claimedPct: 0.8 }, { scopeId: "flooring", requested: 8_000, claimedPct: 1 }], status: "submitted", approvers: [],
     linePhotos: [{ id: "dp-1", scopeId: "kitchen", name: "kitchen-cabinets.jpg", at: "2026-10-20T16:15:00Z", takenAt: "2026-10-20T15:58:00Z", lat: 26.12236, lng: -80.13748 }, { id: "dp-2", scopeId: "flooring", name: "new-flooring.jpg", at: "2026-10-20T16:15:00Z", takenAt: "2026-10-20T16:02:00Z", lat: 26.12241, lng: -80.13735 }] },
   { id: "draw-2", dealId: "d9", requestedAt: "2026-10-18T11:30:00-07:00", by: "Quinn Sample (FAKE)", note: "Rough plumbing and electrical passed city inspection.", contact: "Quinn Sample, (555) 010-0109", photos: ["rough-plumbing.jpg", "panel.jpg"], lines: [{ scopeId: "plumbing", requested: 5_000 }, { scopeId: "electrical", requested: 5_000 }], status: "inspecting", approvers: [] },
-  { id: "draw-3", dealId: "d12", requestedAt: "2026-10-15T08:45:00-07:00", by: "Blake Notreal (FAKE)", note: "Framing is finished and mechanicals are mostly roughed in.", contact: "Blake Notreal, (555) 010-0112", photos: ["framing-north.jpg", "framing-south.jpg", "ductwork.jpg"], lines: [{ scopeId: "framing", requested: 80_000, observedPct: 0.9 }, { scopeId: "mechanical", requested: 40_000, observedPct: 0.7 }], status: "inspected", approvers: ["Cam Capital (FAKE)"] },
+  { id: "draw-3", dealId: "d12", requestedAt: "2026-10-15T08:45:00-07:00", by: "Blake Notreal (FAKE)", note: "Framing is finished and mechanicals are mostly roughed in.", contact: "Blake Notreal, (555) 010-0112", photos: ["framing-north.jpg", "framing-south.jpg", "ductwork.jpg"], lines: [{ scopeId: "framing", requested: 80_000, observedPct: 0.9 }, { scopeId: "mechanical", requested: 40_000, observedPct: 0.7 }], status: "inspected", approvers: ["Cam Capital (FAKE)"], titleCheck: { asked: { by: "Pat Processor (FAKE)", at: "2026-10-30T14:00:00Z", to: "closer@sample-title.test" }, updates: [] } },
   { id: "draw-4", dealId: "d13", requestedAt: "2026-10-21T14:10:00-07:00", by: "Kai Placeholder (FAKE)", note: "Bathrooms are done.", contact: "Kai Placeholder, (555) 010-0113", photos: ["bathroom.jpg"], lines: [{ scopeId: "bathrooms", requested: 2_500 }], status: "submitted", approvers: [] },
 ];
 
@@ -708,9 +841,9 @@ export const seedLoanOffers: LoanOffer[] = [
 ];
 
 export const partners: Partner[] = [
-  { id: "p-a", name: "Demo Partner Capital A (FAKE)", ndaSigned: true, buyBox: { products: ["fix_flip", "bridge", "ground_up"], states: ["FL", "GA"], minLoan: 250_000, maxLoan: 3_000_000, maxLTARV: 0.72, minFico: 680, minTier: 2, targetYield: 9.5 } },
-  { id: "p-b", name: "Sample Bridge Fund B (FAKE)", ndaSigned: true, buyBox: { products: ["fix_flip", "bridge"], states: ["FL"], minLoan: 100_000, maxLoan: 2_000_000, maxLTARV: 0.7, minFico: 660, minTier: 1, targetYield: 10 } },
-  { id: "p-c", name: "Placeholder DSCR Lender C (FAKE)", ndaSigned: true, buyBox: { products: ["dscr"], states: ["FL", "TX", "NC"], minLoan: 100_000, maxLoan: 1_500_000, maxLTV: 0.8, minFico: 680, minTier: 1, targetYield: 6.5 } },
+  { id: "p-a", name: "Demo Partner Capital A (FAKE)", ndaSigned: true, investorStatus: { entity: "llc", basis: "accredited_investor", how: "entity_assets", evidence: "self_certified", on: "2026-06-01", expiresOn: "2027-06-01", signedName: "Pia Partner (FAKE)", by: "Pia Partner (FAKE)", at: "2026-06-01T15:00:00Z" }, buyBox: { products: ["fix_flip", "bridge", "ground_up"], states: ["FL", "GA"], minLoan: 250_000, maxLoan: 3_000_000, maxLTARV: 0.72, minFico: 680, minTier: 2, targetYield: 9.5 } },
+  { id: "p-b", name: "Sample Bridge Fund B (FAKE)", ndaSigned: true, investorStatus: { entity: "fund", basis: "licensed_lender", evidence: "verified", verifiedBy: "Sample CPA LLP (FAKE), letter of May 10, 2026", on: "2026-05-10", expiresOn: "2027-05-10", by: "Cam Capital (FAKE)", at: "2026-05-11T14:00:00Z" }, buyBox: { products: ["fix_flip", "bridge"], states: ["FL"], minLoan: 100_000, maxLoan: 2_000_000, maxLTARV: 0.7, minFico: 660, minTier: 1, targetYield: 10 } },
+  { id: "p-c", name: "Placeholder DSCR Lender C (FAKE)", ndaSigned: true, investorStatus: { entity: "corporation", basis: "reit", evidence: "self_certified", on: "2025-11-20", expiresOn: "2026-11-20", signedName: "Sample Officer (FAKE)", by: "Sample Officer (FAKE)", at: "2025-11-20T15:00:00Z" }, buyBox: { products: ["dscr"], states: ["FL", "TX", "NC"], minLoan: 100_000, maxLoan: 1_500_000, maxLTV: 0.8, minFico: 680, minTier: 1, targetYield: 6.5 } },
   { id: "p-d", name: "Unsigned Prospect D (FAKE)", ndaSigned: false, buyBox: { products: ["fix_flip"], states: ["FL"], minLoan: 75_000, maxLoan: 1_000_000, maxLTARV: 0.7, minFico: 660, minTier: 1, targetYield: 10 } },
 ];
 

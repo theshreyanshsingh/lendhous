@@ -8,6 +8,7 @@ import { evaluate } from "./engine";
 import { payoffShare, ratesOn, reoShare, type Holding } from "./investor-statements";
 import { payoffOn } from "./loan-exits";
 import type { Bid, Deal, DrawCall, Partner, PayoffProceeds, RolloverChoice, ShareTransfer } from "./mockData";
+import { investorBlocker } from "./investor-status";
 import { firmOfacBlocker } from "./ofac";
 import { SERVICED } from "./servicing";
 import { isBusinessDay } from "./sla";
@@ -106,7 +107,7 @@ export function transferProblem(book: Pick<Book, "bids" | "partners" | "deals">,
     if (!firm) return "That partner is no longer on file.";
     if (!firm.ndaSigned) return `${firm.name} hasn't signed the NDA.`;
     if (currentBids(book, deal.id).some((item) => item.partnerId === to)) return `${firm.name} already holds a share of this loan.`;
-    const held = firmOfacBlocker(firm, today);
+    const held = firmOfacBlocker(firm, today) ?? investorBlocker(firm, today);
     if (held) return `${held}.`;
   }
   return null;

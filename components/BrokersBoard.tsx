@@ -1,4 +1,5 @@
 "use client";
+import { brokerNumbers } from "@/lib/broker-milestones";
 import { EmptyState } from "@/components/EmptyState";
 import { FirmMatchReview } from "@/components/FirmScreening";
 import { useEffect, useState } from "react";
@@ -62,6 +63,7 @@ export function BrokersBoard() {
         return (
           <div key={broker.id} data-testid="broker-row"><Section title={broker.name} right={<Badge tone={tone(broker.status)}>{broker.status ? BROKER_STATUS[broker.status] : "Not signed"}</Badge>}>
             <div className="space-y-3 text-sm">
+              {loans.length > 0 && (() => { const numbers = brokerNumbers(loans); return <p className="text-xs text-muted-foreground" data-testid="broker-row-numbers">{loans.length} deal{loans.length === 1 ? "" : "s"} · {numbers.daysToTermSheet ?? "—"} days to a term sheet · {numbers.daysToFunding ?? "—"} days to funding · pull-through {numbers.pullThrough === null ? "—" : `${numbers.pullThrough}%`} · {numbers.openConditions} conditions open</p>; })()}
               {application ? (
                 <dl className="grid gap-x-4 gap-y-1 sm:grid-cols-[10rem_minmax(0,1fr)]">
                   <dt className="text-muted-foreground">Formed in</dt><dd>{application.entityState}</dd>

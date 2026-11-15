@@ -38,6 +38,11 @@ const wipe = async () => {
   await prisma.rateWindow.deleteMany({ where: { key: { startsWith: "signup-ip:" } } });
   await prisma.rateWindow.deleteMany({ where: { key: { startsWith: "quote-event:" } } });
   await prisma.user.deleteMany({ where: { email: { endsWith: DOMAIN } } });
+  // Notifications outlive their user, so a run that stopped partway would leave the next one's counts off.
+  await prisma.notification.deleteMany({ where: { toEmail: { endsWith: DOMAIN } } });
+  // So do the audit entries and letter numbers it counts, which a second run on the same day would otherwise double.
+  await prisma.auditEvent.deleteMany({ where: { action: { in: ["pricing.published", "pii.revealed"] } } });
+  await prisma.approvalLetter.deleteMany();
   await prisma.rateWindow.deleteMany({ where: { key: { contains: DOMAIN } } });
   await prisma.platformSettings.update({ where: { id: "default" }, data: { offerSampleData: true, allowSignup: true } });
   await prisma.jobRun.deleteMany({ where: { runKey: { startsWith: "smoke-" } } });
@@ -897,9 +902,45 @@ try {
     await card.getByTestId("check-waiver").first().click();
     for (let tries = 0; tries < 40 && (await card.getByTestId("check-waiver").count()) === left; tries++) await owner.waitForTimeout(250);
   }
+  // A title search since recording before the money goes out (lib/title-updates.ts): asked here, answered on title's link.
+  ok("the draw also waits for a title search since recording", (await card.getByTestId("draw-holds").innerText()).includes("title search"));
+  await card.getByTestId("ask-title-search").click();
+  await seen(card.getByTestId("title-search-link"));
+  const searchLink = await card.getByTestId("title-search-link").inputValue();
+  ok("asking emails the title company a new link", searchLink.includes("/closing/") && (await prisma.notification.count({ where: { toEmail: `title@${DOMAIN}`, eventCode: "closing.title_update" } })) === 1);
+  // The closing's own page was closed after funding; the title company opens the new link fresh.
+  const searchContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const titleSearch = await searchContext.newPage();
+  titleSearch.on("pageerror", (error) => errors.push(`title search: ${error.message}`));
+  await titleSearch.goto(BASE + new URL(searchLink).pathname);
+  await seen(titleSearch.getByTestId("title-search"));
+  await titleSearch.getByTestId("title-search-open").click();
+  await titleSearch.getByTestId("title-search-found").check();
+  await titleSearch.getByTestId("title-search-what").fill("Claim of lien by Smoke Roofing LLC, OR Book 123 Page 45");
+  await titleSearch.getByTestId("title-search-through").fill(today);
+  await titleSearch.getByTestId("title-search-send").click();
+  await seen(titleSearch.getByTestId("title-search-answer"));
+  await go(owner, "/admin/draws");
+  ok("a lien title finds holds the draw", (await card.getByTestId("draw-holds").innerText()).includes("Smoke Roofing") && (await prisma.notification.count({ where: { eventCode: "closing.title_update" } })) >= 2);
+  await titleSearch.goto(BASE + new URL(searchLink).pathname);
+  await titleSearch.getByTestId("title-search-open").click();
+  await titleSearch.getByTestId("title-search-clean").check();
+  await titleSearch.getByTestId("title-search-through").fill(today);
+  const searchChooser = titleSearch.waitForEvent("filechooser");
+  await titleSearch.getByTestId("title-search-file").click();
+  await (await searchChooser).setFiles({ name: "Date-down RT-1.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4\n1 0 obj << /Producer (Real Title Search 4.2) /CreationDate (D:20261101090000-05'00') >> endobj\n%%EOF") });
+  await titleSearch.getByTestId("title-search-send").click();
+  await seen(titleSearch.getByTestId("title-search-answer").getByText(/nothing new recorded/));
+  await go(owner, "/admin/draws");
+  ok("once the lien is released, title's clean search frees the draw", (await seen(card.getByTestId("title-search-result"))) && (await card.getByTestId("title-search-result").innerText()).includes("Nothing new recorded") && (await prisma.document.count({ where: { documentType: "title_update" } })) === 1);
+  await searchContext.close();
   ok("the team checks them against the statutory form, which frees the draw", await seen(card.getByTestId("draw-holds").getByText(/Nothing under the lien law/)));
   await card.getByTestId("release-draw").click();
   await seen(owner.getByTestId("closed-draw"));
+  // Every PDF sent for the loan was read for signs of editing as it was stored (lib/pdf-signals.ts).
+  await go(owner, dealHref);
+  await owner.getByTestId("tab-Score & Flags").click();
+  ok("the loan's PDFs were checked for signs of editing as they arrived", await seen(owner.getByTestId("file-checks").getByText(/PDFs? checked|Signs a document/)) && (await owner.getByTestId("file-checks").innerText()).match(/\d+ PDFs? checked/) !== null);
   await go(borrower, `/admin/borrower/${dealId}`);
   ok("the borrower sees the money released", (await borrower.getByTestId("my-draw").innerText()).includes("Funds released"));
   await carl.goto(BASE + renewedPath);
@@ -1135,6 +1176,16 @@ try {
   ok("a partner signs before seeing deals", await seen(partner.getByTestId("nda-gate")));
   await partner.getByRole("button", { name: "E-sign agreement" }).click();
   await seen(partner.locator("main").getByText("Deal feed"));
+  // What kind of investor the firm is comes first: selling a share to a noninstitutional investor is licensed activity (lib/investor-status.ts).
+  ok("the partner is asked what kind of investor it is", await seen(partner.getByTestId("investor-status-form")));
+  await go(owner, leadDeal);
+  await owner.getByTestId("tab-Capital Routing").click();
+  ok("no teaser can go to it until it says", (await owner.locator("li", { hasText: "Parker Capital" }).locator("input[type=checkbox]").isDisabled()) && (await owner.locator("li", { hasText: "Parker Capital" }).innerText()).includes("hasn't certified"));
+  await go(partner, "/admin/partner");
+  await partner.getByTestId("investor-basis").selectOption("licensed_lender");
+  await partner.getByTestId("investor-signed").fill("Paula Parker");
+  await partner.getByTestId("investor-save").click();
+  ok("the partner certifies it's an institutional investor, signing for it", (await seen(partner.getByTestId("investor-status-summary"))) && (await partner.getByTestId("investor-status-summary").innerText()).includes("Paula Parker's word"));
   await go(owner, leadDeal);
   await owner.getByTestId("tab-Capital Routing").click();
   await owner.locator("li", { hasText: "Parker Capital" }).locator("input[type=checkbox]").check();
@@ -1160,6 +1211,16 @@ try {
   await go(buyer, "/admin/buyer");
   await buyer.getByRole("button", { name: "E-sign agreement" }).click();
   await seen(buyer.locator("main").getByText("Loans for sale"));
+  // The team records the buyer's status itself, verified by a letter.
+  await go(owner, "/admin/partners");
+  const blair = owner.getByTestId("firm-row").filter({ hasText: "Blair Notes" });
+  await blair.getByTestId("investor-status-open").click();
+  await blair.getByTestId("investor-entity").selectOption("fund");
+  await blair.getByTestId("investor-basis").selectOption("accredited_investor");
+  await blair.getByTestId("investor-how").selectOption("entity_assets");
+  await blair.getByTestId("investor-verified-by").fill("Sample CPA LLP, letter of today (smoke)");
+  await blair.getByTestId("investor-save").click();
+  ok("the team records a buyer's verified investor status", (await seen(blair.getByTestId("investor-status-summary"))) && (await blair.getByTestId("investor-status-summary").innerText()).includes("Verified by Sample CPA LLP"));
   await go(owner, "/admin/loan-sales");
   const ready = owner.getByTestId("eligible-row").filter({ hasText: "LH-1001" });
   await ready.getByTestId("ask-input").fill("99");

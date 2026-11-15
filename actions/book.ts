@@ -33,6 +33,7 @@ import { recordError } from "@/lib/errors";
 import { mapProperty } from "@/lib/property-facts";
 import { extensionOf, mimeFor, putBytes, safeBasename } from "@/lib/storage";
 import { attachmentName, documentNameContext, uploadProblem } from "@/lib/uploads";
+import { checkPdf } from "@/lib/pdf-signals";
 
 export type BookReply = { book?: Book; error?: string };
 
@@ -143,6 +144,17 @@ export async function refreshBook(): Promise<Book | null> {
 }
 
 /** Stores a loan document or a draw photo, then records it. The file goes in first, so a record never points at nothing. */
+/** Reads a stored PDF's metadata and keeps what it shows on the loan (lib/pdf-signals.ts). A failure is logged, not shown. */
+async function recordPdfCheck(viewer: Viewer, dealId: string, bytes: Buffer, file: { documentId: string; fileName: string; label: string }): Promise<BookReply | null> {
+  try {
+    const result = await runAction(viewer, { t: "recordFileCheck", dealId, check: checkPdf(bytes, { ...file, at: new Date().toISOString() }) }, { trusted: true });
+    return "error" in result ? null : { book: scopeBook(result.after, viewer) };
+  } catch (error) {
+    await recordError(error, "pdf-check", "action").catch(() => {});
+    return null;
+  }
+}
+
 export async function uploadLoanFile(form: FormData): Promise<BookReply & { documentId?: string }> {
   const viewer = await requireUser();
   if (!(await consumeRateLimit(`upload:${viewer.id}`, 60, 60 * 60 * 1000))) return { error: "Too many uploads. Wait a while and try again." };
@@ -194,6 +206,8 @@ export async function uploadLoanFile(form: FormData): Promise<BookReply & { docu
     data: { id, ownerType: "LOAN", ownerId: dealId, documentType: docId || (renewal ? "insurance_renewal" : conditionId ? "condition" : lienDraw ? (affidavit ? "final_affidavit" : "lien_waiver") : "draw_photo"), originalName: encryptField(attachmentName(file.name), documentNameContext(id)), storageKey: key, fileKeyId, mime, size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex"), uploadedById: viewer.id },
   });
   await audit({ actorId: viewer.id, action: "document.uploaded", entityType: "Document", entityId: id, after: { dealId, documentType: docId || (renewal ? "insurance_renewal" : conditionId ? "condition" : lienDraw ? (affidavit ? "final_affidavit" : "lien_waiver") : "draw_photo"), size: bytes.length } });
+  // A PDF's own record of how it was made, beside the loan's other fraud checks. It never stops an upload.
+  const checked = ext === "pdf" ? await recordPdfCheck(viewer, dealId, bytes, { documentId: id, fileName: attachmentName(file.name), label: doc?.name ?? (renewal ? "Insurance renewal" : conditionId ? book.deals.find((item) => item.id === dealId)?.conditions?.find((item) => item.id === conditionId)?.title ?? "Condition" : lienDraw ? (affidavit ? "Contractor's final payment affidavit" : "Lien waiver") : "Loan file") }) : null;
   if (lienDraw) {
     const deal = book.deals.find((item) => item.id === dealId)!;
     const action: BookAction = affidavit ? { t: "affidavitReceived", drawId, fileName: attachmentName(file.name), documentId: id, by: viewer.name } : { t: "lienWaiverReceived", drawId, partyKey: waiverParty, kind: isFinalDraw(deal, lienDraw) ? "final" : "progress", fileName: attachmentName(file.name), documentId: id, by: viewer.name };
@@ -201,7 +215,7 @@ export async function uploadLoanFile(form: FormData): Promise<BookReply & { docu
   }
   if (renewal) return { ...(await perform(viewer, { t: "insuranceRenewal", dealId, ...renewal, fileName: attachmentName(file.name), documentId: id, by: viewer.name }, { trusted: true })), documentId: id };
   if (conditionId) return { ...(await perform(viewer, { t: "conditionFile", dealId, conditionId, fileName: attachmentName(file.name), documentId: id, by: viewer.name }, { trusted: true })), documentId: id };
-  if (!docId) return { documentId: id };
+  if (!docId) return { ...(checked ?? {}), documentId: id };
   const reply = await perform(viewer, { t: "uploadDoc", dealId, docId, fileName: attachmentName(file.name), documentId: id }, { trusted: true });
   return { ...reply, documentId: id };
 }

@@ -2,6 +2,9 @@
 import Link from "next/link";
 import { useState } from "react";
 import { pricePaid, tapeOf } from "@/lib/loan-sale";
+import { TAPE_STATUSES, tapeRow, type TapeVersion } from "@/lib/loan-tape";
+import { serviceDay } from "@/lib/book";
+import { TapeDownload } from "@/components/TapeDownload";
 import type { Deal, LoanSale } from "@/lib/mockData";
 import { useStore } from "@/lib/store";
 import { PageIntro } from "@/components/page-intro";
@@ -25,6 +28,7 @@ export default function LoanSales() {
         <div className="glass p-4"><Stat label="Offers waiting" value={waiting} /></div>
         <div className="glass p-4"><Stat label="Sold" value={sold.length} sub={sold.length ? k(sold.reduce((sum, sale) => { const tape = tapeFor(sale); return sum + pricePaid(tape.balance, sale.soldPct ?? 100); }, 0)) + " total" : undefined} /></div>
       </div>
+      <TapeSection />
       <Section title={`Listed for sale (${live.length})`}>
         {live.length === 0 && <p className="text-sm text-muted-foreground">Nothing listed. List a funded loan below.</p>}
         <ul className="divide-y divide-border">
@@ -83,5 +87,31 @@ function ListRow({ deal, onList }: { deal: Deal; onList: (askPct: number) => voi
         <button type="button" className="btn-primary" data-testid="list-loan" disabled={ask < 50 || ask > 120} onClick={() => onList(ask)}>List</button>
       </div>
     </li>
+  );
+}
+
+/**
+ * The loan tape to send a buyer: the loans listed for sale or the whole funded book, blind for anyone or full for a buyer
+ * under the NDA. The JSON file says what each column means.
+ */
+function TapeSection() {
+  const { s } = useStore();
+  const [which, setWhich] = useState<"listed" | "book">("listed");
+  const [version, setVersion] = useState<TapeVersion>("blind");
+  const day = serviceDay(s);
+  const listedFor = (dealId: string) => s.sales.find((sale) => sale.dealId === dealId && sale.status === "listed");
+  const deals = which === "listed" ? s.deals.filter((deal) => listedFor(deal.id)) : s.deals.filter((deal) => TAPE_STATUSES.includes(deal.status));
+  const rows = deals.map((deal) => tapeRow(deal, version, day, listedFor(deal.id)));
+  return (
+    <Section title="Loan tape">
+      <div className="space-y-3 text-sm" data-testid="tape-section">
+        <p className="text-muted-foreground">One row per loan, with the same columns every time, to send a buyer or load into their system. The blind tape names no borrower, guarantor, street or city, but a price, date and county can still be matched to the public deed, so send even that one only to a buyer who has agreed to keep it confidential. The full one goes only to a buyer under the NDA.</p>
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="block"><span className="label">Loans</span><select className="desk-input w-auto!" data-testid="tape-which" value={which} onChange={(event) => setWhich(event.target.value as "listed" | "book")}><option value="listed">Listed for sale</option><option value="book">Every funded loan, including paid off</option></select></label>
+          <label className="block"><span className="label">Version</span><select className="desk-input w-auto!" data-testid="tape-version" value={version} onChange={(event) => setVersion(event.target.value as TapeVersion)}><option value="blind">Blind: no names or addresses</option><option value="full">Full: for a buyer under NDA</option></select></label>
+          <TapeDownload rows={rows} version={version} asOf={day} what={which === "listed" ? "for-sale" : "book"} />
+        </div>
+      </div>
+    </Section>
   );
 }

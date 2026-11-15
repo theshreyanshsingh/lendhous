@@ -976,6 +976,12 @@ await draw.getByTestId("waiver-amount").fill("18000");
 await draw.getByTestId("waiver-through").fill("2026-10-30");
 ok("a waiver can't cover work after today", await (async () => { await draw.getByTestId("waiver-through").fill("2026-11-15"); const blocked = await draw.getByTestId("check-waiver").isDisabled(); await draw.getByTestId("waiver-through").fill("2026-10-30"); return blocked; })());
 await draw.getByTestId("check-waiver").click();
+// A title search since recording before the money goes out (lib/title-updates.ts). Demo seats record title's answer.
+ok("the draw also waits for a title search since recording", (await draw.getByTestId("draw-holds").innerText()).includes("title search"));
+await draw.getByTestId("record-title-search").click();
+await draw.getByTestId("title-record-clean").check();
+await draw.getByTestId("title-record-save").click();
+ok("title's clean search frees that hold", (await seen(draw.getByTestId("title-search-result"))) && (await draw.getByTestId("title-search-result").innerText()).includes("Nothing new recorded"));
 ok("a checked statutory waiver frees the draw", await seen(draw.getByTestId("draw-holds").getByText(/Nothing under the lien law/)));
 await shot(page, "18f-admin-draw-lien-waivers.png", false);
 await draw.getByTestId("release-draw").click();

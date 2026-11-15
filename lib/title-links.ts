@@ -27,9 +27,10 @@ export async function openTitleLink(token: string) {
   if (!token || token.length > 100) return null;
   const row = await prisma.closingLink.findUnique({ where: { tokenHash: hashOf(token) } });
   if (!row || row.expiresAt.getTime() < Date.now()) return null;
-  const deal = (await readBook()).book.deals.find((item) => item.id === row.dealId);
+  const { book } = await readBook();
+  const deal = book.deals.find((item) => item.id === row.dealId);
   if (!deal) return null;
-  return { deal, state: titleLinkState(deal), view: titleView(deal, evaluate(deal.app).noteAmount) };
+  return { deal, state: titleLinkState(deal), view: titleView(deal, evaluate(deal.app).noteAmount, book.draws) };
 }
 
 /** Who the server acts as for the title company. No roles, so it can do only what a trusted step does for it. */

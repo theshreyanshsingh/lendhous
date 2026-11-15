@@ -6,6 +6,9 @@ import { insuranceGaps } from "./insurance";
 import type { Estimate } from "./engine";
 import { ofacBlocker } from "./ofac";
 import { partnerFundsBlocker } from "./partner-funding";
+import { sellerBlockers } from "./seller-checks";
+import { condoBlocker } from "./condo-check";
+import { sb264Blocker } from "./sb264";
 import type { Deal, LoanStatus } from "./mockData";
 
 // action is the button; next says what happens, for the line above it.
@@ -45,6 +48,12 @@ export function nextStage(deal: Deal, e: Estimate, today?: string): NextStage | 
     // Every condition before the loan documents and before funding is cleared or waived first (Spec 4.3).
     const conditions = blockingConditions(deal).length;
     if (conditions) blockers.push(`${conditions} condition${conditions > 1 ? "s" : ""} to clear before closing (Conditions tab)`);
+    // A condo's building is checked before it closes: inspections, reserves and the association's debts (lib/condo-check.ts).
+    const condo = condoBlocker(deal);
+    if (condo) blockers.push(condo);
+    // Florida's limits on buyers from countries of concern (lib/sb264.ts): citizens and permanent residents clear at once.
+    const foreign = sb264Blocker(deal);
+    if (foreign) blockers.push(foreign);
     const allocated = deal.allocations.reduce((sum, item) => sum + item.amount, 0);
     if (allocated !== e.noteAmount) blockers.push("Capital doesn't cover the whole loan yet");
   }
@@ -55,6 +64,8 @@ export function nextStage(deal: Deal, e: Estimate, today?: string): NextStage | 
   }
   if (step.to === "funded" && !wireVerified(deal)) blockers.push(activeWire(deal) ? "The wire instructions haven't been verified by a call-back (Closing tab)" : "No wire instructions yet (Closing tab)");
   if (step.to === "funded") { const waiting = partnerFundsBlocker(deal); if (waiting) blockers.push(waiting); }
+  // Someone posing as the owner of a lot sells it for cash and vanishes; the title company checks who's selling first.
+  if (step.to === "funded") blockers.push(...sellerBlockers(deal));
   // The property is insured, with LendHous named, before any money goes out (lib/insurance.ts).
   if (step.to === "funded" && today) blockers.push(...insuranceGaps(deal, today));
   if (step.to === "funded" && (deal.fundingApprovers?.length ?? 0) < 2) blockers.push(`Needs two people to approve funding (${deal.fundingApprovers?.length ?? 0} of 2)`);

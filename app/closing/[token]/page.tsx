@@ -17,11 +17,24 @@ const DEMO: TitleView = {
     { id: "closing-recorded", name: "Recorded mortgage", status: "requested", stage: "post_close", fileName: null },
   ],
   wire: null, fundsReceived: null, recording: null, funded: false,
+  // A lot bought from an owner who lives out of state: the closer confirms how it checked who's selling.
+  sellerCheck: { done: null }, updates: [],
+};
+
+// The same file after funding, when the team asks for a title search before releasing a draw.
+const DEMO_DRAW: TitleView = {
+  ...DEMO, loanNumber: "LH-DEMO-1012", entity: "Notreal Builders LLC (FAKE)", address: "12 Example Ridge Way, Tampa 33602", noteAmount: 512_000, closingDate: "2026-07-18", status: "servicing_current", fileNumber: "ST-1012",
+  items: DEMO.items.map((item) => ({ ...item, status: "accepted", fileName: item.fileName ?? `${item.name}.pdf` })),
+  wire: { bankName: "Sample Bank (FAKE)", beneficiary: "Sample Title & Escrow (FAKE) Escrow Account", account: "•••• 4821", verified: true, enteredAt: "2026-07-14T15:00:00Z" },
+  fundsReceived: { amount: 512_000, on: "2026-07-18", by: "Sample Title & Escrow (FAKE)", at: "2026-07-18T18:00:00Z" }, recording: { on: "2026-07-21", reference: "Instr. 2026-0123456 (FAKE)", by: "Sample Title & Escrow (FAKE)", at: "2026-07-21T16:00:00Z" }, funded: true,
+  sellerCheck: null,
+  updates: [{ drawId: "demo-draw", askedAt: new Date(Date.now() - 86_400_000).toISOString(), amount: 120_000, since: "2026-07-21", answered: null }],
 };
 
 export default async function TitleLinkPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
   if (token === "demo") return <TitlePortal token={null} initial={DEMO} expiresAt={new Date(Date.now() + TITLE_LINK_DAYS * 86_400_000).toISOString()} />;
+  if (token === "demo-draw") return <TitlePortal token={null} initial={DEMO_DRAW} expiresAt={new Date(Date.now() + TITLE_LINK_DAYS * 86_400_000).toISOString()} />;
   const link = await openTitleLink(token);
   if (!link || link.state !== "open") {
     return (

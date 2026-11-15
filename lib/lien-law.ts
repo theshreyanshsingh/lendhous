@@ -3,10 +3,12 @@
 // (713.07), and it lapses if work doesn't start within 90 days or once a year passes (713.13(2), (6)). Subcontractors and
 // suppliers not hired by the borrower serve notices to owner (713.06(2)); each draw then needs a statutory lien waiver
 // from the contractor and every one of them (713.20), and the last one final waivers and the contractor's final payment
-// affidavit (713.06(3)(d)). No policy on the building, or any lapsed policy (lib/insurance.ts), stops draws too. An owner can release past these
+// affidavit (713.06(3)(d)). No policy on the building, or any lapsed policy (lib/insurance.ts), stops draws too, and so does a title
+// search since recording that isn't back clean, where Settings asks for one (lib/title-updates.ts). An owner can release past these
 // holds with a reason. The reducer, the access rules and the screens all ask these, so they can't disagree.
 import { freshInspectionNeeded } from "./storms";
 import { insuranceHold } from "./insurance";
+import { titleUpdateHold } from "./title-updates";
 import type { Deal, DrawRequest, LienFile, LienWaiver } from "./mockData";
 import { addDays } from "./servicing";
 
@@ -53,7 +55,7 @@ export function partiesFor(lien: LienFile | undefined, onDay: string): Party[] {
 /** The waiver from a party that counts for this draw: the right kind, checked, not rejected. */
 export const waiverFrom = (draw: DrawRequest, key: string, kind: LienWaiver["kind"]) => draw.waivers?.find((item) => item.partyKey === key && item.kind === kind && item.checked && !item.rejected);
 
-/** Everything that holds a draw's release under the lien law and insurance. Empty when it can go. */
+/** Everything that holds a draw's release under the lien law, insurance and the title search. Empty when it can go. */
 export function drawHolds(deal: Deal, draw: DrawRequest, today: string) {
   const holds = [...nocProblems(deal, today)];
   // A storm over the property since the inspection: the work is looked at again before the money goes (lib/storms.ts).
@@ -61,6 +63,9 @@ export function drawHolds(deal: Deal, draw: DrawRequest, today: string) {
   if (storm) holds.push(storm);
   const insurance = insuranceHold(deal, today);
   if (insurance) holds.push(insurance);
+  // Nothing recorded against the property since closing that could come ahead of this money.
+  const title = titleUpdateHold(draw, today);
+  if (title) holds.push(title);
   if (!deal.lienFile?.contractor) holds.push("The contractor isn't on file, so its lien waiver can't be checked.");
   const kind = isFinalDraw(deal, draw) ? "final" : "progress";
   for (const party of partiesFor(deal.lienFile, today)) if (!waiverFrom(draw, party.key, kind)) holds.push(`${party.name}'s ${kind} lien waiver (Fla. Stat. 713.20) isn't checked yet.`);

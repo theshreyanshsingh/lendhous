@@ -54,6 +54,14 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           </div>
           <small className="block text-xs text-muted-foreground">A borrower whose draw qualifies can choose the team&apos;s review of their phone photos instead of a visit: it&apos;s faster, and it can cost less. The fee is fixed when the draw is asked for.</small>
         </fieldset>
+        <fieldset className="space-y-2" data-testid="setting-title-check">
+          <legend className="label">A title search before draws go out</legend>
+          <label className="flex items-start gap-3 text-sm">
+            <input type="checkbox" name="titleCheckDraws" data-testid="setting-title-check-on" className="mt-1" defaultChecked={settings.titleCheckDraws !== false} />
+            <span><b className="font-medium">Hold each draw until the title company has searched the records since the mortgage was recorded</b><small className="block text-xs text-muted-foreground">It catches a lien or judgment recorded after closing before more money goes out. The team asks on the draw, and the title company answers through its secure link. An owner can still release a draw past it, with a reason.</small></span>
+          </label>
+          <label className="block"><span className="label">Only for draws of this many dollars or more (blank for every draw)</span><input name="titleCheckMinDraw" data-testid="setting-title-check-min" type="number" min={0} max={1000000} step={1000} inputMode="numeric" className="desk-input w-40!" defaultValue={settings.titleCheckMinDrawCents / 100 || ""} placeholder="Every draw" /><small className="block text-xs text-muted-foreground">Title companies usually charge for each search, so a threshold saves the fee on small draws.</small></label>
+        </fieldset>
         <fieldset className="space-y-2" data-testid="setting-targets">
           <legend className="label">How long things may wait (PLACEHOLDER targets until you set them)</legend>
           <p className="text-xs text-muted-foreground">Business hours count 9 to 5 Eastern on weekdays, less Florida&apos;s state holidays; 8 of them is one business day. Items turn amber at three quarters of the way and red once past, and red ones go in the morning email.</p>

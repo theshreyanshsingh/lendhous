@@ -1,10 +1,12 @@
 "use client";
 import { Check, FileUp, Lock } from "lucide-react";
 import { useRef, useState } from "react";
-import { titleConfirmFunds, titleEnterWire, titleRecordMortgage } from "@/actions/title-links";
+import { titleConfirmFunds, titleEnterWire, titleRecordMortgage, titleVerifySeller } from "@/actions/title-links";
 import { Logo } from "@/components/logo";
 import { Arrive, Reveal } from "@/components/motion";
 import { wireProblem, type TitleView } from "@/lib/closing";
+import type { SellerIdMethod } from "@/lib/mockData";
+import { ID_METHODS, methodWords } from "@/lib/seller-checks";
 import { servicingDate } from "@/lib/servicing";
 import { shortDay } from "@/lib/format";
 
@@ -84,6 +86,9 @@ export function TitlePortal({ token, initial, expiresAt }: { token: string | nul
         <Reveal open={Boolean(error || notice)}>
           <p className={`rounded-[2px] p-3 text-sm ${error ? "bg-bad/10 text-bad" : "bg-good/10 text-good"}`} role={error ? "alert" : "status"} data-testid="title-message">{error || notice}</p>
         </Reveal>
+
+        {view.updates.length > 0 && <TitleSearches token={token} view={view} onView={setView} onSaid={(text, failed) => { setNotice(failed ? "" : text); setError(failed ? text : ""); }} />}
+        {view.sellerCheck && !view.funded && <SellerIdCard token={token} view={view} onView={setView} onSaid={(text, failed) => { setNotice(failed ? "" : text); setError(failed ? text : ""); }} />}
 
         <section className="glass p-5">
           <h2 className="eyebrow">Closing checklist</h2>
@@ -171,5 +176,107 @@ export function TitlePortal({ token, initial, expiresAt }: { token: string | nul
         </section>
       </main>
     </div>
+  );
+}
+
+type Part = { token: string | null; view: TitleView; onView: (view: TitleView) => void; onSaid: (text: string, failed?: boolean) => void };
+const longDay = (day: string) => new Date(`${day.slice(0, 10)}T12:00:00Z`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+
+/**
+ * Who's selling (lib/seller-checks.ts): on a sale of land, or by an owner who lives elsewhere and owes nothing on the
+ * property, the closer confirms how it checked the seller is the owner. LendHous won't fund until it has.
+ */
+function SellerIdCard({ token, view, onView, onSaid }: Part) {
+  const [method, setMethod] = useState<SellerIdMethod | "">("");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const done = view.sellerCheck?.done;
+  const confirm = async () => {
+    if (!method) return;
+    setBusy(true);
+    if (!token) { onView({ ...view, sellerCheck: { done: { method, at: new Date().toISOString() } } }); setBusy(false); return; }
+    const reply = await titleVerifySeller(token, { method, note }).catch(() => ({ error: "That didn't go through." }));
+    setBusy(false);
+    if ("view" in reply && reply.view) { onView(reply.view); onSaid("Thank you. LendHous has your confirmation."); } else onSaid(reply.error ?? "That didn't go through.", true);
+  };
+  return (
+    <section className="glass space-y-3 p-5" data-testid="title-seller">
+      <h2 className="eyebrow">The seller&apos;s identity</h2>
+      {done ? (
+        <p className="text-sm" data-testid="title-seller-done"><Check size={14} className="mr-1 inline text-good" aria-hidden="true" />You confirmed on {longDay(done.at)}: {methodWords(done.method)}.</p>
+      ) : (
+        <>
+          <p className="text-sm text-muted-foreground">This sale is the kind people posing as the owner target: vacant land, or an owner who lives elsewhere and has no mortgage. Before LendHous funds, confirm how you checked that the seller is the owner, without relying on a phone number, email or notary the seller gave you.</p>
+          <fieldset className="space-y-2">
+            <legend className="sr-only">How you checked</legend>
+            {(Object.entries(ID_METHODS) as [SellerIdMethod, string][]).map(([key, label]) => (
+              <label key={key} className="flex items-start gap-2 text-sm"><input type="radio" name="seller-id" className="mt-1" data-testid={`title-seller-${key}`} checked={method === key} onChange={() => setMethod(key)} /> {label}</label>
+            ))}
+          </fieldset>
+          <label className="block"><span className="label">Anything we should know (optional)</span><input className="desk-input" data-testid="title-seller-note" maxLength={500} value={note} onChange={(event) => setNote(event.target.value)} /></label>
+          <button type="button" className="btn-primary" data-testid="title-seller-confirm" disabled={!method || busy} onClick={() => void confirm()}>{busy ? "Saving…" : "Confirm the seller's identity was checked"}</button>
+        </>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Searches LendHous has asked for before releasing a construction draw (lib/title-updates.ts): anything recorded against
+ * the property since the mortgage, through a recent day. Sent as a form, with the search report if there is one.
+ */
+function TitleSearches({ token, view, onView, onSaid }: Part) {
+  const today = servicingDate(new Date());
+  const [open, setOpen] = useState("");
+  const [answer, setAnswer] = useState({ clean: "", through: today, found: "" });
+  const [chosen, setChosen] = useState<File | null>(null);
+  const [busy, setBusy] = useState(false);
+  const send = async (drawId: string) => {
+    setBusy(true);
+    const clean = answer.clean === "yes";
+    if (!token) {
+      onView({ ...view, updates: view.updates.map((item) => (item.drawId === drawId ? { ...item, answered: { clean, through: answer.through, found: clean ? "" : answer.found, at: new Date().toISOString() } } : item)) });
+      setBusy(false); setOpen(""); return;
+    }
+    const form = new FormData();
+    form.set("update", drawId); form.set("clean", clean ? "yes" : "no"); form.set("through", answer.through); form.set("found", clean ? "" : answer.found);
+    if (chosen) form.set("file", chosen);
+    const response = await fetch(`/api/closing-links/${token}`, { method: "POST", body: form }).catch(() => null);
+    const body = response ? ((await response.json().catch(() => ({}))) as { view?: TitleView; error?: string }) : { error: "That didn't go through. Check your connection and try again." };
+    setBusy(false);
+    if (body.view) { onView(body.view); setOpen(""); setChosen(null); onSaid("Thank you. LendHous has your search."); } else onSaid(body.error ?? "That didn't go through.", true);
+  };
+  return (
+    <section className="glass space-y-3 p-5" data-testid="title-searches">
+      <h2 className="eyebrow">Title searches before draws</h2>
+      <ul className="space-y-3">
+        {view.updates.map((item) => (
+          <li key={item.drawId} className="rounded-[2px] border border-border p-3 text-sm" data-testid="title-search">
+            <p>LendHous asked on {longDay(item.askedAt)}, before releasing a construction draw of {usd(item.amount)}. Search the official records for anything recorded against the property since {item.since ? `the mortgage was recorded on ${longDay(item.since)}` : "the mortgage was recorded"}: liens, judgments, lis pendens, a new notice of commencement or a deed.</p>
+            {item.answered && (
+              <p className={`mt-2 text-xs ${item.answered.clean ? "text-good" : "text-bad"}`} data-testid="title-search-answer">{item.answered.clean ? `You searched through ${longDay(item.answered.through)}: nothing new recorded.` : `You searched through ${longDay(item.answered.through)} and found: ${item.answered.found}`}</p>
+            )}
+            {open !== item.drawId ? (
+              <button type="button" className={`${item.answered ? "btn-ghost" : "btn-primary"} mt-2 h-9! px-3! text-xs!`} data-testid="title-search-open" onClick={() => { setOpen(item.drawId); setAnswer({ clean: "", through: today, found: "" }); setChosen(null); }}>{item.answered ? "Send a newer search" : "Send what you found"}</button>
+            ) : (
+              <div className="mt-2 space-y-2" data-testid="title-search-form">
+                <fieldset className="flex flex-wrap gap-4">
+                  <legend className="sr-only">What the search found</legend>
+                  <label className="flex items-center gap-2"><input type="radio" name={`clean-${item.drawId}`} data-testid="title-search-clean" checked={answer.clean === "yes"} onChange={() => setAnswer({ ...answer, clean: "yes" })} /> Nothing new is recorded</label>
+                  <label className="flex items-center gap-2"><input type="radio" name={`clean-${item.drawId}`} data-testid="title-search-found" checked={answer.clean === "no"} onChange={() => setAnswer({ ...answer, clean: "no" })} /> Something new is recorded</label>
+                </fieldset>
+                <label className="block"><span className="label">Records searched through</span><input className="desk-input w-auto!" type="date" max={today} min={item.since ?? undefined} data-testid="title-search-through" value={answer.through} onChange={(event) => setAnswer({ ...answer, through: event.target.value })} /></label>
+                {answer.clean === "no" && <label className="block"><span className="label">What&apos;s recorded: the kind of document, who it&apos;s for and the book and page</span><textarea className="desk-input min-h-20" data-testid="title-search-what" maxLength={1000} value={answer.found} onChange={(event) => setAnswer({ ...answer, found: event.target.value })} /></label>}
+                <label className="block"><span className="label">Your search or date-down (optional)</span><input type="file" className="block text-xs" data-testid="title-search-file" accept=".pdf,.jpg,.jpeg,.png,.webp,.heic" onChange={(event) => setChosen(event.target.files?.[0] ?? null)} /></label>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" className="btn-primary h-9! px-3! text-xs!" data-testid="title-search-send" disabled={busy || !answer.clean || !answer.through || (answer.clean === "no" && !answer.found.trim())} onClick={() => void send(item.drawId)}>{busy ? "Sending…" : "Send it"}</button>
+                  <button type="button" className="btn-ghost h-9! px-3! text-xs!" onClick={() => setOpen("")}>Cancel</button>
+                </div>
+              </div>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

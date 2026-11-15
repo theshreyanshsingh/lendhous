@@ -2,6 +2,7 @@
 
 import { EmptyState } from "@/components/EmptyState";
 import { FirmScreening } from "@/components/FirmScreening";
+import { InvestorStatusPanel } from "@/components/InvestorStatus";
 import { useState } from "react";
 import { PageIntro } from "@/components/page-intro";
 import { Badge, productLabel, usd } from "@/components/ui";
@@ -49,7 +50,7 @@ export function PartnersBoard({ accounts }: { accounts: FirmAccount[] }) {
               <p className="mt-2 text-sm text-muted-foreground">They see nothing until you set what they buy.</p>
             )}
             {firm.principals?.length ? <p className="mt-1 text-xs text-muted-foreground">Owners and officers: {firm.principals.join(", ")}</p> : firm.buyBox ? <p className="mt-1 text-xs text-warn">Add its owners and officers so they're screened too.</p> : null}
-            {(() => { const record = saved(firm.kind).find((item) => item.id === firm.id); return record ? <div className="mt-3 border-t border-border pt-3"><FirmScreening kind={firm.kind} firm={record} /></div> : null; })()}
+            {(() => { const record = saved(firm.kind).find((item) => item.id === firm.id); return record ? <><div className="mt-3 border-t border-border pt-3"><FirmScreening kind={firm.kind} firm={record} /></div><div className="mt-3 border-t border-border pt-3"><InvestorStatusPanel kind={firm.kind} firm={record} side="team" /></div></> : null; })()}
             {firm.kind === "partner" && s.partners.some((item) => item.id === firm.id) && <DrawFunding partnerId={firm.id} />}
             <button type="button" className="btn-ghost mt-3 h-9! px-3! text-xs!" data-testid="edit-firm" onClick={() => setEditing(firm)}>{firm.buyBox ? "Edit" : "Set up"}</button>
           </section>

@@ -4,6 +4,10 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { matchPartner } from "@/lib/engine";
 import { SERVICING_STRIP_PCT, tapeOf } from "@/lib/loan-sale";
+import { tapeRow } from "@/lib/loan-tape";
+import { serviceDay } from "@/lib/book";
+import { TapeDownload } from "@/components/TapeDownload";
+import { InvestorStatusPanel } from "@/components/InvestorStatus";
 import type { LoanBuyer } from "@/lib/mockData";
 import { useStore } from "@/lib/store";
 import { PageIntro } from "@/components/page-intro";
@@ -22,8 +26,9 @@ function Market({ me }: { me: LoanBuyer }) {
     const deal = s.deals.find((item) => item.id === sale.dealId)!;
     const tape = tapeOf(deal, sale);
     const fit = matchPartner(me.buyBox, { product: tape.product, state: tape.state, noteAmount: tape.balance, ltarv: tape.ratios.find((r) => r.key === "ltarv")?.actual, ltv: tape.ratios.find((r) => r.key === "ltv")?.actual, fico: tape.fico, tier: tape.tier, rate: tape.noteRate });
-    return { sale, tape, fit, offer: s.offers.find((item) => item.saleId === sale.id && item.buyerId === me.id) };
-  }), [s.sales, s.deals, s.offers, me]);
+    // The server works the downloadable row out from the whole loan; a demo seat has the whole loan in the browser.
+    return { sale, tape, fit, offer: s.offers.find((item) => item.saleId === sale.id && item.buyerId === me.id), row: sale.tape ?? tapeRow(deal, "blind", serviceDay(s), sale) };
+  }), [s, me]);
   const rows = listed
     .filter((row) => product === "all" || row.tape.product === product)
     .sort((a, b) => (sort === "yield" ? b.tape.askYield - a.tape.askYield : sort === "size" ? b.tape.balance - a.tape.balance : b.fit.match - a.fit.match));
@@ -39,11 +44,13 @@ function Market({ me }: { me: LoanBuyer }) {
         <div className="glass p-4"><Stat label="Average yield at asking" value={balance ? `${weighted.toFixed(2)}%` : "—"} sub="weighted by balance" /></div>
         <div className="glass p-4"><Stat label="Your open offers" value={openOffers} /></div>
       </div>
+      <div className="glass p-4"><InvestorStatusPanel kind="buyer" firm={me} side="firm" /></div>
       <div className="glass min-w-0 px-3 py-2 text-xs text-muted-foreground">Your buy box: {me.buyBox.products.map((p) => productLabel[p]).join(", ")} · {me.buyBox.states.join("/")} · {usd(me.buyBox.minLoan)}–{usd(me.buyBox.maxLoan)} · min FICO {me.buyBox.minFico} · target yield {me.buyBox.targetYield}%</div>
       <div className="flex flex-wrap gap-2">
         <select className="desk-input w-full sm:w-auto" aria-label="Filter by product" value={product} onChange={(event) => setProduct(event.target.value)}><option value="all">All products</option>{Object.entries(productLabel).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
         <select className="desk-input w-full sm:w-auto" aria-label="Sort loans" value={sort} onChange={(event) => setSort(event.target.value)}><option value="match">Best fit first</option><option value="yield">Highest yield first</option><option value="size">Largest balance first</option></select>
       </div>
+      {listed.length > 0 && <div className="glass flex flex-wrap items-center justify-between gap-2 px-3 py-2" data-testid="buyer-tape"><span className="text-xs text-muted-foreground">The loan tape of every loan for sale, for your own model. The JSON file says what each column means.</span><TapeDownload rows={listed.map((item) => item.row)} version="blind" asOf={serviceDay(s)} what="for-sale" testId="buyer-tape" /></div>}
       {rows.length === 0 && <EmptyState>{listed.length === 0 ? "No loans for sale right now." : "No loans match this filter."}</EmptyState>}
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {rows.map(({ sale, tape, fit, offer }) => (

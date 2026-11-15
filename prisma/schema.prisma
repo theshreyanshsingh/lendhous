@@ -346,6 +346,10 @@ model PlatformSettings {
   // borrower's photos (lib/draw-review.ts). 0 charges nothing.
   drawFeeInspectionCents        Int      @default(0)
   drawFeeDeskCents              Int      @default(0)
+  // A title search since recording before draws go out (lib/title-updates.ts): on unless false, for draws of at least
+  // titleCheckMinDrawCents (0 is every draw).
+  titleCheckDraws               Boolean?
+  titleCheckMinDrawCents        Int      @default(0)
   updatedAt                     DateTime @updatedAt
 }
 
