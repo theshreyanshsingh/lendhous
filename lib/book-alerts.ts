@@ -657,7 +657,8 @@ export async function sendAlerts(before: Book, after: Book, action: BookAction) 
       if (alert.to === "team") {
         // The owners hear about everything; a loan's own officer and processor hear about theirs too.
         const dealId = alert.dealId ?? ("dealId" in action ? action.dealId : undefined);
-        await notifyTeam(alert.subject, alert.body + link, alert.event, undefined, teamEmails(after.deals.find((item) => item.id === dealId)));
+        const deal = after.deals.find((item) => item.id === dealId);
+        await notifyTeam(alert.subject, alert.body + link, alert.event, undefined, teamEmails(deal), deal ? { url: `/admin/deals/${deal.id}`, loan: deal.loanNumber } : {});
         continue;
       }
       if (alert.to === "email") {
@@ -675,7 +676,8 @@ export async function sendAlerts(before: Book, after: Book, action: BookAction) 
         : await prisma.user.findMany({ where: { OR: [{ id: (alert.to === "broker" ? deal?.brokerId : alert.firmId) ?? "" }, { organizationId: (alert.to === "broker" ? deal?.brokerId : alert.firmId) ?? "" }] }, select: { email: true } });
       // A notification on a phone opens the page it's about (lib/push.ts).
       const url = alert.to === "borrower" && deal ? `/admin/borrower/${deal.id}` : alert.to === "broker" && deal ? `/admin/broker/deals/${deal.id}` : alert.to === "partner" ? "/admin/partner/portfolio" : alert.to === "buyer" ? "/admin/buyer/portfolio" : undefined;
-      for (const account of accounts) await notify(account.email, alert.subject, alert.body + link, { eventCode: alert.event, ...(url ? { url } : {}) });
+      // Partners and buyers see a loan by its number on their portfolio, so the number groups their notices too.
+      for (const account of accounts) await notify(account.email, alert.subject, alert.body + link, { eventCode: alert.event, ...(url ? { url } : {}), ...(deal ? { loan: deal.loanNumber } : {}) });
     } catch (error) {
       console.error("[lendhous-alerts] could not send an alert:", error);
     }

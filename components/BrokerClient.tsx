@@ -64,7 +64,7 @@ export function BrokerEarnings({ deals }: { deals: Deal[] }) {
   if (!rows.length) return null;
   const year = new Date().getFullYear();
   const paidThisYear = rows.filter((row) => row.fee.state === "paid" && row.deal.brokerFeePaid?.on.startsWith(`${year}-`)).reduce((sum, row) => sum + row.fee.amount, 0);
-  const download = () => downloadCsv(`lendhous-broker-fees-${year}.csv`, rows.map(({ deal, fee }) => ({ Loan: deal.loanNumber, Client: deal.borrowerName, Property: `${deal.address}, ${deal.city}`, Points: deal.brokerPoints ?? 0, Fee: fee.amount, Status: FEE_STATE[fee.state], "Paid on": deal.brokerFeePaid?.on ?? "", Reference: deal.brokerFeePaid?.reference ?? "" })));
+  const download = () => downloadCsv(`lendhous-broker-fees-${year}.csv`, rows.map(({ deal, fee }) => ({ Loan: deal.loanNumber, Client: deal.borrowerName, Property: `${deal.address}, ${deal.city}`, Points: deal.brokerPoints ?? 0, Fee: fee.amount, Status: FEE_STATE[fee.state], "Closing date": deal.closingDate ?? "", "Paid on": deal.brokerFeePaid?.on ?? "", Reference: deal.brokerFeePaid?.reference ?? "" })));
   return (
     <Section title="Your fees" right={<button type="button" className="text-xs text-link underline underline-offset-2" data-testid="broker-fees-csv" onClick={download}>Download (CSV)</button>}>
       <table className="stack-table w-full text-sm" data-testid="broker-my-fees">
@@ -75,7 +75,8 @@ export function BrokerEarnings({ deals }: { deals: Deal[] }) {
               <td>{deal.loanNumber}<small className="block text-xs text-muted-foreground">{deal.borrowerName} · {deal.city}</small></td>
               <td data-label="Fee" className="text-right tabular-nums">{usd(fee.amount, 2)}<small className="block text-xs text-muted-foreground">{deal.brokerPoints ?? 0} points</small></td>
               <td data-label="Status"><Badge tone={fee.state === "paid" ? "green" : fee.state === "unpaid" ? "amber" : "slate"}>{FEE_STATE[fee.state]}</Badge></td>
-              <td data-label="Paid">{deal.brokerFeePaid ? `${shortDay(deal.brokerFeePaid.on)}${deal.brokerFeePaid.reference ? ` · ${deal.brokerFeePaid.reference}` : ""}` : "—"}</td>
+              {/* When it's due: paid at closing, so the closing date, set or done. */}
+              <td data-label="Paid" data-testid="broker-fee-when">{deal.brokerFeePaid ? `${shortDay(deal.brokerFeePaid.on)}${deal.brokerFeePaid.reference ? ` · ${deal.brokerFeePaid.reference}` : ""}` : deal.closingDate ? <span className="text-muted-foreground">{fee.state === "unpaid" ? `Closed ${shortDay(deal.closingDate)}` : `Closing set for ${shortDay(deal.closingDate)}`}</span> : <span className="text-muted-foreground">At closing</span>}</td>
             </tr>
           ))}
         </tbody>

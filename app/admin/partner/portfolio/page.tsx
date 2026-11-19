@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { InvestorStatements } from "@/components/InvestorStatements";
+import { LoanOutlook } from "@/components/HolderOutlook";
 import { PartnerMoney } from "@/components/PartnerMoney";
 import { PortfolioCharts } from "@/components/charts/PortfolioCharts";
 import { PageIntro } from "@/components/page-intro";
@@ -47,6 +48,7 @@ export default function PartnerPortfolio() {
                 {row.holding.since && <p className="mt-1 text-xs text-muted-foreground" data-testid="portfolio-took-over">You took over this share on {shortDay(row.holding.since)}.</p>}
                 {(() => { const moved = row.holding.until ? row.holding.deal.transfers?.find((item) => item.from === me.id && item.on === row.holding.until) : undefined; return moved ? <p className="mt-1 text-xs text-muted-foreground">Your share moved on {shortDay(moved.on)} for {usd(moved.price, 2)}{moved.settled ? `, settled ${shortDay(moved.settled.on)}` : ", to be settled"}.</p> : null; })()}
                 {latestUpdate(row.holding.deal) && <p className="mt-1 text-sm text-muted-foreground" data-testid="portfolio-update">Update {shortDate(latestUpdate(row.holding.deal)!.at)}: {latestUpdate(row.holding.deal)!.text}</p>}
+                <LoanOutlook deal={row.holding.deal} moved={Boolean(row.holding.until)} />
                 <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-5">
                   <Stat label="Your share" value={`${Math.round(row.holding.share * 100)}%`} sub={`${row.holding.investorRate.toFixed(2)}% to you`} />
                   <Stat label="Balance" value={usd(row.balance)} />

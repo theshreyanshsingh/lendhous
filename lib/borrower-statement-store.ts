@@ -33,7 +33,7 @@ export async function makeBorrowerStatements(month: string) {
     const borrower = await prisma.user.findFirst({ where: { id: deal.borrowerId, accountStatus: "APPROVED", ...notDeleted }, select: { email: true } });
     if (!borrower) continue;
     const due = statement.paidOff ? "The loan is paid in full." : statement.nextDue ? `Your next payment is ${dollars(statement.nextDue.amount)}, due ${shortDay(statement.nextDue.on)}.` : "";
-    await notify(borrower.email, `Your ${monthName(month)} statement for ${deal.loanNumber}`, `Your loan statement for ${monthName(month)} is ready. ${due}\n\nSee it, and download it as a PDF, on your loan page: ${origin()}/admin/borrower/${deal.id}#statements`, { eventCode: "statement.ready" });
+    await notify(borrower.email, `Your ${monthName(month)} statement for ${deal.loanNumber}`, `Your loan statement for ${monthName(month)} is ready. ${due}\n\nSee it, and download it as a PDF, on your loan page: ${origin()}/admin/borrower/${deal.id}#statements`, { eventCode: "statement.ready", url: `/admin/borrower/${deal.id}#statements`, loan: deal.loanNumber });
     await prisma.borrowerStatement.update({ where: { id }, data: { emailedAt: new Date() } });
   }
   return made;

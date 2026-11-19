@@ -177,6 +177,8 @@ export interface Deal {
   showcase?: { on: boolean; by: string; at: string };
   /** How the borrower says the loan will end, and when they said it (lib/exit-plans.ts). */
   exitPlan?: import("./exit-plans").ExitPlan;
+  /** Only in a partner's or buyer's copy of a loan it holds, worked out by the server (lib/holder-view.ts); never stored. */
+  holderWatch?: import("./holder-view").HolderWatch;
   /** The days before maturity the borrower has been asked for that plan. */
   exitAsked?: number[];
   /** The LendHous loan this one refinances: it's paid off from this loan's money when this one funds. */

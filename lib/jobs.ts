@@ -11,7 +11,10 @@ import { PRE_FUNDING } from "@/lib/loan-exits";
 import { refreshSanctionsList, screenDeal } from "@/lib/sanctions-store";
 import { screenBrokerage, screenFirm } from "@/lib/firm-screening";
 import { encryptStoredData } from "@/lib/encrypt-data";
-import { notifyTeam } from "@/lib/email";
+import { notifyTeam, sendSummary } from "@/lib/email";
+import { readField } from "@/lib/crypto";
+import { summaryEmail } from "@/lib/notice-topics";
+import { noticeContext } from "@/lib/notifications";
 import { unansweredLeads } from "@/lib/lead-store";
 import { payoffReminders } from "@/lib/payoffs";
 import { noticeReminders } from "@/lib/adverse-action";
@@ -166,6 +169,30 @@ async function sendDigest(now: Date) {
   return digest.subject;
 }
 
+// Each person's once-a-day email: the notices they asked to get in one summary (lib/notice-topics.ts), held since the last
+// one. A failed send leaves that person's notices held, so tomorrow's summary still has them.
+async function sendSummaries() {
+  const held = await prisma.notification.findMany({ where: { delivery: "daily" }, orderBy: { createdAt: "asc" }, take: 5000 });
+  const byPerson = new Map<string, typeof held>();
+  for (const notice of held) byPerson.set(notice.toEmail, [...(byPerson.get(notice.toEmail) ?? []), notice]);
+  const origin = (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "");
+  let sent = 0;
+  let failed = 0;
+  for (const [toEmail, notices] of byPerson) {
+    const opened = notices.map((notice) => ({ ...notice, subject: readField(notice.subject, noticeContext("subject", notice.id)), body: readField(notice.body, noticeContext("body", notice.id)) }));
+    const summary = summaryEmail(opened, origin);
+    try {
+      await sendSummary(toEmail, summary.subject, summary.body);
+      await prisma.notification.updateMany({ where: { id: { in: notices.map((notice) => notice.id) } }, data: { delivery: "summarized" } });
+      sent++;
+    } catch (error) {
+      failed++;
+      await recordError(error, "job:summaries", "job");
+    }
+  }
+  return `sent ${sent} ${sent === 1 ? "summary" : "summaries"} of ${held.length} notice${held.length === 1 ? "" : "s"}${failed ? `; ${failed} failed and wait for tomorrow` : ""}`;
+}
+
 // Properties not yet on the map or without a flood zone: the Census geocoder and FEMA's flood map (lib/property-facts.ts).
 const mapProperties = () => mapMissing();
 
@@ -176,7 +203,7 @@ async function watchStorms(now: Date) {
   return result.summary;
 }
 
-export const JOBS: Record<string, Job> = { sanctions: checkSanctions, servicing: checkServicing, termSheets: checkTermSheets, insurance: checkInsurance, taxes: checkTaxes, properties: mapProperties, storms: watchStorms, sessions: purgeSessions, retention: cleanRetention, encryption: sealStoredData, statements: makeMonthlyStatements, digest: sendDigest };
+export const JOBS: Record<string, Job> = { sanctions: checkSanctions, servicing: checkServicing, termSheets: checkTermSheets, insurance: checkInsurance, taxes: checkTaxes, properties: mapProperties, storms: watchStorms, sessions: purgeSessions, retention: cleanRetention, encryption: sealStoredData, statements: makeMonthlyStatements, summaries: sendSummaries, digest: sendDigest };
 
 /** NHC writes a new advisory every six hours, so the storm check runs once in each six-hour window; the rest once a day. */
 const EVERY_SIX_HOURS = new Set(["storms"]);

@@ -5,6 +5,7 @@ import { encryptField } from "@/lib/crypto";
 import { notDeleted, prisma } from "@/lib/prisma";
 import { deliverable, deskRecipients, resolveMailTransport, type MailTransport } from "@/lib/mail-config";
 import { noticeContext } from "@/lib/notifications";
+import { routeNotice, safeLink } from "@/lib/notice-topics";
 import { pushMessage, pushReady, pushTo } from "./push";
 
 type Attachment = { filename: string; content: Buffer };
@@ -37,20 +38,20 @@ async function deliver(transport: MailTransport, toEmail: string, subject: strin
   }
 }
 
-export async function notify(toEmail: string, subject: string, body: string, options: { eventCode?: string; legal?: boolean; replyTo?: string; url?: string } = {}) {
-  const user = await prisma.user.findUnique({ where: { email: toEmail }, select: { id: true, notifyEmail: true, notifyInApp: true } });
-  const legal = Boolean(options.legal);
-  const sendEmail = legal || !user || user.notifyEmail;
-  const keepInApp = legal || !user || user.notifyInApp;
-  // To their phone or computer, where they turned notifications on there, whatever their email choice (lib/push.ts). A
-  // failure never stops the rest.
-  if (user && pushReady()) await pushTo(user.id, pushMessage(subject, body, options.url ?? "/admin/account/notifications", options.eventCode)).catch(() => 0);
-  if (!sendEmail && !keepInApp) return;
+export async function notify(toEmail: string, subject: string, body: string, options: { eventCode?: string; legal?: boolean; replyTo?: string; url?: string; loan?: string } = {}) {
+  const user = await prisma.user.findUnique({ where: { email: toEmail }, select: { id: true, notifyEmail: true, notifyInApp: true, noticeTopics: true } });
+  const eventCode = options.eventCode ?? "";
+  // Email now, in tomorrow's summary, or only here, by the person's choice for this kind of update (lib/notice-topics.ts).
+  const route = routeNotice({ eventCode, legal: Boolean(options.legal), email: user?.notifyEmail ?? true, inApp: user?.notifyInApp ?? true, choices: user?.noticeTopics, hasAccount: Boolean(user) });
+  const link = safeLink(options.url);
+  // To their phone or computer, where they turned notifications on there (lib/push.ts). A failure never stops the rest.
+  if (user && route.push && pushReady()) await pushTo(user.id, pushMessage(subject, body, link ?? "/admin/account/notifications", eventCode)).catch(() => 0);
+  if (!route.email && !route.keep) return;
   const transport = deliverable(toEmail) ? resolveMailTransport() : "log";
-  let delivery: string = sendEmail ? transport : "skipped";
-  if (sendEmail && transport === "log") {
+  let delivery: string = route.email ? transport : route.summary ? "daily" : "skipped";
+  if (route.email && transport === "log") {
     console.info(`[lendhous-mail] to=${toEmail} subject=${subject}\n${body}`);
-  } else if (sendEmail) {
+  } else if (route.email) {
     try {
       await deliver(transport, toEmail, subject, body, options.replyTo);
     } catch (error) {
@@ -59,10 +60,18 @@ export async function notify(toEmail: string, subject: string, body: string, opt
       console.info(`[lendhous-mail] to=${toEmail} subject=${subject}\n${body}`);
     }
   }
-  if (!keepInApp) return;
+  if (!route.keep) return;
   // Alerts can quote a client's details, so the saved copy is encrypted like the record it came from.
   const id = randomUUID();
-  await prisma.notification.create({ data: { id, toEmail, userId: user?.id, subject: encryptField(subject, noticeContext("subject", id)), body: encryptField(body, noticeContext("body", id)), delivery, legal, eventCode: options.eventCode ?? "" } });
+  await prisma.notification.create({ data: { id, toEmail, userId: user?.id, subject: encryptField(subject, noticeContext("subject", id)), body: encryptField(body, noticeContext("body", id)), delivery, legal: Boolean(options.legal), eventCode, ...(options.loan ? { loan: options.loan } : {}), ...(link ? { link } : {}), ...(route.readNow ? { readAt: new Date() } : {}) } });
+}
+
+/** The once-a-day email of held notices. Sent bare, like a password link, so the summary isn't saved as one more notice. */
+export async function sendSummary(toEmail: string, subject: string, body: string) {
+  const transport = deliverable(toEmail) ? resolveMailTransport() : "log";
+  if (transport === "log") console.info(`[lendhous-mail] to=${toEmail} subject=${subject}\n${body}`);
+  else await deliver(transport, toEmail, subject, body);
+  return transport;
 }
 
 /**
@@ -111,12 +120,12 @@ export function sendLetterMail(toEmail: string, subject: string, body: string, p
 }
 
 /** Team alerts go to every approved owner-admin, to TEAM_EMAIL when it is set, and to anyone else named (a loan's team). */
-export async function notifyTeam(subject: string, body: string, eventCode = "", replyTo?: string, also: string[] = []) {
+export async function notifyTeam(subject: string, body: string, eventCode = "", replyTo?: string, also: string[] = [], about: { url?: string; loan?: string } = {}) {
   const owners = await prisma.user.findMany({
     where: { accountStatus: "APPROVED", ...notDeleted, roles: { some: { role: "ADMIN_OWNER" } } },
     select: { email: true },
   });
   const recipients = deskRecipients([...owners.map((owner) => owner.email), ...also], process.env.TEAM_EMAIL);
   if (!recipients.length) console.warn(`[lendhous-mail] no team recipient for ${subject}`);
-  for (const email of recipients) await notify(email, subject, body, { eventCode, replyTo });
+  for (const email of recipients) await notify(email, subject, body, { eventCode, replyTo, ...about });
 }

@@ -1,4 +1,5 @@
 "use client";
+import { AddToCalendar } from "@/components/loan/AddToCalendar";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { isClosedApplication, PRE_FUNDING } from "@/lib/loan-exits";
@@ -88,7 +89,7 @@ export default function BorrowerLoan() {
         </div>
         {/* Once funded, a phone shows the money before the paperwork. */}
         <div className={`min-w-0 space-y-4 ${funded ? "max-lg:order-first" : ""}`}>
-          <Section title={funded ? "Loan balance" : "Estimated terms"}>
+          <Section title={funded ? "Loan balance" : "Estimated terms"} right={<AddToCalendar deal={d} />}>
             <div className="grid grid-cols-2 gap-3">
               <Stat label="Note amount" value={usd(e.noteAmount)} />
               <Stat label="Rate" value={`${rate.toFixed(2)}%`} sub={interestBasis(d.app.product, d.app.accrual)} />

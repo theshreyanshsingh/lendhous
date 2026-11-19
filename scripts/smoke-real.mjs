@@ -82,6 +82,8 @@ const person = async (local) => {
   return page;
 };
 const seen = (locator, timeout = 8000) => locator.first().waitFor({ timeout }).then(() => true, () => false);
+/** Waits up to 8 seconds for a check against the database to come true. */
+const poll = async (check, timeout = 8000) => { for (const end = Date.now() + timeout; Date.now() < end; await new Promise((done) => setTimeout(done, 250))) if (await check()) return true; return false; };
 const gone = (locator) => locator.first().waitFor({ state: "detached", timeout: 8000 }).then(() => true, () => false);
 const path = (page) => new URL(page.url()).pathname;
 // What actually reached this person's browser, including data the screen doesn't show.
@@ -425,6 +427,28 @@ try {
   ok("a team note never reaches the borrower", !(await received(borrower)).includes("Team only remark 7741"));
   await go(borrower, "/admin/account/notifications");
   ok("the borrower is notified of the message", await seen(borrower.getByTestId("notice").filter({ hasText: "New message" })));
+  ok("the notice sits under its loan's address", await seen(borrower.getByTestId("notice-group").filter({ hasText: "100 Real Street" }).getByTestId("notice").filter({ hasText: "New message" })));
+  const messageNotice = borrower.getByTestId("notice").filter({ hasText: "New message" }).first();
+  await messageNotice.locator("summary").click();
+  await messageNotice.getByTestId("notice-open").click();
+  await borrower.waitForURL(`**/admin/borrower/${dealId}`);
+  ok("its Open link goes to the loan and marks it read", (await prisma.notification.count({ where: { toEmail: `borrower@${DOMAIN}`, eventCode: { startsWith: "message." }, readAt: { not: null } } })) >= 1);
+  // Messages once a day instead: the next one waits for the summary email, and still shows in the app
+  await go(borrower, "/admin/account/notifications");
+  await borrower.getByTestId("pref-topic-messages").selectOption("daily");
+  await borrower.getByTestId("notice-preferences").getByRole("button", { name: "Save" }).click();
+  await poll(async () => (await prisma.user.findUnique({ where: { email: `borrower@${DOMAIN}` } }))?.noticeTopics?.messages === "daily");
+  await under.getByTestId("message-text").fill("A second note for the summary");
+  await under.getByTestId("send-message").click();
+  await seen(under.getByTestId("loan-messages").getByText("A second note for the summary"));
+  ok("a message the borrower gets once a day waits for the summary", await poll(async () => (await prisma.notification.count({ where: { toEmail: `borrower@${DOMAIN}`, eventCode: { startsWith: "message." }, delivery: "daily" } })) === 1));
+  await go(borrower, "/admin/account/notifications");
+  // The first message's notice was read through its Open link, so an unread one on the Unread tab is the second.
+  await go(borrower, "/admin/account/notifications?show=unread");
+  ok("and shows on the Notifications page unread", await seen(borrower.getByTestId("notice").filter({ hasText: "New message" })));
+  await borrower.getByTestId("pref-topic-messages").selectOption("now");
+  await borrower.getByTestId("notice-preferences").getByRole("button", { name: "Save" }).click();
+  await poll(async () => (await prisma.user.findUnique({ where: { email: `borrower@${DOMAIN}` } }))?.noticeTopics?.messages === "now");
 
   await go(under, dealHref);
   for (const label of ["Start initial review", "Send to underwriting"]) {
@@ -681,6 +705,12 @@ try {
   ok("a second person funds it and it moves to servicing", (await owner.getByTestId("stage-panel").count()) === 0);
   // Before the policy ends, the borrower sends the renewal from the loan page and the team accepts it.
   await go(borrower, `/admin/borrower/${dealId}`);
+  // The loan's dates in the borrower's own calendar, from the server: theirs only
+  const calendarHref = await borrower.getByTestId("add-to-calendar").getAttribute("href");
+  const calendarReply = await borrower.request.get(BASE + calendarHref);
+  const calendarText = await calendarReply.text();
+  ok("the borrower downloads the funded loan's payment dates for their calendar", calendarReply.status() === 200 && calendarReply.headers()["content-type"].startsWith("text/calendar") && calendarText.includes("RRULE:FREQ=MONTHLY") && !calendarText.includes("$"));
+  ok("nobody else can download them", (await partner.request.get(BASE + calendarHref)).status() === 404 && (await (await browser.newContext()).request.get(BASE + calendarHref)).status() === 401);
   await borrower.getByTestId("send-renewal").click();
   await borrower.getByTestId("renewal-kind").selectOption("hazard");
   await borrower.getByTestId("renewal-policy").fill("GBM-78");

@@ -61,6 +61,32 @@ describe("Approval collection validator (MongoDB stands in for a CHECK constrain
   });
 });
 
+describe("notification choices and the daily summary", () => {
+  it("emails at once by default, holds a chosen topic for one summary a day, and keeps the loan and page", async () => {
+    const { notify } = await import("@/lib/email");
+    const { recentNotices } = await import("@/lib/notifications");
+    const base = { passwordHash: "x", accountStatus: "APPROVED" as const };
+    const daily = await prisma.user.create({ data: { ...base, email: "daily.reader@example.com", name: "Daily", noticeTopics: { draws: "daily", payments: "app" } } });
+    await prisma.user.create({ data: { ...base, email: "eager.reader@example.com", name: "Eager" } });
+    await notify(daily.email, "Draw requested: LH-1004", "Pat asked for $12,000.\n\nSign in: x", { eventCode: "draw.requested", url: "/admin/deals/d4", loan: "LH-1004" });
+    await notify(daily.email, "Payment received: LH-1004", "Thank you.", { eventCode: "payment.received", url: "//evil.example" });
+    await notify(daily.email, "Your decline notice", "Legal text.", { eventCode: "adverse_action.requested", legal: true });
+    await notify("eager.reader@example.com", "Draw requested: LH-1004", "Pat asked.", { eventCode: "draw.requested" });
+    const rows = await prisma.notification.findMany({ where: { toEmail: { in: [daily.email, "eager.reader@example.com"] } }, orderBy: { createdAt: "asc" }, select: { toEmail: true, eventCode: true, delivery: true, loan: true, link: true } });
+    expect(rows).toEqual([
+      { toEmail: daily.email, eventCode: "draw.requested", delivery: "daily", loan: "LH-1004", link: "/admin/deals/d4" },
+      { toEmail: daily.email, eventCode: "payment.received", delivery: "skipped", loan: null, link: null },
+      { toEmail: daily.email, eventCode: "adverse_action.requested", delivery: "log", loan: null, link: null },
+      { toEmail: "eager.reader@example.com", eventCode: "draw.requested", delivery: "log", loan: null, link: null },
+    ]);
+    expect((await recentNotices(daily)).length).toBe(3);
+    const run = await lib.jobs.runJob("summaries", new Date("2026-11-19T06:00:00Z"));
+    expect(run.summary).toBe("sent 1 summary of 1 notice");
+    expect((await prisma.notification.findFirst({ where: { toEmail: daily.email, eventCode: "draw.requested" } }))?.delivery).toBe("summarized");
+    expect((await lib.jobs.runJob("summaries", new Date("2026-11-20T06:00:00Z"))).summary).toBe("sent 0 summaries of 0 notices");
+  });
+});
+
 describe("soft delete and team alerts", () => {
   it("counts a user whose deletedAt was never written, and skips a deleted one", async () => {
     const { notDeleted } = await import("@/lib/prisma");

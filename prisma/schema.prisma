@@ -114,6 +114,8 @@ model User {
   organization     Organization? @relation(fields: [organizationId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   notifyEmail      Boolean       @default(true)
   notifyInApp      Boolean       @default(true)
+  // Per topic of update: "now", "daily" or "app" (lib/notice-topics.ts). Unset is "now".
+  noticeTopics     Json?
   lastLoginAt      DateTime?
   // Created through the public sign-up page. Such an account stays PENDING until its email link is used.
   signedUpAt       DateTime?
@@ -255,7 +257,11 @@ model Notification {
   body      String
   // Legal and security notices (Spec v3 12.1 "(L)") ignore the user's channel preferences.
   legal     Boolean   @default(false)
+  // "daily" waits for the person's once-a-day email (lib/notice-topics.ts), then becomes "summarized".
   delivery  String    @default("log")
+  // The loan it's about and the page that opens it, for the Notifications page's groups and its Open link.
+  loan      String?
+  link      String?
   readAt    DateTime?
   createdAt DateTime  @default(now())
 

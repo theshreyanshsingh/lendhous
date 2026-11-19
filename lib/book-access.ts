@@ -1,6 +1,7 @@
 // Who sees what in the loan book, and who may do what to it. Everything an account receives or sends passes through here,
 // because the browser can't be trusted to hide a borrower's name or to ask only for what its screen offers.
 // No database code, so the rules can be tested on their own.
+import { holderWatch } from "./holder-view";
 import type { RoleCode } from "@prisma/client";
 import { emptyBook, serviceDay, type Book, type BookAction } from "./book";
 import { verifyProblem, wireProblem, wireVerified } from "./closing";
@@ -195,7 +196,7 @@ function scopeRecords(book: Book, viewer: Viewer): Book {
     const deals = book.deals.filter((deal) => deal.teaserSentTo.includes(me.id));
     // Someone else's accepted bid only says the deal is gone: no firm, no price.
     const taken = book.bids.filter((bid) => bid.partnerId !== me.id && bid.status === "accepted" && deals.some((deal) => deal.id === bid.dealId)).map((bid) => ({ ...bid, partnerId: "", pct: 0, lenderRate: 0, lenderPoints: 0, conditions: "" }));
-    return { ...empty, partnerId: me.id, partners: [ownRecord(me)], bids: [...mine, ...taken], deals: deals.map((deal) => (won.has(deal.id) ? { ...forHolder(deal), teaserSentTo: [me.id], contractorIsGtAffiliate: deal.contractorIsGtAffiliate, partnerFunding: deal.partnerFunding?.partnerId === me.id ? { ...deal.partnerFunding, sendTo: sendToFor(deal) } : undefined, ...ownMoves(deal, me.id) } : { ...blind(deal), teaserSentTo: [me.id] })) };
+    return { ...empty, partnerId: me.id, partners: [ownRecord(me)], bids: [...mine, ...taken], deals: deals.map((deal) => (won.has(deal.id) ? { ...forHolder(deal), holderWatch: holderWatch(deal, book), teaserSentTo: [me.id], contractorIsGtAffiliate: deal.contractorIsGtAffiliate, partnerFunding: deal.partnerFunding?.partnerId === me.id ? { ...deal.partnerFunding, sendTo: sendToFor(deal) } : undefined, ...ownMoves(deal, me.id) } : { ...blind(deal), teaserSentTo: [me.id] })) };
   }
 
   if (view === "buyer") {
@@ -212,7 +213,7 @@ function scopeRecords(book: Book, viewer: Viewer): Book {
     // leaves out what the tape still needs (extensions, modifications, insurance dates), and names no one.
     const day = serviceDay(book);
     const withTape = (sale: LoanSale): LoanSale => { const deal = book.deals.find((item) => item.id === sale.dealId); return deal ? { ...hideBuyer(sale), tape: tapeRow(deal, owned.has(deal.id) ? "full" : "blind", day, sale) } : hideBuyer(sale); };
-    return { ...empty, buyerId: me.id, buyers: [ownRecord(me)], offers, sales: sales.map(withTape), deals: deals.map((deal) => (owned.has(deal.id) ? forHolder(deal) : blind(deal))) };
+    return { ...empty, buyerId: me.id, buyers: [ownRecord(me)], offers, sales: sales.map(withTape), deals: deals.map((deal) => (owned.has(deal.id) ? { ...forHolder(deal), holderWatch: holderWatch(deal, book) } : blind(deal))) };
   }
   return empty;
 }
