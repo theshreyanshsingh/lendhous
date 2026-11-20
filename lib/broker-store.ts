@@ -11,7 +11,7 @@ import { servicingDate } from "@/lib/servicing";
 
 const CODE = /^[a-z2-9]{8}$/;
 
-export type Referral = { kind: "broker" | "borrower"; id: string; name: string };
+export type Referral = { kind: "broker" | "borrower"; id: string; name: string; brand?: NonNullable<import("./mockData").Broker["brand"]> };
 
 /**
  * Whose referral code this is: an approved brokerage, or a borrower whose loan has funded while the referral program is
@@ -22,7 +22,7 @@ export async function referralByCode(code: string | undefined | null): Promise<R
   if (!code || !CODE.test(code)) return null;
   const { book } = await readBook();
   const broker = book.brokers.find((item) => item.referralCode === code && item.status === "approved");
-  if (broker) return { kind: "broker", id: broker.id, name: broker.name };
+  if (broker) return { kind: "broker", id: broker.id, name: broker.name, ...(broker.brand ? { brand: broker.brand } : {}) };
   // Read fresh: the quote page and the request it sends must agree on whether the program is on.
   if (!(await freshSettings()).referralBonusCents) return null;
   const borrower = referrerByCode(book.deals, code);

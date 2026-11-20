@@ -95,7 +95,12 @@ export function DrawLienChecklist({ deal, draw, side }: { deal: Deal; draw: Draw
               {latest && <p className="text-xs text-muted-foreground">{fileLink(latest.fileName, latest.documentId, local)} · {shortDate(latest.sentAt)}{latest.checked ? ` · ${usd(latest.checked.amount, 2)}${latest.checked.throughOn ? ` through ${latest.checked.throughOn}` : ""}${latest.checked.conditional ? ", conditional on payment" : ""}` : ""}</p>}
               {latest?.rejected && <p className="text-xs text-warn">Sent back: {latest.rejected.reason}</p>}
               {side === "team" && latest && !latest.checked && !latest.rejected && <CheckWaiver draw={draw} waiver={latest} />}
-              {(!latest || latest.rejected) && <div className="mt-1"><Upload deal={deal} draw={draw} party={{ key: party.key, kind }} label={side === "team" ? "Upload it for them" : "Upload the waiver"} /></div>}
+              {(!latest || latest.rejected) && (
+                <div className="mt-1 flex flex-wrap items-center gap-3">
+                  <Upload deal={deal} draw={draw} party={{ key: party.key, kind }} label={side === "team" ? "Upload it for them" : "Upload the waiver"} />
+                  {!local && <a className="text-xs text-link underline" href={`/api/lien-waivers/${draw.id}?party=${encodeURIComponent(party.key)}`} data-testid="waiver-form">The {kind} waiver form, filled in (PDF)</a>}
+                </div>
+              )}
             </li>
           );
         })}

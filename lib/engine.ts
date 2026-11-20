@@ -47,6 +47,20 @@ export function qualifyingRent(app: Pick<Application, "rentalType" | "monthlyRen
   return round2(((app.strAnnualIncome ?? 0) * shortTermFactor(app, config)) / 12);
 }
 
+/**
+ * A rental purchase's taxes on its price (docs/competitor-gaps-2026-11-09.md, rank 22). A Florida home is reassessed when
+ * it sells, so a seller's bill held down by the homestead cap understates what the buyer will pay, and from February 1,
+ * 2027 listings show the taxes on the asking price (ch. 2026-239). Until the state publishes its formula, LendHous takes
+ * the whole price as the taxable value (PLACEHOLDER: conservative), at the millage the underwriter enters. Null without one.
+ */
+export const PURCHASE_TAX_RULES = { taxableShare: 1 };
+export function purchaseTaxes(app: Pick<Application, "product" | "purpose" | "purchasePrice" | "millage">) {
+  if (app.product !== "dscr" || app.purpose !== "purchase" || !app.millage || app.millage <= 0) return null;
+  return Math.round((app.purchasePrice * PURCHASE_TAX_RULES.taxableShare * app.millage) / 1000);
+}
+/** The taxes a rental is sized on: the bill as given, or the estimate on the price where that's higher. */
+export const taxesForDscr = (app: Pick<Application, "product" | "purpose" | "purchasePrice" | "millage" | "taxesAnnual">) => Math.max(app.taxesAnnual ?? 0, purchaseTaxes(app) ?? 0);
+
 export function dscr(i: { monthlyRent: number; payment: number; taxesAnnual: number; insuranceAnnual: number; hoaMonthly?: number; floodAnnual?: number }) {
   const pitia = i.payment + i.taxesAnnual / 12 + i.insuranceAnnual / 12 + (i.hoaMonthly ?? 0) + (i.floodAnnual ?? 0) / 12;
   return { pitia, dscr: i.monthlyRent / pitia };
@@ -245,6 +259,11 @@ export interface Application {
   /** Flood insurance a year, on a property in a special flood hazard area. Counted in the DSCR's monthly costs. */
   floodAnnual?: number;
   /**
+   * The county's total millage (dollars of tax per $1,000 of taxable value), from the tax collector. On a rental purchase
+   * it estimates the buyer's taxes on the price (purchaseTaxes), since the seller's bill may be capped by homestead.
+   */
+  millage?: number;
+  /**
    * How the rental is let: on a lease (the default), or by the night on Airbnb or VRBO. A short-term rental is sized on its
    * yearly income at a factor (qualifyingRent): the last 12 months of payouts, or a projection where there's no history yet.
    */
@@ -385,6 +404,8 @@ export function evaluate(app: Application, cfg: PricingConfig = pricingFor(app.p
       flags.push(`Short-term rental: ${Math.round(shortTermFactor(app, cfg) * 100)}% of the ${app.strIncomeSource === "projection" ? "projected" : "last 12 months'"} income counted, −${Math.round(rules.leverageCut * 100)}% leverage, +${rules.rateAdd}%`);
       if (!app.strAnnualIncome) hardStops.push("Short-term rental: enter its yearly income");
     }
+    const onPrice = purchaseTaxes(app);
+    if (onPrice !== null && onPrice > (app.taxesAnnual ?? 0)) flags.push(`Taxes on the price: $${onPrice.toLocaleString("en-US")} a year at ${app.millage} mills, above the $${Math.round(app.taxesAnnual ?? 0).toLocaleString("en-US")} bill; the DSCR uses the higher`);
     const rent = qualifyingRent(app, cfg);
     pointsPct = app.termPoints ?? repeatPoints(pick(pointsRange, pp));
     const row = d.ficoBands.findIndex((b) => app.fico >= b);
@@ -399,7 +420,7 @@ export function evaluate(app: Application, cfg: PricingConfig = pricingFor(app.p
         const cellRate = pick(d.baseRate, pp) + cell.rateAdd + rateAdd + smallLoanAdd(loan);
         const r = app.termRate ?? cellRate;
         const pay = d.qualifyOn === "io" ? ioPayment(loan, r) : amortizingPayment(loan, r, d.amortizationMonths);
-        const x = dscr({ monthlyRent: rent, payment: pay, taxesAnnual: app.taxesAnnual ?? 0, insuranceAnnual: app.insuranceAnnual ?? 0, hoaMonthly: app.hoaMonthly, floodAnnual: app.floodAnnual }).dscr;
+        const x = dscr({ monthlyRent: rent, payment: pay, taxesAnnual: taxesForDscr(app), insuranceAnnual: app.insuranceAnnual ?? 0, hoaMonthly: app.hoaMonthly, floodAnnual: app.floodAnnual }).dscr;
         if (x >= d.dscrBands[col] - 1e-9) { chosen = { col, loan, rate: r, matrixRate: cellRate, dscr: x, maxLTV: maxL }; break; }
       }
     }

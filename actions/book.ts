@@ -1,5 +1,6 @@
 "use server";
 
+import { attachmentProblem, VIDEO_TYPES } from "@/lib/draw-attachments";
 import { createHash, randomUUID } from "crypto";
 import { revalidatePath, revalidateTag } from "next/cache";
 import { after } from "next/server";
@@ -194,6 +195,11 @@ export async function uploadLoanFile(form: FormData): Promise<BookReply & { docu
     const refused = fileProblem(condition, viewFor(viewer.roleCodes) !== "admin");
     if (refused) return { error: refused };
   }
+  // A receipt or a short video for a draw being asked for (lib/draw-attachments.ts); any other file is a photo or a document.
+  const drawFile = String(form.get("drawFile") || "");
+  const drawFileKind = drawFile === "receipt" ? "draw_receipt" : drawFile === "video" ? "draw_video" : undefined;
+  if (drawFileKind) { const refused = attachmentProblem([{ name: file.name, size: file.size, kind: drawFile as "receipt" | "video" }]); if (refused) return { error: refused }; }
+  else if (VIDEO_TYPES.has(file.name.split(".").pop()?.toLowerCase() ?? "")) return { error: "A video goes with a draw request." };
   const bytes = Buffer.from(await file.arrayBuffer());
   const problem = uploadProblem(file.name, file.size, bytes);
   if (problem) return { error: problem };
@@ -203,9 +209,9 @@ export async function uploadLoanFile(form: FormData): Promise<BookReply & { docu
   const mime = mimeFor(ext, file.type);
   const fileKeyId = await putBytes(key, bytes);
   await prisma.document.create({
-    data: { id, ownerType: "LOAN", ownerId: dealId, documentType: docId || (renewal ? "insurance_renewal" : conditionId ? "condition" : lienDraw ? (affidavit ? "final_affidavit" : "lien_waiver") : "draw_photo"), originalName: encryptField(attachmentName(file.name), documentNameContext(id)), storageKey: key, fileKeyId, mime, size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex"), uploadedById: viewer.id },
+    data: { id, ownerType: "LOAN", ownerId: dealId, documentType: docId || (renewal ? "insurance_renewal" : conditionId ? "condition" : lienDraw ? (affidavit ? "final_affidavit" : "lien_waiver") : drawFileKind ?? "draw_photo"), originalName: encryptField(attachmentName(file.name), documentNameContext(id)), storageKey: key, fileKeyId, mime, size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex"), uploadedById: viewer.id },
   });
-  await audit({ actorId: viewer.id, action: "document.uploaded", entityType: "Document", entityId: id, after: { dealId, documentType: docId || (renewal ? "insurance_renewal" : conditionId ? "condition" : lienDraw ? (affidavit ? "final_affidavit" : "lien_waiver") : "draw_photo"), size: bytes.length } });
+  await audit({ actorId: viewer.id, action: "document.uploaded", entityType: "Document", entityId: id, after: { dealId, documentType: docId || (renewal ? "insurance_renewal" : conditionId ? "condition" : lienDraw ? (affidavit ? "final_affidavit" : "lien_waiver") : drawFileKind ?? "draw_photo"), size: bytes.length } });
   // A PDF's own record of how it was made, beside the loan's other fraud checks. It never stops an upload.
   const checked = ext === "pdf" ? await recordPdfCheck(viewer, dealId, bytes, { documentId: id, fileName: attachmentName(file.name), label: doc?.name ?? (renewal ? "Insurance renewal" : conditionId ? book.deals.find((item) => item.id === dealId)?.conditions?.find((item) => item.id === conditionId)?.title ?? "Condition" : lienDraw ? (affidavit ? "Contractor's final payment affidavit" : "Lien waiver") : "Loan file") }) : null;
   if (lienDraw) {

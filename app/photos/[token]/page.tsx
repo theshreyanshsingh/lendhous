@@ -1,6 +1,7 @@
 import { Logo } from "@/components/logo";
 import { PhotoGuide, type Claims } from "@/components/PhotoGuide";
 import type { DrawRequest } from "@/lib/mockData";
+import { drawStatusForContractor } from "@/lib/draw-payee";
 import { openPhotoLink } from "@/lib/photo-links";
 import { guideSteps, requestSteps } from "@/lib/photo-requests";
 
@@ -25,6 +26,7 @@ export default async function PhotoLinkPage({ params }: { params: Promise<{ toke
           <p className="eyebrow">Photos for LendHous</p>
           <h1 className="mt-3 text-3xl font-normal text-foreground">This link is no longer open.</h1>
           <p className="mt-3 text-sm text-muted-foreground">It may have expired or been replaced. Ask the person who sent it for a new one. Anything you already sent is safe.</p>
+          {link?.request.who === "contractor" && link.draw && <p className="mt-4 rounded-[2px] border border-border p-3 text-sm" data-testid="photo-link-draw-status">{drawStatusForContractor(link.draw)}</p>}
         </main>
       </div>
     );

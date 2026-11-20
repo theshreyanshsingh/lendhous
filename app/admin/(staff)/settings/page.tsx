@@ -62,6 +62,13 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           </label>
           <label className="block"><span className="label">Only for draws of this many dollars or more (blank for every draw)</span><input name="titleCheckMinDraw" data-testid="setting-title-check-min" type="number" min={0} max={1000000} step={1000} inputMode="numeric" className="desk-input w-40!" defaultValue={settings.titleCheckMinDrawCents / 100 || ""} placeholder="Every draw" /><small className="block text-xs text-muted-foreground">Title companies usually charge for each search, so a threshold saves the fee on small draws.</small></label>
         </fieldset>
+        <fieldset className="space-y-2" data-testid="setting-permit-holds">
+          <legend className="label">Building permits before draws</legend>
+          <label className="flex items-start gap-3 text-sm">
+            <input type="checkbox" name="permitHoldDraws" data-testid="setting-permit-holds-on" className="mt-1" defaultChecked={settings.permitHoldDraws !== false} />
+            <span><b className="font-medium">Hold a budget line&apos;s draw until its building permit is issued, and the last draw until every permit is finaled</b><small className="block text-xs text-muted-foreground">Roof, electrical, plumbing, HVAC, structural, window and door, and demolition lines are flagged. The team records each permit on the loan&apos;s Closing tab, or marks a line as needing none with why. An owner can still release a draw past the hold with a reason.</small></span>
+          </label>
+        </fieldset>
         <fieldset className="space-y-2" data-testid="setting-targets">
           <legend className="label">How long things may wait (PLACEHOLDER targets until you set them)</legend>
           <p className="text-xs text-muted-foreground">Business hours count 9 to 5 Eastern on weekdays, less Florida&apos;s state holidays; 8 of them is one business day. Items turn amber at three quarters of the way and red once past, and red ones go in the morning email.</p>

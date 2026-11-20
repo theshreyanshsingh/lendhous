@@ -22,6 +22,8 @@ const DEFAULTS: Omit<PlatformSettings, "updatedAt"> = {
   drawFeeDeskCents: 0,
   titleCheckDraws: null,
   titleCheckMinDrawCents: 0,
+  permitHoldDraws: null,
+  reportSchedules: null,
 };
 
 let cached: { at: number; value: Omit<PlatformSettings, "updatedAt"> } | null = null;

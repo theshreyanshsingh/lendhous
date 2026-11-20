@@ -10,13 +10,13 @@ import { pushMessage, pushReady, pushTo } from "./push";
 
 type Attachment = { filename: string; content: Buffer };
 
-async function deliver(transport: MailTransport, toEmail: string, subject: string, body: string, replyTo?: string, attachments: Attachment[] = []) {
+async function deliver(transport: MailTransport, toEmail: string, subject: string, body: string, replyTo?: string, attachments: Attachment[] = [], headers: Record<string, string> = {}) {
   const from = process.env.EMAIL_FROM || "Lendhous <team@localhost>";
   if (transport === "resend") {
     const response = await fetch("https://api.resend.com/emails", {
       method: "POST",
       headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ from, to: [toEmail], subject, text: body, ...(replyTo ? { reply_to: replyTo } : {}), ...(attachments.length ? { attachments: attachments.map((file) => ({ filename: file.filename, content: file.content.toString("base64") })) } : {}) }),
+      body: JSON.stringify({ from, to: [toEmail], subject, text: body, ...(Object.keys(headers).length ? { headers } : {}), ...(replyTo ? { reply_to: replyTo } : {}), ...(attachments.length ? { attachments: attachments.map((file) => ({ filename: file.filename, content: file.content.toString("base64") })) } : {}) }),
       signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) {
@@ -34,7 +34,7 @@ async function deliver(transport: MailTransport, toEmail: string, subject: strin
       secure: port === 465,
       auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASSWORD || "" } : undefined,
     });
-    await transporter.sendMail({ from, to: toEmail, subject, text: body, replyTo, attachments });
+    await transporter.sendMail({ from, to: toEmail, subject, text: body, replyTo, attachments, headers });
   }
 }
 
@@ -67,6 +67,14 @@ export async function notify(toEmail: string, subject: string, body: string, opt
 }
 
 /** The once-a-day email of held notices. Sent bare, like a password link, so the summary isn't saved as one more notice. */
+/** A campaign email (lib/campaigns.ts): not kept as a notice, with a one-click unsubscribe for mail apps (RFC 8058). */
+export async function sendCampaignEmail(toEmail: string, subject: string, body: string, unsubscribeUrl: string) {
+  const transport = deliverable(toEmail) ? resolveMailTransport() : "log";
+  if (transport === "log") console.info(`[lendhous-mail] campaign to=${toEmail} subject=${subject}`);
+  else await deliver(transport, toEmail, subject, body, undefined, [], { "List-Unsubscribe": `<${unsubscribeUrl}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" });
+  return transport;
+}
+
 export async function sendSummary(toEmail: string, subject: string, body: string) {
   const transport = deliverable(toEmail) ? resolveMailTransport() : "log";
   if (transport === "log") console.info(`[lendhous-mail] to=${toEmail} subject=${subject}\n${body}`);

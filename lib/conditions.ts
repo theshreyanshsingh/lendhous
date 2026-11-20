@@ -25,6 +25,8 @@ export const DEFAULT_LIBRARY: ConditionTemplate[] = [
   standard("std-title", "Title commitment reviewed", "The commitment's requirements are listed for closing and nothing on it stops the loan.", "prior_to_docs", "processor", false),
   standard("std-budget", "Scope of work and budget approved", "The rehab or construction budget is reviewed against the scope and the after-repair value.", "prior_to_docs", "underwriter", false, ["fix_flip", "ground_up"]),
   { ...standard("std-lease", "Leases or rent roll", "Signed leases for occupied units, or a rent roll with the market rent for vacant ones.", "prior_to_docs", "borrower", true, ["dscr"]), rental: "long_term" },
+  // Fla. Stat. 83.512 (ch. 2025-166): without it, a tenant whose belongings a flood badly damages can end the lease.
+  { ...standard("std-lease-flood", "Landlord's flood disclosure", "For each lease of a year or more, the separate flood disclosure the landlord gave the tenant at or before signing (Fla. Stat. 83.512): whether the landlord knows of flooding, filed a flood claim or got help for flood damage. Without it, a tenant can end the lease after a flood.", "prior_to_docs", "borrower", true, ["dscr"]), rental: "long_term" },
   // Short-term rentals in Florida (PLACEHOLDER until the attorney confirms): the state's vacation rental license, any local
   // registration, association rules that allow stays under 30 days, and income that supports the loan.
   { ...standard("std-str-income", "Short-term rental income supports the loan", "The payout statements for the last 12 months, or the projection for a property without them, support the income the loan was sized on.", "prior_to_docs", "underwriter", false, ["dscr"]), rental: "short_term" },

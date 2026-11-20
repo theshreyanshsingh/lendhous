@@ -2,18 +2,20 @@
 // each change, and each browser from its page, so a screen offers what the server will accept.
 import { setDrawFees } from "./draw-review";
 import { setNfipThrough } from "./florida-insurance";
+import { setPermitHolds } from "./permits";
 import { setTitleCheckRule, type TitleCheckRule } from "./title-updates";
 
-export type BookRules = { nfipThrough: string; drawFees: { inspector: number; desk: number }; titleCheck: TitleCheckRule };
+export type BookRules = { nfipThrough: string; drawFees: { inspector: number; desk: number }; titleCheck: TitleCheckRule; permits?: boolean };
 
 /** PLACEHOLDER fees for demo seats, so the photo review's price shows: an inspector's visit and a photo review. */
-export const DEMO_RULES: BookRules = { nfipThrough: "2026-12-11", drawFees: { inspector: 250, desk: 100 }, titleCheck: { on: true, minDraw: 0 } };
+export const DEMO_RULES: BookRules = { nfipThrough: "2026-12-11", drawFees: { inspector: 250, desk: 100 }, titleCheck: { on: true, minDraw: 0 }, permits: true };
 
-// A title search before draws is on unless an owner turned it off (unset counts as on).
-export const rulesFrom = (settings: { nfipAuthorizedThrough: string; drawFeeInspectionCents: number; drawFeeDeskCents: number; titleCheckDraws?: boolean | null; titleCheckMinDrawCents?: number }): BookRules => ({ nfipThrough: settings.nfipAuthorizedThrough, drawFees: { inspector: settings.drawFeeInspectionCents / 100, desk: settings.drawFeeDeskCents / 100 }, titleCheck: { on: settings.titleCheckDraws !== false, minDraw: (settings.titleCheckMinDrawCents ?? 0) / 100 } });
+// A title search before draws, and the permit holds, are on unless an owner turned them off (unset counts as on).
+export const rulesFrom = (settings: { nfipAuthorizedThrough: string; drawFeeInspectionCents: number; drawFeeDeskCents: number; titleCheckDraws?: boolean | null; titleCheckMinDrawCents?: number; permitHoldDraws?: boolean | null }): BookRules => ({ nfipThrough: settings.nfipAuthorizedThrough, drawFees: { inspector: settings.drawFeeInspectionCents / 100, desk: settings.drawFeeDeskCents / 100 }, titleCheck: { on: settings.titleCheckDraws !== false, minDraw: (settings.titleCheckMinDrawCents ?? 0) / 100 }, permits: settings.permitHoldDraws !== false });
 
 export function applyRules(rules: BookRules) {
   setNfipThrough(rules.nfipThrough);
   setDrawFees(rules.drawFees);
   setTitleCheckRule(rules.titleCheck ?? { on: false, minDraw: 0 });
+  setPermitHolds(rules.permits ?? false);
 }

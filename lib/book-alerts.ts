@@ -1,5 +1,6 @@
 // Who hears about what. Competitors' borrowers get told when their loan moves; so do these, and so does the team.
 // Only names the loan number and what happened: details stay behind sign-in.
+import { payeeEmail } from "./draw-payee";
 import { brokerMilestones } from "./broker-milestones";
 import { serviceDay, type Book, type BookAction } from "@/lib/book";
 import { notify, notifyTeam } from "@/lib/email";
@@ -380,8 +381,13 @@ function actionAlerts(before: Book, after: Book, action: BookAction): Alert[] {
     case "rejectDraw": case "releaseDraw": {
       const draw = after.draws.find((item) => item.id === action.drawId);
       if (!draw) return [];
+      // A contractor paid directly, or jointly with the borrower, hears the money went out: at the address its photo link went to.
+      const paidTo = action.t === "releaseDraw" && draw.payee && draw.payee !== "borrower" ? after.photoRequests.find((request) => request.drawId === draw.id && request.who === "contractor" && request.email) : undefined;
+      const property = loan(draw.dealId);
+      const contractorAlert: Alert[] = paidTo?.email && property ? [{ to: "email", email: paidTo.email, subject: `A draw was released: ${property.address}`, body: payeeEmail(draw, property, paidTo.to), event: "draw.released_to_contractor" }] : [];
       const calls = (after.deals.find((item) => item.id === draw.dealId)?.drawCalls ?? []).filter((call) => call.drawId === draw.id && !(before.deals.find((item) => item.id === draw.dealId)?.drawCalls ?? []).some((old) => old.id === call.id));
       return [
+        ...contractorAlert,
         ...calls.map((call): Alert => ({ to: "partner", firmId: call.partnerId, subject: `Your share of a draw: ${number(draw.dealId)}`, body: `LendHous released a draw of ${dollars(draw.approved ?? 0)} on ${number(draw.dealId)}. Your share is ${dollars(call.amount)}, due by ${longDate(call.dueOn)}. Where to send it is on your portfolio page; confirm it by phone before you first send money.`, event: "investor.draw_call" })),{ to: "borrower", dealId: draw.dealId, subject: `Update on your draw: ${number(draw.dealId)}`, body: action.t === "releaseDraw" ? `Your draw of $${(draw.approved ?? 0).toLocaleString("en-US")} was released.${draw.fee ? ` ${dollars(toSend(draw))} is on its way to you after the ${dollars(draw.fee)} ${draw.path === "desk" ? "photo review" : "inspection"} fee.` : ""}` : `Your draw wasn't approved: ${draw.reason}`, event: `draw.${action.t === "releaseDraw" ? "released" : "rejected"}` }];
     }
     case "recordPayment": {

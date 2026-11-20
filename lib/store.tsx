@@ -25,7 +25,7 @@ type Store = {
   /** A renewed insurance policy for the team to check. Demo seats keep the name only. */
   uploadRenewal: (dealId: string, renewal: { kind: PolicyKind; carrier: string; policy: string; expiresOn: string }, file: File) => Promise<boolean>;
   /** Stores one draw photo and gives back its id. Demo and sample data keep no file, so they get null. */
-  uploadPhoto: (dealId: string, file: File) => Promise<string | null>;
+  uploadPhoto: (dealId: string, file: File, drawFile?: "receipt" | "video") => Promise<string | null>;
   /** Takes in a reply from a server action that changed the book some other way, like starting a loan. */
   applyReply: (reply: { book?: Book; error?: string }) => void;
   /** Website briefs nobody has answered yet. They live outside the book. */
@@ -164,10 +164,11 @@ export function StoreProvider({ demo, accountId, viewerName, viewerEmail = "", i
     return !(await send(form)).error;
   }, [isLocal, send, viewerName]);
 
-  const uploadPhoto = useCallback(async (dealId: string, file: File) => {
+  const uploadPhoto = useCallback(async (dealId: string, file: File, drawFile?: "receipt" | "video") => {
     if (isLocal) return null;
     const form = new FormData();
     form.set("dealId", dealId); form.set("file", file);
+    if (drawFile) form.set("drawFile", drawFile);
     return (await send(form)).documentId ?? null;
   }, [isLocal, send]);
 

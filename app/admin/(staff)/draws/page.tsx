@@ -13,7 +13,9 @@ import { awaitingDecision, claimGap, decideBy } from "@/lib/draw-walk";
 import { photosSummary, reusedSummary } from "@/lib/photo-checks";
 import { PATH_LABEL, toSend } from "@/lib/draw-review";
 import { clockOf, floridaTime } from "@/lib/sla";
-import type { Deal, DrawRequest } from "@/lib/mockData";
+import type { Deal, DrawPayee, DrawRequest } from "@/lib/mockData";
+import { PAYEES, payeeWords } from "@/lib/draw-payee";
+import { attachmentSummary } from "@/lib/draw-attachments";
 import { unreleasedHolds } from "@/lib/lien-law";
 import { ofacBlocker } from "@/lib/ofac";
 import { useStore } from "@/lib/store";
@@ -38,7 +40,7 @@ export default function Draws() {
       {closed.length > 0 && (
         <Section title={`Finished (${closed.length})`}>
           <ul className="divide-y divide-border">
-            {closed.map((draw) => <li key={draw.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm" data-testid="closed-draw"><span className="min-w-0">{dealOf(draw).loanNumber} · {draw.status === "funded" ? usd(draw.approved ?? 0) : usd(drawTotal(draw))}{draw.reason ? ` · ${draw.reason}` : ""}</span><Badge tone={DRAW_STATUS[draw.status].tone}>{DRAW_STATUS[draw.status].label}</Badge></li>)}
+            {closed.map((draw) => <li key={draw.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm" data-testid="closed-draw"><span className="min-w-0">{dealOf(draw).loanNumber} · {draw.status === "funded" ? usd(draw.approved ?? 0) : usd(drawTotal(draw))}{draw.reason ? ` · ${draw.reason}` : ""}{draw.status === "funded" && draw.payee ? <span className="text-muted-foreground" data-testid="draw-paid-to"> · paid to {payeeWords(draw.payee, dealOf(draw).lienFile?.contractor)}</span> : null}</span><Badge tone={DRAW_STATUS[draw.status].tone}>{DRAW_STATUS[draw.status].label}</Badge></li>)}
           </ul>
         </Section>
       )}
@@ -64,6 +66,7 @@ function DrawCard({ draw, deal }: { draw: DrawRequest; deal: Deal }) {
   const desk = draw.path === "desk" && draw.status === "submitted";
   const reading = draw.status === "inspecting" || desk;
   const [why, setWhy] = useState("");
+  const [payee, setPayee] = useState<DrawPayee>("borrower");
   const reused = reusedSummary(s, linePhotos);
   const review = reviewDraw(deal, draw);
   const needed = approversNeeded(deal, review.approved);
@@ -112,6 +115,19 @@ function DrawCard({ draw, deal }: { draw: DrawRequest; deal: Deal }) {
           </ul>
         </div>
       )}
+      {draw.attachments?.length ? (
+        <div className="mt-2 space-y-1 text-xs" data-testid="draw-attachments">
+          <p className="text-muted-foreground">{attachmentSummary(draw.attachments)}</p>
+          <ul className="flex flex-wrap gap-3">
+            {draw.attachments.map((item) => (
+              <li key={item.id} className="min-w-0" data-testid={`draw-attachment-${item.kind}`}>
+                {item.documentId && item.kind === "video" && <video className="mb-1 max-h-40 max-w-full rounded-[2px] border border-border" controls preload="metadata" src={`/api/documents/${item.documentId}?view=1`} />}
+                {item.documentId ? <a className="text-link underline underline-offset-2" href={`/api/documents/${item.documentId}`}>{item.kind === "video" ? "Video" : "Receipt"}: {item.name}</a> : <span>{item.kind === "video" ? "Video" : "Receipt"}: {item.name}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       <table className="stack-table mt-3 w-full">
         <thead><tr className="border-b border-rule"><th>Budget line</th><th className="text-right">Budget</th><th className="text-right">Released</th><th className="text-right">Requested</th><th className="text-right">Borrower says</th><th className="text-right">Work finished</th><th className="text-right">Supported</th></tr></thead>
         <tbody>
@@ -154,7 +170,14 @@ function DrawCard({ draw, deal }: { draw: DrawRequest; deal: Deal }) {
         {((draw.status === "submitted" && !desk) || (draw.status === "inspected" && fresh)) && <button className="btn-primary" data-testid="send-inspector" onClick={() => dispatch({ t: "sendInspector", drawId: draw.id })}>{draw.status === "inspected" ? "Order a fresh inspection" : "Order inspection"}</button>}
         {draw.status === "inspecting" && <button className="btn-primary" data-testid="record-inspection" disabled={draw.lines.some((line) => observed[line.scopeId] === undefined)} onClick={() => dispatch({ t: "recordInspection", drawId: draw.id, observed: Object.fromEntries(Object.entries(observed).map(([id, percent]) => [id, Math.min(100, Math.max(0, percent)) / 100])) })}>Record inspection</button>}
         {draw.status === "inspected" && <button className="btn-primary" data-testid="approve-draw" disabled={Boolean(refusal)} onClick={() => dispatch({ t: "approveDrawRequest", drawId: draw.id, by: viewerName })}>Approve</button>}
-        {draw.status === "approved" && <button className="btn-primary" data-testid="release-draw" disabled={Boolean(sanctions) || holds.length > 0} onClick={() => dispatch({ t: "releaseDraw", drawId: draw.id })}>Release funds</button>}
+        {draw.status === "approved" && (
+          <label className="flex items-center gap-2 text-xs"><span className="text-muted-foreground">Pay to</span>
+            <select className="desk-input h-9! w-auto! py-0! text-xs!" data-testid="draw-payee" value={payee} onChange={(event) => setPayee(event.target.value as DrawPayee)}>
+              {(Object.entries(PAYEES) as [DrawPayee, string][]).map(([key, label]) => <option key={key} value={key} disabled={key !== "borrower" && !deal.lienFile?.contractor}>{label}{key !== "borrower" && deal.lienFile?.contractor ? ` (${deal.lienFile.contractor})` : ""}</option>)}
+            </select>
+          </label>
+        )}
+        {draw.status === "approved" && <button className="btn-primary" data-testid="release-draw" disabled={Boolean(sanctions) || holds.length > 0} onClick={() => dispatch({ t: "releaseDraw", drawId: draw.id, ...(payee !== "borrower" ? { payee } : {}) })}>Release funds</button>}
         {draw.status === "approved" && !sanctions && holds.length > 0 && <span className="text-xs text-warn" data-testid="release-held">Held: {holds.length} lien-law or insurance item{holds.length === 1 ? "" : "s"} above.</span>}
         {draw.status === "approved" && sanctions && <span className="text-xs text-bad" data-testid="release-blocked">{sanctions}. <Link href={`/admin/deals/${deal.id}`} className="underline">Screen on the loan&apos;s Credit review tab</Link>.</span>}
         {draw.status !== "approved" && (

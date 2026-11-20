@@ -106,6 +106,8 @@ model User {
   phone            String        @default("")
   title            String?
   // Per-person changes to what the roles allow, set on the members page (lib/permissions.ts `can`).
+  // When the person used a campaign's unsubscribe link (lib/unsubscribe.ts). Loan notices still come.
+  marketingOptOut  DateTime?
   extraPermissions  String[]
   deniedPermissions String[]
   accountStatus    AccountStatus @default(PENDING)
@@ -356,6 +358,10 @@ model PlatformSettings {
   // titleCheckMinDrawCents (0 is every draw).
   titleCheckDraws               Boolean?
   titleCheckMinDrawCents        Int      @default(0)
+  // Draws held for building permits on the lines that need them (lib/permits.ts): on unless false.
+  permitHoldDraws               Boolean?
+  // Reports emailed on a schedule (lib/scheduled-reports.ts): each one's report, when, and the accounts it goes to.
+  reportSchedules               Json?
   updatedAt                     DateTime @updatedAt
 }
 
@@ -405,6 +411,28 @@ model Lead {
 
 // A call a visitor booked from the site's /book page (lib/calls.ts). One per half hour. Name, email, phone and notes are
 // encrypted like a lead's.
+// A security incident and its breach notices (lib/breach.ts, Fla. Stat. 501.171). The whole record is encrypted in data,
+// bound to its id; closed is kept in the clear only to list open ones first.
+model SecurityIncident {
+  id        String   @id @default(uuid()) @map("_id")
+  data      String
+  closed    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// A marketing email sent to an audience (lib/campaigns.ts): what it said, to whom, and how many it reached.
+model Campaign {
+  id         String   @id @default(uuid()) @map("_id")
+  audience   String
+  subject    String
+  body       String
+  sentBy     String
+  recipients Int      @default(0)
+  skipped    Int      @default(0)
+  createdAt  DateTime @default(now())
+}
+
 model CallBooking {
   id        String   @id @default(uuid()) @map("_id")
   startsAt  DateTime @unique

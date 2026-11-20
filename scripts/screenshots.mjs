@@ -590,6 +590,11 @@ const [capitalFile] = await Promise.all([page.waitForEvent("download"), page.get
 const capitalCsv = fs.readFileSync(await capitalFile.path(), "utf8");
 ok("the partner downloads its capital account: committed, received, paid back and rolled, per loan", capitalCsv.split("\r\n")[0].startsWith("Loan,Program,Your share,Status,Committed,Called for draws,Received by LendHous,Paid to you") && capitalCsv.includes("LH-DEMO-1011,Bridge,50%,Current,232500,0,232500,3584.38"));
 await shot(page, "07b-partner-portfolio.png");
+// The track record under the NDA (rank 17): the whole book in totals, honest that it's only a few loans so far.
+await page.goto(BASE + "/admin/partner/track-record");
+ok("the partner reads LendHous's track record: every funded loan, in totals", (await seen(page.getByTestId("track-record"))) && (await page.getByTestId("track-funded").innerText()).includes("8") && (await page.getByTestId("track-yield").innerText()).includes("None ended yet"));
+ok("and is told plainly it's too few loans to read much into", (await page.getByTestId("track-small").innerText()).includes("fewer than 10") && !(await page.locator("main").innerText()).includes("LH-DEMO"));
+await shot(page, "07c-partner-track-record.png");
 await page.goto(BASE + "/admin/account/tax");
 ok("a partner has a tax form page (a sample on demo seats)", await seen(page.getByTestId("tax-demo")));
 await page.goto(BASE + "/admin/partner/teasers/d11");
@@ -858,6 +863,8 @@ await page.getByTestId("draw-shots").waitFor();
 await shot(page, "17a-borrower-draw-line.png");
 await page.getByTestId("draw-next").click();
 ok("a draw needs a contact and a certification", await page.getByTestId("submit-draw").isDisabled());
+await page.getByTestId("draw-receipts").setInputFiles({ name: "pipe-receipt.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 sample") });
+ok("the borrower can add receipts and a short video to the draw", (await seen(page.getByTestId("draw-extras-list").getByText("pipe-receipt.pdf"))) && (await page.getByTestId("draw-video").count()) === 1);
 ok("and sums up each line before it's sent", (await page.getByTestId("draw-summary-lines").innerText()).includes("60% done") && (await page.getByTestId("draw-summary-lines").innerText()).includes("90% done"));
 await page.getByTestId("draw-note").fill("Rough plumbing is finished.");
 await page.getByTestId("draw-contact").fill("Alex Sample, (555) 010-0100");
@@ -1431,6 +1438,16 @@ await actAs(SEATS.staff);
 // 10. Broker seat: their own deals and fees, and a new deal for a client
 await signIn(page, SEATS.broker);
 ok("the broker seat lands on its deals", pathOf(page) === "/admin/broker");
+// The broker kit (rank 25): the short course, and the program sheet from today's rates.
+const lesson = page.getByTestId("broker-lesson").first();
+await lesson.locator("button").first().click();
+await page.getByTestId("lesson-lending-1").check();
+await page.getByTestId("lesson-lending-answer").click();
+ok("the broker takes LendHous's short course and passes a lesson", (await seen(page.getByTestId("broker-course"))) && (await lesson.getByTestId("broker-lesson-state").innerText()) === "Passed");
+await page.goto(BASE + "/broker-sheet");
+ok("the broker prints a program sheet from today's rates, with its referral link", (await seen(page.getByTestId("program-sheet"))) && (await page.getByTestId("sheet-grid-dscr").count()) === 1 && (await page.getByTestId("program-sheet-link").innerText()).includes("/start?ref=demobrkr"));
+await shot(page, "30d-broker-program-sheet.png");
+await page.goto(BASE + "/admin/broker");
 await seen(page.getByTestId("broker-deal").first());
 ok("the broker sees only their own deals", (await page.getByTestId("broker-deal").count()) === 3 && !(await page.locator("main").innerText()).includes("LH-DEMO-1001"));
 ok("funding a loan earns the broker's fee", (await page.getByTestId("fees-earned").innerText()) !== "$0");
@@ -1714,6 +1731,67 @@ ok("the deal goes in, marked as waiting on the client's details", (await seen(fi
 await fillsDeal.click();
 ok("and its page says where the client's details stand", await seen(page.getByTestId("client-details")));
 await actAs(SEATS.staff);
+
+// Wind mitigation, flood history and permits on a loan's Closing tab (ranks 15 and 18).
+await page.goto(BASE + "/admin/deals/d2?tab=Closing");
+const roofLine = page.getByTestId("permit-line").filter({ hasText: "Roof and exterior" });
+ok("the loan's roof line is flagged as needing a permit, with none on file", (await seen(page.getByTestId("permits-panel"))) && (await roofLine.getByTestId("permit-line-state").innerText()) === "No permit on file" && (await page.getByTestId("permit-line").filter({ hasText: "Kitchen" }).count()) === 0);
+await roofLine.getByTestId("permit-add-for-line").click();
+await page.getByTestId("permit-number").fill("BLD-26-0099 (FAKE)");
+await page.getByTestId("permit-jurisdiction").fill("City of Fort Lauderdale");
+await page.getByTestId("permit-issued").fill("2026-10-01");
+await page.getByTestId("permit-save").click();
+ok("staff record the roofing permit, and the line shows it issued", (await seen(page.getByTestId("permit-row").filter({ hasText: "BLD-26-0099 (FAKE)" }))) && (await roofLine.getByTestId("permit-line-state").innerText()) === "Issued");
+await page.getByTestId("edit-mitigation").first().click();
+await page.getByTestId("mitigation-date").fill("2025-04-01");
+await page.getByTestId("mitigation-inspector").fill("Sample Inspections (FAKE), HI0001");
+await page.getByTestId("mitigation-shape").selectOption("hip");
+await page.getByTestId("mitigation-swr").check();
+await page.getByTestId("save-mitigation").click();
+ok("staff record the wind mitigation form, and its credits show", (await seen(page.getByTestId("mitigation-credits"))) && (await page.getByTestId("mitigation-credits").first().innerText()).includes("Hip roof"));
+await page.getByTestId("edit-seller-flood").first().click();
+await page.getByTestId("seller-flood-given").selectOption("yes");
+await page.getByTestId("seller-flood-flooding").selectOption("yes");
+await page.getByTestId("seller-flood-claim").selectOption("no");
+await page.getByTestId("seller-flood-assistance").selectOption("no");
+await page.getByTestId("save-seller-flood").click();
+ok("the seller's flood disclosure is recorded, and a yes is flagged", (await seen(page.getByTestId("seller-flood-flags"))) && (await page.getByTestId("seller-flood-flags").first().innerText()).includes("knows of flooding"));
+await shot(page, "22a-permits-and-wind.png");
+// A rental's leases and tenants (rank 26).
+await page.goto(BASE + "/admin/deals/d10?tab=Score%20%26%20Flags");
+ok("a rental's leases and tenants wait for review", (await seen(page.getByTestId("lease-review-form"))) && (await page.getByTestId("lease-notes").innerText()).includes("haven't been reviewed"));
+await page.getByTestId("lease-flag-cash_rent").check();
+await page.getByTestId("lease-note").fill("Two months' rent shows as cash deposits only.");
+await page.getByTestId("lease-review-save").click();
+ok("the processor's red flag is kept, with what it means for the rent", (await seen(page.getByTestId("lease-review-summary"))) && (await page.getByTestId("lease-notes").innerText()).includes("1 red flag"));
+// Reports by email and the track record on Reports (ranks 23 and 17), security incidents (rank 19), and the permit setting.
+await page.goto(BASE + "/admin/reports");
+ok("Reports shows the track record partners see", (await seen(page.getByTestId("staff-track-record"))) && (await page.getByTestId("staff-track-record").getByTestId("track-by-program").count()) === 1);
+const lateFile = await page.request.get(BASE + "/api/reports/scheduled/delinquency");
+ok("the delinquency report downloads with the late loan on it", lateFile.ok() && (await lateFile.text()).includes("LH-DEMO-1013") && lateFile.headers()["content-disposition"].includes("lendhous-delinquency-"));
+ok("and a demo seat is told schedules are for real accounts", await seen(page.getByTestId("report-schedule-demo")));
+await shot(page, "22b-reports-by-email.png");
+await page.goto(BASE + "/admin/incidents");
+ok("an owner has a security incidents page, empty so far", (await seen(page.getByTestId("incidents-empty"))) && (await page.getByRole("link", { name: "Security incidents" }).count()) >= 1);
+await page.goto(BASE + "/admin/settings");
+ok("permit holds on draws are on by default in Settings", await page.getByTestId("setting-permit-holds-on").isChecked());
+// The budget check before closing (rank 20) and a rental purchase's taxes on its price (rank 22).
+await page.goto(BASE + "/admin/deals/d1?tab=Score%20%26%20Flags");
+ok("a rehab's budget is checked against LendHous's own loans in the county", (await seen(page.getByTestId("budget-check"))) && (await page.getByTestId("budget-spread").innerText()).includes("Broward County") && (await page.getByTestId("budget-lines").count()) === 1);
+await page.goto(BASE + "/admin/deals/d4?tab=Numbers%20%26%20Ratios");
+await page.getByTestId("uw-millage").fill("20");
+await page.getByTestId("uw-millage").blur();
+ok("a rental purchase's taxes on its price are set beside the seller's bill, and the higher is used", await seen(page.getByTestId("purchase-taxes-line").getByText(/^On the \$[\d,]+ price: \$[\d,]+ a year, above the \$[\d,]+ bill\. The DSCR uses/)));
+await shot(page, "22c-taxes-on-price.png");
+// The files partners open, logged on Partners & buyers (rank 24).
+await page.goto(BASE + "/admin/partners");
+ok("Partners & buyers has the file log, kept for real accounts", await seen(page.getByTestId("file-opens-demo")));
+// Email campaigns (rank 29): written from today's rates or as a note to past borrowers; demo seats don't send.
+await page.goto(BASE + "/admin/campaigns");
+ok("an owner writes a campaign to brokers from today's rates", (await seen(page.getByTestId("campaign-composer"))) && (await page.getByTestId("campaign-subject").inputValue()) === "LendHous rates this week" && (await page.getByTestId("campaign-body").inputValue()).includes("Fix & flip"));
+await page.getByTestId("campaign-start-past").click();
+await page.waitForURL("**/admin/campaigns?start=past");
+ok("or a note to past borrowers, and a demo seat is told it doesn't send", (await seen(page.getByTestId("campaign-demo"))) && (await page.getByTestId("campaign-subject").inputValue().then(async (value) => value === "Your next project with LendHous" || (await page.waitForFunction(() => document.querySelector('[data-testid="campaign-subject"]')?.value === "Your next project with LendHous", null, { timeout: 5000 }).then(() => true, () => false)))));
 
 // 11. Real records: the audit log, notifications, and a forgotten password
 await page.goto(BASE + "/admin/audit");

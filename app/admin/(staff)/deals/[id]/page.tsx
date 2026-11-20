@@ -35,6 +35,11 @@ import { InvestorUpdates } from "@/components/loan/InvestorUpdates";
 import { RiskChecks } from "@/components/loan/RiskChecks";
 import { PropertyTaxes } from "@/components/loan/PropertyTaxes";
 import { CondoBuilding } from "@/components/loan/CondoBuilding";
+import { PermitsPanel } from "@/components/loan/PermitsPanel";
+import { LeaseAndTenants, ReoOccupancyCard } from "@/components/loan/Occupancy";
+import { BudgetCheck } from "@/components/loan/BudgetCheck";
+import { PurchaseTaxes } from "@/components/loan/PurchaseTaxes";
+import { leaseReviewApplies } from "@/lib/occupancy";
 import { Sb264Panel } from "@/components/loan/Sb264Panel";
 import { ShareTransfers } from "@/components/loan/ShareTransfers";
 import { PropertySchedule } from "@/components/loan/PropertySchedule";
@@ -195,7 +200,9 @@ export default function DealWorkspace() {
                   {num("strAnnualIncome", uwApp.strIncomeSource === "projection" ? "Projected income / yr" : "Payouts, last 12 months")}
                   <p className="text-[11px] text-faint" data-testid="uw-str-rent">Counted at {Math.round(shortTermFactor(uwApp, pricingConfig) * 100)}%: {usd(qualifyingRent(uwApp, pricingConfig))} a month for the DSCR.</p>
                 </> : num("monthlyRent", "Qualifying rent / mo")}
-                {num("taxesAnnual", "Taxes / yr")}{num("insuranceAnnual", "Insurance / yr")}{num("floodAnnual", "Flood insurance / yr")}
+                {num("taxesAnnual", "Taxes / yr")}
+                {uwApp.purpose === "purchase" && <PurchaseTaxes app={uwApp} onMillage={(millage) => setOv({ ...ov, millage })} />}
+                {num("insuranceAnnual", "Insurance / yr")}{num("floodAnnual", "Flood insurance / yr")}
               </>}
               {num("fico", "FICO (pulled)")}{num("verifiedDeals", "Verified deals (36 mo)")}{num("liquidity", "Verified liquidity")}
               <p className="text-[11px] text-faint">{locked ? "Edits are a live what-if. These numbers are locked once a loan clears to close." : "Edits are a live what-if until you save them."}</p>
@@ -250,6 +257,8 @@ export default function DealWorkspace() {
             {e.hardStops.length + e.flags.length === 0 ? <p className="text-sm text-good">No flags.</p> : <ul className="space-y-1 text-sm">{e.hardStops.map((h) => <li key={h} className="rounded-md bg-bad/10 px-2 py-1 text-bad">⛔ {h}</li>)}{e.flags.map((f) => <li key={f} className="rounded-md bg-warn/12 px-2 py-1 text-warn">⚠ {f}</li>)}</ul>}
           </Section>
           {d.app.propertyType === "condo" && <div className="md:col-span-2"><CondoBuilding deal={d} /></div>}
+          {leaseReviewApplies(d) && <div className="md:col-span-2"><LeaseAndTenants deal={d} /></div>}
+          {(d.app.product === "fix_flip" || d.app.product === "ground_up") && d.scope?.length ? <div className="md:col-span-2"><BudgetCheck deal={d} /></div> : null}
           <div className="md:col-span-2"><RiskChecks deal={d} /></div>
         </div>
       )}
@@ -308,9 +317,9 @@ export default function DealWorkspace() {
       {tab === "Term sheet" && <TermSheetBuilder deal={d} />}
       {tab === "Conditions" && <ConditionsPanel deal={d} />}
       {tab === "Credit review" && <div className="space-y-4"><ApplicationRecord deal={d} /><ApplicationOnFile deal={d} /><OfacPanel deal={d} /><Sb264Panel deal={d} /><CreditReview deal={d} /></div>}
-      {tab === "Closing" && <div className="space-y-4"><ClosingPanel deal={d} />{INSURED.includes(d.status) && <InsurancePanel deal={d} />}{(d.app.product === "fix_flip" || d.app.product === "ground_up" || d.lienFile) && <LienProtection deal={d} />}<OfacPanel deal={d} /></div>}
+      {tab === "Closing" && <div className="space-y-4"><ClosingPanel deal={d} />{INSURED.includes(d.status) && <InsurancePanel deal={d} />}{(d.app.product === "fix_flip" || d.app.product === "ground_up" || d.lienFile) && <LienProtection deal={d} />}{d.scope?.length ? <PermitsPanel deal={d} /> : null}<OfacPanel deal={d} /></div>}
       {tab === "Servicing" && (SERVICED.includes(d.status) || d.status === "paid_off") && <LoanLedger deal={d} />}
-      {tab === "Servicing" && d.status === "reo" && <div className="space-y-4"><ForeclosurePanel deal={d} /><CollectionsPanel deal={d} /></div>}
+      {tab === "Servicing" && d.status === "reo" && <div className="space-y-4"><ForeclosurePanel deal={d} /><ReoOccupancyCard deal={d} /><CollectionsPanel deal={d} /></div>}
       {tab === "Servicing" && SERVICED.includes(d.status) && d.properties?.length ? <ReleaseProperty deal={d} /> : null}
       {tab === "Servicing" && SERVICED.includes(d.status) && <BudgetControls deal={d} side="team" />}
       {tab === "Servicing" && (SERVICED.includes(d.status) || d.status === "paid_off" || d.status === "reo") && <InvestorUpdates deal={d} />}

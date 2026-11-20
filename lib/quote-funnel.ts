@@ -56,8 +56,8 @@ export function quoteFunnel(counts: FunnelCount[], leads: FunnelLead[], book: Pi
 export const share = (part: number, whole: number) => (whole > 0 ? `${Math.round((part / whole) * 100)}%` : "—");
 
 /** The widget's address on LendHous's site, with the broker's code or the site it sits on. */
-export function embedPath(options: { ref?: string; site?: string } = {}) {
-  const query = [refOf(options.ref) && `ref=${refOf(options.ref)}`, siteSlug(options.site) && `site=${siteSlug(options.site)}`].filter(Boolean).join("&");
+export function embedPath(options: { ref?: string; site?: string; brand?: boolean } = {}) {
+  const query = [refOf(options.ref) && `ref=${refOf(options.ref)}`, siteSlug(options.site) && `site=${siteSlug(options.site)}`, options.brand && refOf(options.ref) && "brand=1"].filter(Boolean).join("&");
   return `/embed/quote${query ? `?${query}` : ""}`;
 }
 
@@ -65,7 +65,7 @@ export function embedPath(options: { ref?: string; site?: string } = {}) {
  * What a site pastes to show the quote: the frame, and a few lines that let it grow with the form instead of scrolling.
  * The height messages are only taken from LendHous's own origin.
  */
-export function embedSnippet(origin: string, options: { ref?: string; site?: string } = {}) {
+export function embedSnippet(origin: string, options: { ref?: string; site?: string; brand?: boolean } = {}) {
   const src = `${origin}${embedPath(options)}`;
   return [
     `<iframe src="${src}" title="LendHous loan quote" style="width:100%;height:1500px;border:0" loading="lazy"></iframe>`,

@@ -6,6 +6,7 @@
 // affidavit (713.06(3)(d)). No policy on the building, or any lapsed policy (lib/insurance.ts), stops draws too, and so does a title
 // search since recording that isn't back clean, where Settings asks for one (lib/title-updates.ts). An owner can release past these
 // holds with a reason. The reducer, the access rules and the screens all ask these, so they can't disagree.
+import { permitHolds } from "./permits";
 import { freshInspectionNeeded } from "./storms";
 import { insuranceHold } from "./insurance";
 import { titleUpdateHold } from "./title-updates";
@@ -68,6 +69,8 @@ export function drawHolds(deal: Deal, draw: DrawRequest, today: string) {
   if (title) holds.push(title);
   if (!deal.lienFile?.contractor) holds.push("The contractor isn't on file, so its lien waiver can't be checked.");
   const kind = isFinalDraw(deal, draw) ? "final" : "progress";
+  // A line that needs a building permit has one issued before its draw, and every permit is finaled before the last (lib/permits.ts).
+  holds.push(...permitHolds(deal, draw, kind === "final", today));
   for (const party of partiesFor(deal.lienFile, today)) if (!waiverFrom(draw, party.key, kind)) holds.push(`${party.name}'s ${kind} lien waiver (Fla. Stat. 713.20) isn't checked yet.`);
   if (kind === "final") {
     if (!draw.affidavit?.checked) holds.push("The contractor's final payment affidavit (713.06(3)(d)) isn't checked yet.");

@@ -6,7 +6,14 @@ const JPEG = (bytes: Buffer) => bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[
 const WEBP = (bytes: Buffer) => bytes.subarray(0, 4).toString("latin1") === "RIFF" && bytes.subarray(8, 12).toString("latin1") === "WEBP";
 const HEIC = (bytes: Buffer) => bytes.subarray(4, 8).toString("latin1") === "ftyp" && /^(heic|heix|hevc|hevx|heim|heis|mif1|msf1)$/.test(bytes.subarray(8, 12).toString("latin1"));
 
+// MP4 and QuickTime both start with an "ftyp" box; WebM is Matroska.
+const MP4 = (bytes: Buffer) => bytes.subarray(4, 8).toString("latin1") === "ftyp" && !HEIC(bytes);
+const WEBM = (bytes: Buffer) => bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3;
+
 const MAGIC: Record<string, (bytes: Buffer) => boolean> = {
+  mp4: MP4,
+  mov: MP4,
+  webm: WEBM,
   pdf: PDF,
   png: PNG,
   jpg: JPEG,
@@ -41,7 +48,7 @@ export function photoProblem(name: string, size: number, bytes: Buffer) {
 }
 
 // Browsers can show these safely. Anything else, HEIC included, downloads instead.
-const SHOWN_INLINE = new Set(["image/jpeg", "image/png", "image/webp"]);
+const SHOWN_INLINE = new Set(["image/jpeg", "image/png", "image/webp", "video/mp4", "video/quicktime", "video/webm"]);
 
 /** Headers for sending a stored file back. Inline only ever applies to plain pictures. */
 export function fileHeaders(mime: string, name: string, inline = false): Record<string, string> {
@@ -53,4 +60,13 @@ export function fileHeaders(mime: string, name: string, inline = false): Record<
     "X-Content-Type-Options": "nosniff",
     "Content-Security-Policy": "default-src 'none'; sandbox",
   };
+}
+
+/** A "bytes=start-end" request header as a range within the file, or null for the whole file. */
+export function byteRange(header: string | null, size: number) {
+  const match = header?.match(/^bytes=(\d*)-(\d*)$/);
+  if (!match || (!match[1] && !match[2]) || size === 0) return null;
+  const start = match[1] ? Number(match[1]) : Math.max(0, size - Number(match[2]));
+  const end = match[1] && match[2] ? Math.min(size - 1, Number(match[2])) : size - 1;
+  return start <= end && start < size ? { start, end } : null;
 }

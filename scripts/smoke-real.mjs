@@ -26,7 +26,8 @@ const wipe = async () => {
   await prisma.document.deleteMany({ where: { ownerType: { in: ["LOAN", "LEAD", "BROKER"] } } });
   await prisma.lead.deleteMany();
   await prisma.quoteCount.deleteMany();
-  await prisma.platformSettings.updateMany({ data: { slaTargets: null, paymentInstructions: "" } });
+  await prisma.platformSettings.updateMany({ data: { slaTargets: null, paymentInstructions: "", reportSchedules: null } });
+  await prisma.securityIncident.deleteMany();
   await prisma.pricingVersion.deleteMany();
   await prisma.sanctionsList.deleteMany();
   await prisma.photoLink.deleteMany();
@@ -916,6 +917,11 @@ try {
   await go(borrower, `/admin/borrower/${dealId}`);
   const lienParties = borrower.getByTestId("lien-party");
   ok("the borrower sees the waivers this draw needs", (await seen(borrower.getByTestId("draw-lien"))) && (await lienParties.count()) === 2);
+  // Each one on Florida's statutory form, filled in (rank 21).
+  const formHref = await lienParties.nth(0).getByTestId("waiver-form").getAttribute("href");
+  const formReply = await borrower.request.get(BASE + formHref);
+  ok("the borrower gets the contractor's waiver on the statutory form, filled in", formReply.status() === 200 && formReply.headers()["content-type"] === "application/pdf" && (await formReply.body()).subarray(0, 5).toString() === "%PDF-");
+  ok("another borrower can't", (await other.request.get(BASE + formHref)).status() === 404);
   for (const [index, name] of [[0, "contractor-waiver.pdf"], [1, "supplier-waiver.pdf"]]) {
     const chooser = borrower.waitForEvent("filechooser");
     await lienParties.nth(index).getByTestId("lien-upload").click();
@@ -965,8 +971,10 @@ try {
   ok("once the lien is released, title's clean search frees the draw", (await seen(card.getByTestId("title-search-result"))) && (await card.getByTestId("title-search-result").innerText()).includes("Nothing new recorded") && (await prisma.document.count({ where: { documentType: "title_update" } })) === 1);
   await searchContext.close();
   ok("the team checks them against the statutory form, which frees the draw", await seen(card.getByTestId("draw-holds").getByText(/Nothing under the lien law/)));
+  await card.getByTestId("draw-payee").selectOption("joint");
   await card.getByTestId("release-draw").click();
   await seen(owner.getByTestId("closed-draw"));
+  ok("the team pays the draw to the borrower and the contractor jointly", await seen(owner.getByTestId("closed-draw").getByTestId("draw-paid-to").getByText(/jointly/)));
   // Every PDF sent for the loan was read for signs of editing as it was stored (lib/pdf-signals.ts).
   await go(owner, dealHref);
   await owner.getByTestId("tab-Score & Flags").click();
@@ -1273,6 +1281,11 @@ try {
   ok("buying opens the loan's address and file", (await seen(buyer.getByTestId("file-open"))) && (await buyer.getByTestId("loan-heading").innerText()).includes("100 Real Street"));
   const bought = await buyer.getByTestId("file-open").getByRole("link").first().getAttribute("href");
   ok("the buyer can open the loan's documents", (await buyer.request.get(BASE + bought)).status() === 200);
+  // Its copy of a PDF is stamped with who opened it (rank 24); this test file isn't a readable PDF, so it goes as it is, and the log says so.
+  const buyerOpen = await prisma.auditEvent.findFirst({ where: { action: "document.opened", actorId: (await prisma.user.findUniqueOrThrow({ where: { email: `buyer@${DOMAIN}` } })).id }, orderBy: { createdAt: "desc" } });
+  ok("the buyer's open is logged with its firm and whether its copy was stamped", Boolean(buyerOpen?.after?.firm) && typeof buyerOpen?.after?.watermarked === "boolean");
+  await go(owner, "/admin/partners");
+  ok("and the team sees it on Partners & buyers", await seen(owner.getByTestId("file-open-row").filter({ hasText: buyerOpen?.after?.firm ?? "?" })));
   await go(owner, "/admin/capital");
   ok("selling frees the capital", parseFloat((await owner.getByTestId("capital-available").innerText()).replace(/[^0-9.]/g, "")) > capitalBefore);
   // The buyer's monthly statement, made for this month the way the 1st makes last month's, then downloaded.
@@ -1599,6 +1612,65 @@ try {
   ok("staff see the signed application with the number masked", (await owner.getByTestId("application-on-file").innerText()).includes("Signed by Vera Visitor") && (await owner.getByTestId("application-ssn").innerText()) === "•••-••-6789");
   await owner.getByRole("button", { name: "Show (logged)" }).click();
   ok("the owner can reveal it, and the reveal is logged", (await seen(owner.getByTestId("application-ssn").getByText("123-45-6789"))) && (await prisma.auditEvent.count({ where: { action: "pii.revealed" } })) === 1);
+
+  // Security incidents (rank 19): recorded the day it's found, Florida's deadlines worked out, kept encrypted, owners only
+  const easternDay = (daysAgo) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date(Date.now() - daysAgo * 86_400_000));
+  await go(owner, "/admin/incidents");
+  await owner.getByTestId("incident-new").click();
+  await owner.getByTestId("incident-title").fill("Smoke laptop stolen");
+  await owner.getByTestId("incident-discovered").fill(easternDay(5));
+  await owner.getByTestId("incident-floridians").fill("620");
+  await owner.getByTestId("incident-synopsis").fill("A staff laptop with loan files was taken from a car.");
+  await owner.getByTestId("incident-kind-ssn").check();
+  await owner.getByTestId("incident-form").getByRole("button", { name: "Record it" }).click();
+  await seen(owner.getByTestId("incident-detail"));
+  const duties = owner.getByTestId("incident-duty");
+  ok("an owner records a security incident, with 25 days left to tell the people and the Department", (await duties.filter({ hasText: "Tell each Floridian" }).getByTestId("incident-duty-state").innerText()).includes("25 days left") && (await duties.filter({ hasText: "Notify the Department of Legal Affairs" }).count()) === 1);
+  ok("the incident is stored encrypted", (await prisma.securityIncident.count()) === 1 && !(await rawRows("SecurityIncident")).includes("Smoke laptop"));
+  const stepsBefore = await prisma.auditEvent.count({ where: { action: "incident.individuals" } });
+  await duties.filter({ hasText: "Tell each Floridian" }).getByRole("button", { name: "Mark done" }).click();
+  ok("the people's notice is marked sent", await poll(async () => (await owner.getByTestId("incident-duty").filter({ hasText: "Tell each Floridian" }).getByTestId("incident-duty-state").innerText().catch(() => "")).startsWith("Done")));
+  ok("and the step is in the audit log", (await prisma.auditEvent.count({ where: { action: "incident.individuals" } })) === stepsBefore + 1);
+  await go(under, "/admin/incidents");
+  ok("an underwriter can't open security incidents", new URL(under.url()).pathname === "/admin");
+
+  // Reports by email (rank 23): scheduled to named people; the link makes the file for what each may see
+  await go(owner, "/admin/reports");
+  const ownerName = (await prisma.user.findUniqueOrThrow({ where: { email: `owner@${DOMAIN}` } })).name;
+  const partnerName = (await prisma.user.findUniqueOrThrow({ where: { email: `partner@${DOMAIN}` } })).name;
+  const scheduleForm = owner.getByTestId("report-schedule-form");
+  ok("the borrower isn't offered as someone to send reports to", (await scheduleForm.innerText()).includes(partnerName) && !(await scheduleForm.innerText()).includes((await prisma.user.findUniqueOrThrow({ where: { email: `borrower@${DOMAIN}` } })).name));
+  await scheduleForm.getByTestId("schedule-kind").selectOption("receivables");
+  await scheduleForm.getByLabel(ownerName, { exact: true }).check();
+  await scheduleForm.getByLabel(partnerName, { exact: true }).check();
+  await scheduleForm.getByRole("button", { name: "Schedule it" }).click();
+  ok("the owner schedules the aged receivables report to themselves and the partner", await poll(async () => { const value = (await prisma.platformSettings.findUnique({ where: { id: "default" } }))?.reportSchedules; return Array.isArray(value) && value.length === 1 && value[0].kind === "receivables" && value[0].to.length === 2 && !JSON.stringify(value).includes("@"); }));
+  ok("and it shows on Reports", await seen(owner.getByTestId("report-schedule").filter({ hasText: "Aged receivables" })));
+  const teamFile = await owner.request.get(`${BASE}/api/reports/scheduled/delinquency`);
+  ok("the team's report downloads", teamFile.status() === 200 && teamFile.headers()["content-type"].startsWith("text/csv"));
+  const partnerFile = await partner.request.get(`${BASE}/api/reports/scheduled/receivables`);
+  ok("a partner's copy has only its loans, and names no borrower", partnerFile.status() === 200 && !(await partnerFile.text()).includes("Borrower"));
+  ok("a borrower can't open one", (await borrower.request.get(`${BASE}/api/reports/scheduled/receivables`)).status() === 403);
+  const signedOut = await (await browser.newContext()).request.get(`${BASE}/api/reports/scheduled/receivables`, { maxRedirects: 0 });
+  ok("someone signed out is sent to sign in first", signedOut.status() === 303 && signedOut.headers().location.startsWith("/login?next="));
+  await owner.getByTestId("report-schedule").getByRole("button", { name: "Stop" }).click();
+  ok("the schedule can be stopped", await poll(async () => ((await prisma.platformSettings.findUnique({ where: { id: "default" } }))?.reportSchedules ?? []).length === 0));
+
+  // Email campaigns (rank 29): a test to the owner, and an unsubscribe link that works without signing in
+  await go(owner, "/admin/campaigns");
+  ok("an owner writes a campaign to the brokers and sees how many it reaches", (await owner.getByTestId("campaign-subject").inputValue()) === "LendHous rates this week" && /\d/.test(await owner.getByTestId("campaign-count-brokers").innerText()));
+  await owner.getByTestId("campaign-test").click();
+  ok("and sends themself a test first", await seen(owner.getByTestId("campaign-result").getByText("Test sent to you.")));
+  const optOutId = (await prisma.user.findUniqueOrThrow({ where: { email: `partner@${DOMAIN}` } })).id;
+  const optOutToken = execFileSync("npx", ["tsx", "--env-file=.env", "-e", `import { unsubscribeToken } from "./lib/unsubscribe"; process.stdout.write(unsubscribeToken(${JSON.stringify(optOutId)}))`]).toString().trim();
+  const reader = await (await browser.newContext()).newPage();
+  await reader.goto(`${BASE}/unsubscribe/${optOutToken}`);
+  await reader.getByTestId("unsubscribe-confirm").click();
+  ok("an unsubscribe link works without signing in, and is kept", (await seen(reader.getByTestId("unsubscribe-done"))) && Boolean((await prisma.user.findUniqueOrThrow({ where: { id: optOutId } })).marketingOptOut));
+  ok("a mail app's one-click unsubscribe is taken too", (await reader.request.post(`${BASE}/api/unsubscribe/${optOutToken}`)).status() === 200);
+  await reader.goto(`${BASE}/unsubscribe/${optOutToken.slice(0, -2)}${optOutToken.endsWith("xx") ? "yy" : "xx"}`);
+  ok("and an altered link isn't", await seen(reader.getByTestId("unsubscribe-bad")));
+  await prisma.user.update({ where: { id: optOutId }, data: { marketingOptOut: null } });
 
   ok(`no browser errors${errors.length ? `: ${errors[0]}` : ""}`, errors.length === 0);
 } finally {

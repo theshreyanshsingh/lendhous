@@ -1,11 +1,12 @@
 "use client";
 import { DrawLienChecklist } from "./DrawLienChecklist";
 import { useEffect, useRef, useState } from "react";
+import { attachmentProblem } from "@/lib/draw-attachments";
 import { Camera, ImageIcon, MapPin, X } from "lucide-react";
 import { PhotoRequests } from "@/components/loan/PhotoRequests";
 import { drawRequestError } from "@/lib/draws";
 import { awaitingDecision, claimedFrom, decideByText, drawableLines, lastPhotos, lineProblem } from "@/lib/draw-walk";
-import type { Deal, DrawRequest } from "@/lib/mockData";
+import type { Deal, DrawAttachment, DrawRequest } from "@/lib/mockData";
 import { shrinkPhoto } from "@/lib/shrink-photo";
 import { photoPrints } from "@/lib/photo-prints";
 import { deskProblem, drawFees, PATH_LABEL, type DrawPath } from "@/lib/draw-review";
@@ -48,6 +49,8 @@ export function DrawPanel({ deal }: { deal: Deal }) {
   const [sending, setSending] = useState(false);
   const [certified, setCertified] = useState(false);
   const [path, setPath] = useState<DrawPath>("desk");
+  // Receipts and short videos sent with the request (lib/draw-attachments.ts).
+  const [extras, setExtras] = useState<{ key: string; kind: DrawAttachment["kind"]; file: File }[]>([]);
   const [locating, setLocating] = useState<"off" | "asking" | "on" | "refused" | "none">("off");
   // The clock for "we'll decide by" is the browser's, set after the first render so the server's page matches.
   const [now, setNow] = useState<Date | null>(null);
@@ -92,7 +95,13 @@ export function DrawPanel({ deal }: { deal: Deal }) {
   };
   const drop = (scopeId: string, key: string) => setShots((all) => ({ ...all, [scopeId]: (all[scopeId] ?? []).filter((shot) => shot.key !== key) }));
 
-  const reset = () => { setStep("closed"); setChosen([]); setAmounts({}); setClaimed({}); setShots({}); setNote(""); setContact(""); setCertified(false); setPath("desk"); };
+  const reset = () => { setStep("closed"); setChosen([]); setAmounts({}); setClaimed({}); setShots({}); setNote(""); setContact(""); setCertified(false); setPath("desk"); setExtras([]); };
+  const addExtras = (kind: DrawAttachment["kind"], files: FileList | null) => {
+    // Read now: the input is cleared right after, which empties its list.
+    const added = Array.from(files ?? []).map((file) => ({ key: `${Date.now()}-${Math.random().toString(36).slice(2)}`, kind, file }));
+    if (added.length) setExtras((all) => [...all, ...added]);
+  };
+  const extrasProblem = attachmentProblem(extras.map((item) => ({ name: item.file.name, size: item.file.size, kind: item.kind })));
   // Whether the team can decide it from these photos, without an inspector's visit (lib/draw-review.ts).
   const photosNow = chosen.flatMap((scopeId) => (shots[scopeId] ?? []).map((shot) => ({ id: shot.key, scopeId, ...(shot.takenAt ? { takenAt: shot.takenAt } : {}), ...(shot.lat !== undefined ? { lat: shot.lat, lng: shot.lng } : {}), ...(shot.prints ?? {}) })));
   const deskWhy = step === "finish" && now ? deskProblem(s, deal, asked, photosNow, now.toISOString()) : null;
@@ -111,8 +120,14 @@ export function DrawPanel({ deal }: { deal: Deal }) {
       // Fingerprints, so the team sees a photo that was sent before (lib/photo-checks.ts).
       linePhotos.push({ scopeId, name: shot.file.name, ...(shot.takenAt ? { takenAt: shot.takenAt } : {}), ...(shot.lat !== undefined ? { lat: shot.lat, lng: shot.lng } : {}), ...(documentId ? { documentId } : {}), ...(shot.prints ?? {}) });
     }
-    const photoIds = linePhotos.flatMap((photo) => (photo.documentId ? [photo.documentId] : []));
-    const done = await dispatch({ t: "requestDraw", dealId: deal.id, by: viewerName, note, contact, photos: linePhotos.map((photo) => photo.name), photoIds: local ? undefined : photoIds, lines: asked, linePhotos, path: chosenPath });
+    const attachments = [];
+    for (const extra of extras) {
+      const documentId = local ? undefined : await uploadPhoto(deal.id, extra.kind === "receipt" ? await shrinkPhoto(extra.file) : extra.file, extra.kind);
+      if (!local && !documentId) { setSending(false); return; }
+      attachments.push({ kind: extra.kind, name: extra.file.name, ...(documentId ? { documentId } : {}) });
+    }
+    const photoIds = [...linePhotos, ...attachments].flatMap((photo) => (photo.documentId ? [photo.documentId] : []));
+    const done = await dispatch({ t: "requestDraw", dealId: deal.id, by: viewerName, note, contact, photos: linePhotos.map((photo) => photo.name), photoIds: local ? undefined : photoIds, lines: asked, linePhotos, ...(attachments.length ? { attachments } : {}), path: chosenPath });
     setSending(false);
     if (done) reset();
   };
@@ -224,6 +239,20 @@ export function DrawPanel({ deal }: { deal: Deal }) {
                 {asked.map((line) => <li key={line.scopeId} className="flex flex-wrap items-baseline justify-between gap-x-3 py-1.5"><span className="min-w-0">{lineOf(line.scopeId).division} <small className="text-xs text-muted-foreground">· {Math.round((line.claimedPct ?? 0) * 100)}% done · {(shots[line.scopeId] ?? []).length} photo{(shots[line.scopeId] ?? []).length === 1 ? "" : "s"}</small></span><b className="tabular-nums">{usd(line.requested)}</b></li>)}
               </ul>
               <label className="block"><span className="label">What was finished</span><textarea data-testid="draw-note" rows={2} className="desk-input h-auto! py-2" value={note} onChange={(event) => setNote(event.target.value)} /></label>
+              <fieldset className="space-y-2" data-testid="draw-extras">
+                <legend className="label">Receipts and a short video (optional)</legend>
+                <p className="text-xs text-muted-foreground">A walk-through video and the receipts for materials help us decide from your photos. Keep each video to about 15 seconds (15 MB); up to three.</p>
+                <div className="flex flex-wrap gap-2">
+                  <label className="btn-ghost h-9! cursor-pointer px-3! text-xs!">Add receipts<input type="file" className="sr-only" accept="image/*,application/pdf" multiple data-testid="draw-receipts" onChange={(event) => { addExtras("receipt", event.target.files); event.target.value = ""; }} /></label>
+                  <label className="btn-ghost h-9! cursor-pointer px-3! text-xs!">Add a video<input type="file" className="sr-only" accept="video/mp4,video/quicktime,video/webm" capture="environment" data-testid="draw-video" onChange={(event) => { addExtras("video", event.target.files); event.target.value = ""; }} /></label>
+                </div>
+                {extras.length > 0 && (
+                  <ul className="space-y-1 text-xs" data-testid="draw-extras-list">
+                    {extras.map((item) => <li key={item.key} className="flex items-center justify-between gap-2"><span className="min-w-0 truncate">{item.kind === "video" ? "Video" : "Receipt"}: {item.file.name} <span className="text-muted-foreground">({(item.file.size / 1048576).toFixed(1)} MB)</span></span><button type="button" className="text-muted-foreground underline" onClick={() => setExtras((all) => all.filter((other) => other.key !== item.key))}>Remove</button></li>)}
+                  </ul>
+                )}
+                {extrasProblem && <p role="alert" className="text-xs text-bad" data-testid="draw-extras-problem">{extrasProblem}</p>}
+              </fieldset>
               <fieldset className="space-y-2" data-testid="draw-path">
                 <legend className="label">How should we check the work?</legend>
                 <label className={`flex items-start gap-2 text-sm ${deskWhy ? "text-muted-foreground" : ""}`}><input type="radio" name="draw-path" className="mt-1" data-testid="draw-path-desk" disabled={Boolean(deskWhy)} checked={chosenPath === "desk"} onChange={() => setPath("desk")} /><span><b className="font-medium">Photo review</b>: the team checks your photos, usually the same business day{fees.desk ? `. ${usd(fees.desk)}, kept from the draw` : ""}.{deskWhy && <small className="block text-xs" data-testid="draw-desk-why">Not for this draw: {deskWhy}</small>}</span></label>
@@ -234,7 +263,7 @@ export function DrawPanel({ deal }: { deal: Deal }) {
               {error && <p role="alert" className="text-sm text-bad">{error}</p>}
               <p className="text-xs text-muted-foreground">We aim to decide within {targets.drawDecision.hours} {targets.drawDecision.business ? "business " : ""}hours, and tell you the time once it&apos;s sent.</p>
               <div className="flex flex-wrap gap-2">
-                <button className="btn-primary flex-1" data-testid="submit-draw" disabled={sending || total <= 0 || Boolean(error) || !certified || !contact.trim()} onClick={() => void submit()}>{sending ? "Sending…" : `Request ${usd(total)}`}</button>
+                <button className="btn-primary flex-1" data-testid="submit-draw" disabled={sending || total <= 0 || Boolean(error) || Boolean(extrasProblem) || !certified || !contact.trim()} onClick={() => void submit()}>{sending ? "Sending…" : `Request ${usd(total)}`}</button>
                 <button className="btn-ghost" data-testid="draw-back" onClick={() => setStep(chosen.length - 1)}>Back</button>
               </div>
             </>

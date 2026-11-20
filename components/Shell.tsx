@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
-import { BarChart3, Bell, Briefcase, ChevronDown, ChevronsUpDown, CloudLightning, FolderOpen, Gavel, FileCheck, FileText, TriangleAlert, Percent, Building2, ClipboardList, FilePlus, Hammer, Inbox, Landmark, LayoutDashboard, ListChecks, BookOpen, Lock, LogOut, Menu, MessageSquare, ReceiptText, RotateCcw, ScrollText, Settings, Store, Tag, Upload, UserRound, Users, type LucideIcon } from "lucide-react";
+import { BarChart3, Bell, Briefcase, ChevronDown, ChevronsUpDown, CloudLightning, FolderOpen, Gavel, FileCheck, FileText, History, TriangleAlert, Percent, Building2, ClipboardList, FilePlus, Hammer, Inbox, Landmark, LayoutDashboard, ListChecks, BookOpen, Lock, LogOut, Menu, MessageSquare, ReceiptText, RotateCcw, ScrollText, Settings, ShieldAlert, Megaphone, Store, Tag, Upload, UserRound, Users, type LucideIcon } from "lucide-react";
 import { logout } from "@/actions/auth";
 import { attentionCounts } from "@/lib/attention";
 import { activeWatches } from "@/lib/storms";
@@ -29,8 +29,8 @@ const FOLDED_KEY = "lendhous-nav-folded";
 const nav: Record<View, NavItem[]> = {
   borrower: [{ href: "/admin/borrower", label: "My loans", icon: LayoutDashboard }, { href: "/admin/borrower/documents", label: "My documents", icon: FolderOpen }, { href: "/admin/apply", label: "Apply for a loan", icon: FilePlus }],
   admin: [{ href: "/admin", label: "Pipeline", icon: ClipboardList }, { href: "/admin/leads", label: "Website leads", icon: Inbox }, { href: "/admin/capital", label: "Capital", icon: Landmark, section: "Money" }, { href: "/admin/loan-sales", label: "Loan sales", icon: Tag, section: "Money" }, { href: "/admin/draws", label: "Draws", icon: Hammer, section: "Servicing" }, { href: "/admin/servicing", label: "Loan servicing", icon: ReceiptText, section: "Servicing" }],
-  partner: [{ href: "/admin/partner", label: "Deal feed", icon: BookOpen }, { href: "/admin/partner/portfolio", label: "My portfolio", icon: Briefcase }],
-  buyer: [{ href: "/admin/buyer", label: "Loans for sale", icon: Store }, { href: "/admin/buyer/portfolio", label: "My loans & offers", icon: Briefcase }],
+  partner: [{ href: "/admin/partner", label: "Deal feed", icon: BookOpen }, { href: "/admin/partner/portfolio", label: "My portfolio", icon: Briefcase }, { href: "/admin/partner/track-record", label: "Track record", icon: History }],
+  buyer: [{ href: "/admin/buyer", label: "Loans for sale", icon: Store }, { href: "/admin/buyer/portfolio", label: "My loans & offers", icon: Briefcase }, { href: "/admin/buyer/track-record", label: "Track record", icon: History }],
   broker: [{ href: "/admin/broker", label: "My deals", icon: LayoutDashboard }, { href: "/admin/broker/new", label: "Submit a deal", icon: FilePlus }],
 };
 
@@ -42,7 +42,7 @@ function active(path: string, href: string) {
   return path === href || path.startsWith(`${href}/`);
 }
 
-export type ShellAccount = { name: string; email: string; roles: string[]; demo: boolean; canManageMembers: boolean; canViewAudit: boolean; canManageSettings: boolean; canManageFirms: boolean; canManagePricing: boolean; canViewReports: boolean; canIssueLetters: boolean; canManageBrokers?: boolean; staleJobs: string[]; openErrors: number; unread: number; offerSample: boolean };
+export type ShellAccount = { name: string; email: string; roles: string[]; demo: boolean; canManageMembers: boolean; canViewAudit: boolean; canManageSettings: boolean; canManageFirms: boolean; canManagePricing: boolean; canViewReports: boolean; canIssueLetters: boolean; canManageBrokers?: boolean; canManageIncidents?: boolean; canSendCampaigns?: boolean; staleJobs: string[]; openErrors: number; unread: number; offerSample: boolean };
 
 export default function Shell({ children, account, view }: { children: React.ReactNode; account: ShellAccount; view: View | null }) {
   const path = usePathname();
@@ -83,9 +83,11 @@ export default function Shell({ children, account, view }: { children: React.Rea
     ...(account.canManageFirms ? [{ href: "/admin/partners", label: "Partners & buyers", icon: Building2, section: "Money" }] : []),
     ...(account.canManageBrokers && view === "admin" ? [{ href: "/admin/brokers", label: "Brokers", icon: Briefcase, section: "Money", count: s.brokers.filter((broker) => broker.status === "applied").length || undefined }] : []),
     ...(account.canManagePricing && view === "admin" ? [{ href: "/admin/pricing", label: "Pricing", icon: Percent, section: "Money" }] : []),
+    ...(account.canSendCampaigns && view === "admin" ? [{ href: "/admin/campaigns", label: "Email campaigns", icon: Megaphone, section: ADMIN }] : []),
     { href: "/admin/account/notifications", label: "Notifications", icon: Bell, section: "Account", count: account.unread },
     ...(account.canManageMembers ? [{ href: "/admin/members", label: "Members", icon: Users, section: ADMIN }] : []),
     ...(account.canViewAudit ? [{ href: "/admin/audit", label: "Audit log", icon: ScrollText, section: ADMIN }] : []),
+    ...(account.canManageIncidents && view === "admin" ? [{ href: "/admin/incidents", label: "Security incidents", icon: ShieldAlert, section: ADMIN }] : []),
     ...(account.canManageSettings ? [{ href: "/admin/conditions", label: "Conditions library", icon: ListChecks, section: ADMIN }, { href: "/admin/settings", label: "Settings", icon: Settings, section: ADMIN }, { href: "/admin/errors", label: "Errors", icon: TriangleAlert, section: ADMIN, count: account.openErrors }, { href: "/admin/tax", label: "Tax forms", icon: FileText, section: ADMIN }] : []),
     ...(view === "partner" || view === "buyer" || view === "broker" ? [{ href: "/admin/account/tax", label: "Tax form", icon: FileText, section: "Account" }] : []),
   ];

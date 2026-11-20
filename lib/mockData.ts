@@ -77,6 +77,9 @@ export interface Deal {
   conditions?: LoanCondition[];
   /** Florida construction lien protections for draws (Fla. Stat. ch. 713): the contractor, the Notice of Commencement, notices to owner. */
   lienFile?: LienFile;
+  /** Building permits for the budget lines that need them (lib/permits.ts), and lines the team says need none, with why. */
+  permits?: Permit[];
+  permitWaivers?: { scopeId: string; reason: string; by: string; at: string }[];
   /** The property's insurance on every loan, the flood zone that decides whether flood cover is needed, and renewals sent in (lib/insurance.ts). */
   insurance?: InsuranceFile;
   /** When the application became complete, which starts Reg B's 30 days (12 CFR 1002.9(a)(1)). */
@@ -193,6 +196,8 @@ export interface Deal {
   taxes?: { parcels: string[]; checks: TaxCheck[]; reminded?: string[] };
   /** A condo's building: its age, inspections, reserves and the association's debts (lib/condo-check.ts). */
   condo?: CondoFile;
+  /** On a rental, the processor's review of its leases and tenants (lib/occupancy.ts). */
+  leaseReview?: LeaseReview;
   /** Answers for Florida's limits on buyers from countries of concern, SB 264 (lib/sb264.ts). */
   sb264?: Sb264Answers;
 }
@@ -423,7 +428,18 @@ export interface Reo {
   value?: number;
   listed?: { on: string; price: number; by: string };
   sold?: { on: string; price: number; closingCosts: number; reference: string; by: string; at: string };
+  /** Who's living there, and the sheriff's removal of anyone there unlawfully (lib/occupancy.ts). */
+  occupancy?: ReoOccupancy;
 }
+export interface ReoOccupancy {
+  checkedOn: string; state: "unknown" | "vacant" | "former_owner" | "tenant" | "squatter"; note: string;
+  /** The conditions of Fla. Stat. 82.036(2) the team has confirmed, by key. */
+  confirmed?: import("./occupancy").SheriffCondition[];
+  sheriff?: { filedOn: string; county: string; outcome?: "removed" | "refused"; outcomeOn?: string };
+  by: string; at: string;
+}
+/** The processor's review of a rental's leases and tenants: red flags found, and two parts of the lease file. */
+export interface LeaseReview { flags: import("./occupancy").TenantFlag[]; emailAddendum: "yes" | "no" | "na"; floodDisclosure: "yes" | "no" | "na"; note: string; by: string; at: string }
 export interface Payoff {
   amount: number; receivedOn: string; method: PaymentMethod; reference: string; by: string; at: string;
   /** A third party's winning bid at the foreclosure sale: it ends the loan even when it's short of what was owed. */
@@ -442,6 +458,11 @@ export interface FeeWaiver { due: string; by: string; at: string; reason: string
 /** One division of a project's rehab or construction budget. Draws are requested against these. */
 /** A line of the rehab budget. The one with id "contingency" is set aside for surprises and only spent by moving it (lib/budget.ts). */
 export interface ScopeLine { id: string; division: string; budget: number; released: number }
+/** A building permit, from the city's or county's permit search: the lines it covers and where it stands. */
+export interface Permit {
+  id: string; number: string; jurisdiction: string; scopeIds: string[]; status: "applied" | "issued" | "finaled" | "expired";
+  issuedOn?: string; expiresOn?: string; finaledOn?: string; by: string; at: string;
+}
 /** Budget moved between lines of a funded loan's scope (lib/budget.ts): asked for by the borrower or the team, decided by the team. */
 export interface ChangeOrder {
   id: string; from: string; to: string | "new"; newDivision?: string; amount: number; reason: string;
@@ -455,11 +476,18 @@ export interface Overrun { id: string; amount: number; scopeId?: string; note: s
 export interface DrawRequestLine { scopeId: string; requested: number; observedPct?: number; claimedPct?: number }
 /** A photo the borrower took for one budget line from their phone, with where and when (lib/photo-checks.ts). */
 export interface DrawPhoto { id: string; scopeId: string; name: string; at: string; takenAt?: string; lat?: number; lng?: number; documentId?: string; sha256?: string; dhash?: string }
+export type DrawPayee = "borrower" | "contractor" | "joint";
+/** A receipt or a short video the borrower sent with a draw (lib/draw-attachments.ts). */
+export interface DrawAttachment { id: string; kind: "receipt" | "video"; name: string; documentId?: string; scopeId?: string; at: string }
 export interface DrawRequest {
   id: string; dealId: string; requestedAt: string; by: string; note: string; contact: string; photos: string[]; lines: DrawRequestLine[];
   status: "submitted" | "inspecting" | "inspected" | "approved" | "funded" | "rejected"; approved?: number; approvers: string[]; reason?: string; fundedAt?: string; photoIds?: string[];
   /** The borrower's photos by budget line, from the line-by-line request on their phone. */
   linePhotos?: DrawPhoto[];
+  /** Receipts and short videos sent with the request. */
+  attachments?: DrawAttachment[];
+  /** Who the released money was paid to (lib/draw-payee.ts). Unset is the borrower, as before. */
+  payee?: DrawPayee;
   /** Lien waivers sent for this draw (Fla. Stat. 713.20), and for the last draw the contractor's final payment affidavit (713.06(3)(d)). */
   waivers?: LienWaiver[]; affidavit?: FinalAffidavit;
   /** Marked as the last draw, which takes final waivers and the affidavit. A draw that uses up the holdback is the last anyway. */
@@ -533,7 +561,28 @@ export interface InsuranceFile {
   renewals?: InsuranceRenewal[];
   /** A condo's association and who insures its building (lib/florida-insurance.ts). */
   association?: { carrier: string; citizens: boolean; by: string; at: string };
+  /** The uniform mitigation verification form's answers (lib/wind-mitigation.ts). */
+  mitigation?: MitigationForm;
+  /** On a purchase, the seller's flood disclosure (Fla. Stat. 689.302). */
+  sellerFlood?: FloodDisclosure;
 }
+/** The uniform mitigation verification inspection form (OIR-B1-1802), as signed by a licensed inspector (Fla. Stat. 627.711). */
+export interface MitigationForm {
+  inspectedOn: string; inspector: string;
+  /** Built under the 2001 Florida Building Code or later. */
+  builtToCode: boolean;
+  /** Every roof covering meets the Florida Building Code. */
+  roofCovering: boolean;
+  roofDeck: "A" | "B" | "C" | "D" | "other";
+  roofToWall: "toe_nails" | "clips" | "single_wraps" | "double_wraps" | "structural" | "unknown";
+  roofShape: "hip" | "flat" | "other";
+  /** Secondary water resistance under the roof covering. */
+  swr: boolean;
+  openings: "all" | "some" | "none";
+  by: string; at: string;
+}
+/** A flood disclosure as the seller gave it: whether it was given, and its three answers. */
+export interface FloodDisclosure { given: boolean; flooding?: boolean; claim?: boolean; assistance?: boolean; by: string; at: string }
 /** A notice to owner from a lienor not hired by the borrower directly (713.06(2)). Each one needs a waiver for every draw after it. */
 export interface NoticeToOwner { id: string; lienor: string; role: "subcontractor" | "supplier" | "sub_subcontractor" | "other"; servedOn: string; by: string; at: string }
 export interface LienWaiver {
@@ -652,6 +701,8 @@ export interface Broker {
   brand?: { name: string; phone: string; email: string; website: string };
   /** The largest loan its own pre-qualification letters may name, set by an owner. Unset: it issues none. */
   letterLimit?: number;
+  /** The lessons of LendHous's broker course it has passed, and when it finished (lib/broker-kit.ts). */
+  training?: { done: string[]; finishedAt?: string };
 }
 export interface CapitalSource { id: string; name: string; type: "gt_balance_sheet" | "gt_credit_line" | "partner_lender"; commitment: number; baseDeployed: number; baseUnfunded: number; lineUndrawn?: number; orgId?: string }
 /** A firm whose money LendHous takes: its owners and officers as the team entered them, and its sanctions screening (lib/ofac.ts). */
@@ -755,13 +806,13 @@ export const seedDeals: Deal[] = [
   { id: "d8", loanNumber: "LH-DEMO-1008", borrowerId: "b-sam", borrowerName: "Sam Example (FAKE)", entityName: "Example Homes LLC (FAKE)", address: "3 Dummy Dr", city: "West Palm Beach", zip: "33407", source: "web_quote",
     app: flip({ county: "Palm Beach", purchasePrice: 255_000, rehab: 75_000, arv: 430_000, fico: 698, verifiedDeals: 2, liquidity: 95_000 }), status: "term_sheet_accepted", daysInStage: 4, capitalStatus: "reserved", route: "in_house", allocations: [{ sourceId: "gt-main", amount: 0 }], teaserSentTo: [], docs: stdDocs(), exitStrategy: "Sell", closingDate: "2026-11-10" },
   { id: "d9", loanNumber: "LH-DEMO-1009", borrowerId: "b-quinn", borrowerName: "Quinn Sample (FAKE)", entityName: "Quinn Flips LLC (FAKE)", address: "410 Test Harbor Way", city: "Hollywood", zip: "33019", source: "web_quote",
-    app: flip({ purchasePrice: 340_000, rehab: 110_000, arv: 640_000, fico: 742, verifiedDeals: 9, liquidity: 190_000, valuationSource: "appraisal", accrual: "dutch" }), status: "servicing_current", daysInStage: 150, capitalStatus: "funded", route: "in_house", allocations: [{ sourceId: "gt-main", amount: 0 }], teaserSentTo: [], docs: fundedDocs, disbursedDraws: 65_000, nextPaymentDue: "2026-11-01", exitStrategy: "Sell", closingDate: "2026-05-12" },
+    app: flip({ purchasePrice: 340_000, rehab: 110_000, arv: 640_000, fico: 742, verifiedDeals: 9, liquidity: 190_000, valuationSource: "appraisal", accrual: "dutch" }), status: "servicing_current", permits: [{ id: "pmt-d9", number: "BLD-26-0412 (FAKE)", jurisdiction: "City of Hollywood", scopeIds: ["plumbing", "electrical", "hvac", "structural"], status: "issued", issuedOn: "2026-07-20", expiresOn: "2027-01-16", by: "Demo processor", at: "2026-07-21T15:00:00Z" }], daysInStage: 150, capitalStatus: "funded", route: "in_house", allocations: [{ sourceId: "gt-main", amount: 0 }], teaserSentTo: [], docs: fundedDocs, disbursedDraws: 65_000, nextPaymentDue: "2026-11-01", exitStrategy: "Sell", closingDate: "2026-05-12" },
   { id: "d10", loanNumber: "LH-DEMO-1010", borrowerId: "b-drew", borrowerName: "Drew Example (FAKE)", entityName: "Example Rentals LLC (FAKE)", address: "77 Sample Palm Ct", city: "Coral Springs", zip: "33065", source: "broker",
     app: { ...flip({}), product: "dscr", purchasePrice: 420_000, rehab: 0, arv: 420_000, monthlyRent: 3_900, taxesAnnual: 7_200, insuranceAnnual: 5_400, fico: 758, verifiedDeals: 6, liquidity: 180_000, occupancy: "tenant", valuationSource: "appraisal" }, status: "servicing_current", daysInStage: 240, capitalStatus: "funded", route: "in_house", allocations: [{ sourceId: "gt-main", amount: 0 }], teaserSentTo: [], docs: fundedDocs, nextPaymentDue: "2026-11-01", exitStrategy: "Hold", closingDate: "2026-02-20", brokerId: DEMO_BROKER_ID, brokerPoints: 1 },
   { id: "d11", loanNumber: "LH-DEMO-1011", borrowerId: "b-avery", borrowerName: "Avery Mock (FAKE)", entityName: "Mock Bridge Partners LLC (FAKE)", address: "1200 Pretend Ave", city: "Miami", zip: "33130", source: "referral",
     app: { ...flip({}), product: "bridge", county: "Miami-Dade", purchasePrice: 620_000, rehab: 0, arv: 620_000, fico: 731, verifiedDeals: 5, liquidity: 260_000, valuationSource: "appraisal" }, status: "servicing_current", daysInStage: 120, capitalStatus: "funded", route: "in_house", allocations: [{ sourceId: "gt-main", amount: 0 }], teaserSentTo: [], docs: fundedDocs, nextPaymentDue: "2026-11-01", exitStrategy: "Refi", closingDate: "2026-06-30" },
   { id: "d12", loanNumber: "LH-DEMO-1012", borrowerId: "b-blake", borrowerName: "Blake Notreal (FAKE)", entityName: "Notreal Builders LLC (FAKE)", address: "8 Fiction Pt", city: "Delray Beach", zip: "33444", source: "referral",
-    app: { ...flip({}), product: "ground_up", county: "Palm Beach", purchasePrice: 300_000, landValue: 300_000, hardCosts: 640_000, softCosts: 70_000, rehab: 710_000, arv: 1_450_000, groundUpBuilds: 3, verifiedDeals: 10, fico: 724, liquidity: 320_000, valuationSource: "appraisal" }, status: "servicing_current", daysInStage: 200, capitalStatus: "funded", route: "in_house", allocations: [{ sourceId: "gt-main", amount: 0 }], teaserSentTo: [], docs: fundedDocs, disbursedDraws: 290_000, nextPaymentDue: "2026-11-01", exitStrategy: "Sell", closingDate: "2026-04-08" },
+    app: { ...flip({}), product: "ground_up", county: "Palm Beach", purchasePrice: 300_000, landValue: 300_000, hardCosts: 640_000, softCosts: 70_000, rehab: 710_000, arv: 1_450_000, groundUpBuilds: 3, verifiedDeals: 10, fico: 724, liquidity: 320_000, valuationSource: "appraisal" }, status: "servicing_current", permits: [{ id: "pmt-d12", number: "PB-26-11873 (FAKE)", jurisdiction: "Palm Beach County", scopeIds: ["site", "framing", "mechanical", "exterior"], status: "issued", issuedOn: "2026-05-02", expiresOn: "2027-05-02", by: "Demo processor", at: "2026-05-03T15:00:00Z" }], daysInStage: 200, capitalStatus: "funded", route: "in_house", allocations: [{ sourceId: "gt-main", amount: 0 }], teaserSentTo: [], docs: fundedDocs, disbursedDraws: 290_000, nextPaymentDue: "2026-11-01", exitStrategy: "Sell", closingDate: "2026-04-08" },
   { id: "d13", loanNumber: "LH-DEMO-1013", borrowerId: "b-kai", borrowerName: "Kai Placeholder (FAKE)", entityName: "Placeholder Homes LLC (FAKE)", address: "39 Invented Ter", city: "Lauderhill", zip: "33313", source: "web_quote",
     app: flip({ purchasePrice: 230_000, rehab: 70_000, arv: 400_000, fico: 684, verifiedDeals: 2, liquidity: 70_000, valuationSource: "appraisal" }), status: "servicing_delinquent", daysInStage: 33, capitalStatus: "funded", route: "in_house", allocations: [{ sourceId: "gt-main", amount: 0 }], teaserSentTo: [], docs: fundedDocs, disbursedDraws: 55_000, nextPaymentDue: "2026-10-01", paymentsLate: 2, exitStrategy: "Sell", closingDate: "2026-03-17" },
   { id: "d14", loanNumber: "LH-DEMO-1014", borrowerId: "b-rowan", borrowerName: "Rowan Demo (FAKE)", entityName: "Rowan Renovations LLC (FAKE)", address: "250 Sample Shore Dr", city: "Deerfield Beach", zip: "33441", source: "wholesale",

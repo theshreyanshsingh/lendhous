@@ -22,10 +22,14 @@ import { issueProblem, latestLetter, letterFigures, receivedOnFor } from "./payo
 import { isLarge, noticeDueOn, noticeOwed, reasonsProblem, requestProblem, startAdverseAction, STATEMENT_DAYS } from "./adverse-action";
 import { defaultNocExpiry, drawHolds, lienFileProblem, partiesFor, unreleasedHolds, waiverCheckProblem } from "./lien-law";
 import { insuranceChecks, insuranceFileOf, policiesOf, policyProblem, policyWord, putPolicy, renewalProblem, withInsurance } from "./insurance";
+import { floodDisclosureProblem, mitigationProblem } from "./wind-mitigation";
+import { permitProblem } from "./permits";
+import { courseProgress, lessonProblem } from "./broker-kit";
+import { leaseReviewProblem, occupancyProblem } from "./occupancy";
 import { addProblem, changeProblem, DEFAULT_LIBRARY, fromTemplate, libraryOf, missingStandard, templateProblem, templatesFor, type ConditionInput } from "./conditions";
 import { chosenTerms, draftSheet, exceptionDecisionProblem, exceptionReasons, exceptionRequestProblem, issueProblem as sheetProblem, latestSheet, matrixOf, pricedApp, respondProblem, startingTerms, termSheetChecks, type Prepay } from "./term-sheets";
 import { optionAt } from "./buy-down";
-import { DEMO_TEAM, seedDeals, seedBids, seedDraws, seedLoanSales, seedLoanOffers, seedMessages, seedPhotoRequests, DEMO_SPONSORS, capitalSources, partners as seedPartners, brokers as seedBrokers, loanBuyers, BORROWER_ID, DEMO_PARTNER_ID, DEMO_BUYER_ID, DEMO_BROKER_ID, type FileCheck, type SellerIdMethod, type TaxCheck, type Broker, type ClosingAgent, type Closure, type Deal, type DefaultKind, type Bid, type DrawRequest, type DrawRequestLine, type DrawPhoto, type DrawCall, type FloodMap, type PortfolioProperty, type PropertyRelease, type RolloverChoice, type ShareTransfer, type LoanExtension, type LoanMessage, type Screening, type WireInstruction, type Partner, type PayoffChannel, type PayoffLetter, type PayoffRequest, type NoticeToOwner, type LienWaiver, type ConditionTemplate, type LoanCondition, type DocStatus, type CapitalSource, type LoanBuyer, type LoanOffer, type LoanSale, type LoanPayment, type LoanStatus, type TeamMember, type PaymentMethod, type PhotoRequest, type RequestPhoto, type ScopeLine, type Sponsor, type StageEntry, type PolicyKind, type InsurancePolicy, type InsuranceRenewal, type ChangeOrder, type AdvanceKind, type Bankruptcy, type ContactChannel, type ContactOutcome, type DeliveryMethod, type ForeclosureStep, type LoanModification, type NoticeKind, type Payoff } from "./mockData";
+import { DEMO_TEAM, seedDeals, seedBids, seedDraws, seedLoanSales, seedLoanOffers, seedMessages, seedPhotoRequests, DEMO_SPONSORS, capitalSources, partners as seedPartners, brokers as seedBrokers, loanBuyers, BORROWER_ID, DEMO_PARTNER_ID, DEMO_BUYER_ID, DEMO_BROKER_ID, type FileCheck, type Permit, type DrawAttachment, type SellerIdMethod, type TaxCheck, type Broker, type ClosingAgent, type Closure, type Deal, type DefaultKind, type Bid, type DrawRequest, type DrawRequestLine, type DrawPhoto, type DrawCall, type FloodMap, type PortfolioProperty, type PropertyRelease, type RolloverChoice, type ShareTransfer, type LoanExtension, type LoanMessage, type Screening, type WireInstruction, type Partner, type PayoffChannel, type PayoffLetter, type PayoffRequest, type NoticeToOwner, type LienWaiver, type ConditionTemplate, type LoanCondition, type DocStatus, type CapitalSource, type LoanBuyer, type LoanOffer, type LoanSale, type LoanPayment, type LoanStatus, type TeamMember, type PaymentMethod, type PhotoRequest, type RequestPhoto, type ScopeLine, type Sponsor, type StageEntry, type PolicyKind, type InsurancePolicy, type InsuranceRenewal, type ChangeOrder, type AdvanceKind, type Bankruptcy, type ContactChannel, type ContactOutcome, type DeliveryMethod, type ForeclosureStep, type LoanModification, type NoticeKind, type Payoff } from "./mockData";
 import { closingShare, creditOf, currentBids, drawCallsFor, moveShare, payoffProceeds, ROLLOVER, transferProblem, transferQuote } from "./capital-moves";
 import { portfolioApp, releaseQuote, scheduleProblem } from "./portfolio";
 import { applyFloodMap, withFloodFollowUps } from "./flood-zones";
@@ -81,6 +85,8 @@ export type BookAction =
   | { t: "referLoan"; dealId: string; brokerId: string; on: string }
   /** How a brokerage shows on its quotes and term sheets, and the largest pre-qualification letter it may issue (lib/broker-program.ts). */
   | { t: "saveBrokerBrand"; brokerId: string; brand: { name: string; phone: string; email: string; website: string } }
+  /** A lesson of the broker course passed, by answering its question right (lib/broker-kit.ts). */
+  | { t: "passBrokerLesson"; brokerId: string; lessonId: string; answer: number }
   | { t: "setBrokerLetterLimit"; brokerId: string; limit: number; by: string }
   /** A loan started from a lead that came by a borrower's referral link, with the bonus Settings named that day. Server only. */
   | { t: "referFriend"; dealId: string; referrerId: string; on: string; bonus: number }
@@ -160,7 +166,7 @@ export type BookAction =
   | { t: "checkTermSheets"; asOf: string }
   | { t: "saveScope"; dealId: string; scope: ScopeLine[]; summary: string }
   /** linePhotos: the photos taken line by line on the borrower's phone, with where and when (lib/draw-walk.ts). */
-  | { t: "requestDraw"; dealId: string; by: string; note: string; contact: string; photos: string[]; photoIds?: string[]; lines: DrawRequestLine[]; linePhotos?: Omit<DrawPhoto, "id" | "at">[]; path?: DrawPath }
+  | { t: "requestDraw"; dealId: string; by: string; note: string; contact: string; photos: string[]; photoIds?: string[]; lines: DrawRequestLine[]; linePhotos?: Omit<DrawPhoto, "id" | "at">[]; attachments?: Omit<DrawAttachment, "id" | "at">[]; path?: DrawPath }
   /** The team's review of a photo-review draw from the borrower's photos (lib/draw-review.ts). */
   | { t: "deskReview"; drawId: string; observed: Record<string, number>; note: string; by: string }
   | { t: "askForPhotos"; requestId: string; dealId: string; drawId?: string; stormId?: string; to: string; email?: string; who: PhotoRequest["who"]; scopeIds: string[]; by: string; byTeam: boolean; expiresAt: string }
@@ -174,7 +180,7 @@ export type BookAction =
   | { t: "recordInspection"; drawId: string; observed: Record<string, number> }
   | { t: "approveDrawRequest"; drawId: string; by: string }
   | { t: "rejectDraw"; drawId: string; reason: string }
-  | { t: "releaseDraw"; drawId: string }
+  | { t: "releaseDraw"; drawId: string; payee?: import("./mockData").DrawPayee }
   /** Budget moved between a funded loan's lines (lib/budget.ts): asked for by the borrower or the team, decided by the team. */
   | { t: "requestChangeOrder"; dealId: string; orderId: string; from: string; to: string; newDivision?: string; amount: number; reason: string; arv?: number; by: string; byTeam: boolean }
   | { t: "decideChangeOrder"; dealId: string; orderId: string; approve: boolean; note: string; by: string }
@@ -182,12 +188,21 @@ export type BookAction =
   | { t: "recordOverrun"; dealId: string; overrunId: string; amount: number; scopeId?: string; note: string; by: string }
   | { t: "coverOverrun"; dealId: string; overrunId: string; how: string; by: string }
   /** The loan's lien file: the contractor and the Notice of Commencement (Fla. Stat. 713.13). */
+  /** A building permit on the budget lines it covers, or a line marked as needing none (lib/permits.ts). */
+  /** A rental's lease and tenant review, and who's living in a property LendHous owns (lib/occupancy.ts). */
+  | { t: "saveLeaseReview"; dealId: string; review: import("./occupancy").LeaseReviewInput; by: string }
+  | { t: "saveOccupancy"; dealId: string; occupancy: import("./occupancy").OccupancyInput; by: string }
+  | { t: "savePermit"; dealId: string; permit: import("./permits").PermitInput; by: string }
+  | { t: "permitNotNeeded"; dealId: string; scopeId: string; reason: string; by: string }
   | { t: "saveLienFile"; dealId: string; contractor: string; noc?: { recordedOn: string; reference: string; expiresOn: string; commencedOn?: string; lenderNamed: boolean; mortgageFirst?: boolean }; mortgageRecordedOn?: string; by: string }
   | { t: "addNoticeToOwner"; dealId: string; lienor: string; role: NoticeToOwner["role"]; servedOn: string; by: string }
   /** A policy on the property, put on file by the team (lib/insurance.ts). It replaces the one of its kind. */
   | { t: "saveInsurance"; dealId: string; kind: PolicyKind; carrier: string; policy: string; expiresOn: string; coverage?: number; windIncluded?: boolean; mortgagee?: boolean; citizens?: boolean; program?: "nfip" | "private"; by: string }
   /** Who insures a condo association's building (lib/florida-insurance.ts). */
   | { t: "saveAssociationPolicy"; dealId: string; carrier: string; citizens: boolean; by: string }
+  /** The wind mitigation form's answers, and on a purchase the seller's flood disclosure (lib/wind-mitigation.ts). */
+  | { t: "saveMitigation"; dealId: string; form: import("./wind-mitigation").MitigationInput; by: string }
+  | { t: "saveSellerFlood"; dealId: string; disclosure: import("./wind-mitigation").FloodDisclosureInput; by: string }
   /** Whether the property is in a special flood hazard area, which makes flood insurance required. */
   | { t: "setFloodZone"; dealId: string; sfha: boolean; zone: string; by: string }
   /** The borrower sent a renewed policy. The server records it once the file is stored; a demo browser keeps the name only. */
@@ -696,6 +711,14 @@ function apply(s: Book, a: BookAction): Book {
       const brand = { name: a.brand.name.trim(), phone: a.brand.phone.trim(), email: a.brand.email.trim().toLowerCase(), website: a.brand.website.trim() };
       return { ...s, brokers: s.brokers.map((item) => (item.id === a.brokerId ? { ...item, brand } : item)), audit: log(`Broker ${broker.name}: brand on quotes and term sheets set to ${brand.name}`) };
     }
+    case "passBrokerLesson": {
+      const broker = s.brokers.find((item) => item.id === a.brokerId)!;
+      if (lessonProblem(a.lessonId, a.answer) || broker.training?.done.includes(a.lessonId)) return s;
+      const done = [...(broker.training?.done ?? []), a.lessonId];
+      const finished = courseProgress({ training: { done } }).finished;
+      const training = { done, ...(finished ? { finishedAt: now() } : {}) };
+      return { ...s, brokers: s.brokers.map((item) => (item.id === a.brokerId ? { ...item, training } : item)), audit: log(`Broker ${broker.name}: passed the "${a.lessonId}" lesson${finished ? ", finishing the course" : ""}`) };
+    }
     case "setBrokerLetterLimit": {
       const broker = s.brokers.find((item) => item.id === a.brokerId)!;
       const limit = Math.max(0, Math.round(a.limit));
@@ -1055,7 +1078,8 @@ function apply(s: Book, a: BookAction): Book {
       // Checked from the borrower's photos where it qualifies and they asked; otherwise by an inspector. Its fee is fixed now.
       const path: DrawPath = a.path === "desk" && !deskProblem(s, deal, lines, linePhotos, at) ? "desk" : "inspector";
       const fee = drawFees()[path];
-      const draw: DrawRequest = { id: `draw${uid()}`, dealId: a.dealId, requestedAt: at, by: a.by, note: a.note, contact: a.contact, photos: a.photos, photoIds: a.photoIds, lines: lines.map((line) => (line.claimedPct === undefined ? line : { ...line, claimedPct: Math.min(1, Math.max(0, line.claimedPct)) })), ...(linePhotos.length ? { linePhotos } : {}), status: "submitted", approvers: [], path, ...(fee ? { fee } : {}) };
+      const attachments = (a.attachments ?? []).map((item, index): DrawAttachment => ({ ...item, id: `da${uid()}${index}`, at }));
+      const draw: DrawRequest = { id: `draw${uid()}`, dealId: a.dealId, requestedAt: at, by: a.by, note: a.note, contact: a.contact, photos: a.photos, photoIds: a.photoIds, lines: lines.map((line) => (line.claimedPct === undefined ? line : { ...line, claimedPct: Math.min(1, Math.max(0, line.claimedPct)) })), ...(linePhotos.length ? { linePhotos } : {}), status: "submitted", approvers: [], path, ...(fee ? { fee } : {}) , ...(attachments.length ? { attachments } : {}) };
       return { ...s, draws: [draw, ...s.draws], audit: log(`${deal.loanNumber}: draw of $${lines.reduce((sum, line) => sum + line.requested, 0).toLocaleString()} requested`) };
     }
     case "askForPhotos": {
@@ -1112,7 +1136,7 @@ function apply(s: Book, a: BookAction): Book {
       // Nor before the lien law's protections are in place, unless an owner released it past them (Fla. Stat. ch. 713).
       if (draw.status !== "approved" || !draw.approved || ofacBlocker(deal, serviceDay(s)) || unreleasedHolds(deal, draw, serviceDay(s)).length) return s;
       return { ...s,
-        draws: s.draws.map((d) => (d.id === a.drawId ? { ...d, status: "funded", fundedAt: now() } : d)),
+        draws: s.draws.map((d) => (d.id === a.drawId ? { ...d, status: "funded", fundedAt: now(), ...(a.payee && a.payee !== "borrower" ? { payee: a.payee } : {}) } : d)),
         // Brought up to today first, so the payments already due keep the amount they owed before this draw.
         // Partners that fund draws as they're released are asked for their share; LendHous has paid the borrower already.
         deals: upd(deal.id, (d) => ({ ...settle(d, serviceDay(s)), disbursedDraws: (d.disbursedDraws ?? 0) + draw.approved!, scope: releaseToScope(d.scope ?? [], d, draw), ...(d.partnerFunding?.drawsAsReleased ? { drawCalls: [...(d.drawCalls ?? []), ...drawCallsFor(s, d, draw.id, draw.approved!, serviceDay(s), (n) => `dc${uid()}${n}`)] } : {}) })),
@@ -1141,6 +1165,35 @@ function apply(s: Book, a: BookAction): Book {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
       return { ...s, deals: upd(a.dealId, (d) => ({ ...d, overruns: (d.overruns ?? []).map((item) => (item.id === a.overrunId && !item.covered ? { ...item, covered: { by: a.by, at: now(), how: a.how.trim() } } : item)) })), audit: log(`${deal.loanNumber}: overrun covered (${a.how.trim()})`) };
     }
+    case "saveLeaseReview": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (leaseReviewProblem(deal, a.review)) return s;
+      const leaseReview = { flags: [...new Set(a.review.flags)], emailAddendum: a.review.emailAddendum, floodDisclosure: a.review.floodDisclosure, note: a.review.note.trim(), by: a.by, at: now() };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, leaseReview })), audit: log(`${deal.loanNumber}: leases and tenants reviewed by ${a.by}${leaseReview.flags.length ? ` (${leaseReview.flags.length} red flag${leaseReview.flags.length === 1 ? "" : "s"})` : ""}`) };
+    }
+    case "saveOccupancy": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (occupancyProblem(deal, a.occupancy, serviceDay(s))) return s;
+      const o = a.occupancy;
+      const occupancy = { checkedOn: o.checkedOn, state: o.state, note: o.note.trim(), ...(o.confirmed?.length ? { confirmed: [...new Set(o.confirmed)] } : {}), ...(o.sheriff ? { sheriff: { ...o.sheriff, county: o.sheriff.county.trim() } } : {}), by: a.by, at: now() };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, reo: d.reo && { ...d.reo, occupancy } })), audit: log(`${deal.loanNumber}: occupancy recorded (${o.state.replace(/_/g, " ")})${o.sheriff ? `, sheriff's complaint filed ${o.sheriff.filedOn}${o.sheriff.outcome ? `, ${o.sheriff.outcome}` : ""}` : ""} by ${a.by}`) };
+    }
+    case "savePermit": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (permitProblem(deal, a.permit, serviceDay(s))) return s;
+      const { id, ...input } = a.permit;
+      const permit: Permit = { ...input, id: id ?? `pmt${uid()}`, number: input.number.trim(), jurisdiction: input.jurisdiction.trim(), scopeIds: [...new Set(input.scopeIds)], by: a.by, at: now() };
+      const permits = id ? (deal.permits ?? []).map((item) => (item.id === id ? permit : item)) : [...(deal.permits ?? []), permit];
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, permits })), audit: log(`${deal.loanNumber}: permit ${permit.number} (${permit.status}) recorded by ${a.by}`) };
+    }
+    case "permitNotNeeded": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const line = deal.scope?.find((item) => item.id === a.scopeId);
+      if (!line) return s;
+      const rest = (deal.permitWaivers ?? []).filter((item) => item.scopeId !== a.scopeId);
+      const permitWaivers = a.reason.trim() ? [...rest, { scopeId: a.scopeId, reason: a.reason.trim(), by: a.by, at: now() }] : rest;
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, permitWaivers })), audit: log(`${deal.loanNumber}: ${line.division} ${a.reason.trim() ? `marked as needing no permit (${a.reason.trim()})` : "needs its permit again"} by ${a.by}`) };
+    }
     case "saveLienFile": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
       if (lienFileProblem(a, serviceDay(s))) return s;
@@ -1165,6 +1218,19 @@ function apply(s: Book, a: BookAction): Book {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
       const association = { carrier: a.carrier.trim(), citizens: a.citizens, by: a.by, at: now() };
       return { ...s, deals: upd(a.dealId, (d) => withInsurance(d, { ...insuranceFileOf(d), association })), audit: log(`${deal.loanNumber}: the condo association's building is insured by ${association.carrier}`) };
+    }
+    case "saveMitigation": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (mitigationProblem(a.form, serviceDay(s))) return s;
+      const mitigation = { ...a.form, inspector: a.form.inspector.trim(), by: a.by, at: now() };
+      return { ...s, deals: upd(a.dealId, (d) => withInsurance(d, { ...insuranceFileOf(d), mitigation })), audit: log(`${deal.loanNumber}: wind mitigation form from ${mitigation.inspectedOn} recorded by ${a.by}`) };
+    }
+    case "saveSellerFlood": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (floodDisclosureProblem(deal, a.disclosure)) return s;
+      const d0 = a.disclosure;
+      const sellerFlood = d0.given ? { given: true, flooding: d0.flooding, claim: d0.claim, assistance: d0.assistance, by: a.by, at: now() } : { given: false, by: a.by, at: now() };
+      return { ...s, deals: upd(a.dealId, (d) => withInsurance(d, { ...insuranceFileOf(d), sellerFlood })), audit: log(`${deal.loanNumber}: seller's flood disclosure recorded by ${a.by}${d0.given ? "" : " (not given)"}`) };
     }
     case "setFloodZone": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;

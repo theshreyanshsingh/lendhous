@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { brokerTaxForms, screenBroker } from "@/actions/brokers";
 import { Badge, Section, usd } from "@/components/ui";
 import { approveProblem, BROKER_STATUS, FEE_STATE, feeOf, referralPath } from "@/lib/brokers";
+import { courseProgress } from "@/lib/broker-kit";
 import { shortDay } from "@/lib/format";
 import type { Broker } from "@/lib/mockData";
 import { useStore } from "@/lib/store";
@@ -81,6 +82,7 @@ export function BrokersBoard() {
               {/* A possible match found after approval, by the nightly check: the brokerage can't send deals until it's reviewed. */}
               {broker.status === "approved" && broker.screening?.status === "review" && <FirmMatchReview kind="broker" firmId={broker.id} screening={broker.screening} />}
               {broker.status === "approved" && <BrokerTierAndLimit broker={broker} />}
+              {broker.status === "approved" && <p className="text-xs text-muted-foreground" data-testid="broker-course-progress">LendHous course: {courseProgress(broker).finished ? `finished${broker.training?.finishedAt ? ` ${broker.training.finishedAt.slice(0, 10)}` : ""}` : `${courseProgress(broker).done} of ${courseProgress(broker).total} lessons`}</p>}
               {broker.status === "approved" && broker.referralCode && <p className="text-xs text-muted-foreground">Referral link: <span className="font-mono">{referralPath(broker.referralCode)}</span>{broker.approved ? ` · approved by ${broker.approved.by} on ${shortDay(broker.approved.at)}` : ""}</p>}
               {broker.status === "suspended" && <p className="text-xs text-bad">Suspended by {broker.suspended?.by} on {broker.suspended ? shortDay(broker.suspended.at) : ""}: {broker.suspended?.reason}</p>}
               {fees.length > 0 && (

@@ -13,6 +13,7 @@ import { brokerNumbers } from "@/lib/broker-milestones";
 import { est, useStore } from "@/lib/store";
 import { BrokerBrandForm, BrokerLetters, BrokerStanding } from "@/components/BrokerProgram";
 import { BrokerEarnings } from "@/components/BrokerClient";
+import { BrokerCourse, ProgramSheetLink } from "@/components/BrokerKit";
 
 const CLOSED = ["funded", "servicing_current", "servicing_delinquent", "matured", "default", "paid_off"];
 // Declined or withdrawn: no longer in process, and never earned a fee.
@@ -75,7 +76,9 @@ export default function BrokerHome() {
       <BrokerStanding firm={firm} />
       <BrokerEarnings deals={mine} />
       {firm.referralCode && <ReferralLink code={firm.referralCode} />}
-      {firm.referralCode && <EmbedSnippet referral={firm.referralCode} title="A quote on your own website">Paste this into a page on your site. Visitors see LendHous&apos;s terms on their deal there, and a quote they save is yours, the same as through your link.</EmbedSnippet>}
+      <BrokerCourse firm={firm} />
+      {firm.referralCode && <ProgramSheetLink />}
+      {firm.referralCode && <EmbedSnippet referral={firm.referralCode} brandable={Boolean(firm.brand)} title="A quote on your own website">Paste this into a page on your site. Visitors see LendHous&apos;s terms on their deal there, and a quote they save is yours, the same as through your link.</EmbedSnippet>}
       <div className="grid gap-4 lg:grid-cols-2"><BrokerBrandForm firm={firm} /><BrokerLetters firm={firm} /></div>
       {mine.length === 0 && <EmptyState>No deals yet. Submit your first one to get an instant estimate.</EmptyState>}
       <div className="grid gap-4 lg:grid-cols-2">

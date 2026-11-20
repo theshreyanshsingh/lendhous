@@ -11,7 +11,9 @@ import { PRE_FUNDING } from "@/lib/loan-exits";
 import { refreshSanctionsList, screenDeal } from "@/lib/sanctions-store";
 import { screenBrokerage, screenFirm } from "@/lib/firm-screening";
 import { encryptStoredData } from "@/lib/encrypt-data";
-import { notifyTeam, sendSummary } from "@/lib/email";
+import { notify, notifyTeam, sendSummary } from "@/lib/email";
+import { readSchedules, recipients, writeSchedules } from "@/lib/report-schedule-store";
+import { dueOn, readyEmail, scheduledRows } from "@/lib/scheduled-reports";
 import { readField } from "@/lib/crypto";
 import { summaryEmail } from "@/lib/notice-topics";
 import { noticeContext } from "@/lib/notifications";
@@ -193,6 +195,28 @@ async function sendSummaries() {
   return `sent ${sent} ${sent === 1 ? "summary" : "summaries"} of ${held.length} notice${held.length === 1 ? "" : "s"}${failed ? `; ${failed} failed and wait for tomorrow` : ""}`;
 }
 
+// Reports people asked for on a schedule (lib/scheduled-reports.ts): an email with a link, and the file is made when
+// they open it, for what their account may see then. Someone whose account has gone, or lost access, isn't sent one.
+async function sendScheduledReports(now: Date) {
+  const today = servicingDate(now);
+  const schedules = await readSchedules();
+  const due = schedules.filter((schedule) => dueOn(schedule, today));
+  if (!due.length) return "none due today";
+  const book = (await readBook()).book;
+  const origin = (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "");
+  let sent = 0;
+  for (const schedule of due) {
+    for (const person of await recipients(schedule.to.map((item) => item.id))) {
+      const holder = person.sees === "team" ? undefined : { type: person.sees, id: person.organizationId ?? person.id };
+      const email = readyEmail(schedule, scheduledRows(schedule.kind, book, today, holder).length, origin, today);
+      await notify(person.email, email.subject, email.body, { eventCode: `report.${schedule.kind}`, url: `/api/reports/scheduled/${schedule.kind}` });
+      sent++;
+    }
+  }
+  await writeSchedules(schedules.map((schedule) => (due.some((item) => item.id === schedule.id) ? { ...schedule, lastSent: today } : schedule)));
+  return `${due.length} scheduled report${due.length === 1 ? "" : "s"} to ${sent} ${sent === 1 ? "person" : "people"}`;
+}
+
 // Properties not yet on the map or without a flood zone: the Census geocoder and FEMA's flood map (lib/property-facts.ts).
 const mapProperties = () => mapMissing();
 
@@ -203,7 +227,7 @@ async function watchStorms(now: Date) {
   return result.summary;
 }
 
-export const JOBS: Record<string, Job> = { sanctions: checkSanctions, servicing: checkServicing, termSheets: checkTermSheets, insurance: checkInsurance, taxes: checkTaxes, properties: mapProperties, storms: watchStorms, sessions: purgeSessions, retention: cleanRetention, encryption: sealStoredData, statements: makeMonthlyStatements, summaries: sendSummaries, digest: sendDigest };
+export const JOBS: Record<string, Job> = { sanctions: checkSanctions, servicing: checkServicing, termSheets: checkTermSheets, insurance: checkInsurance, taxes: checkTaxes, properties: mapProperties, storms: watchStorms, sessions: purgeSessions, retention: cleanRetention, encryption: sealStoredData, statements: makeMonthlyStatements, reports: sendScheduledReports, summaries: sendSummaries, digest: sendDigest };
 
 /** NHC writes a new advisory every six hours, so the storm check runs once in each six-hour window; the rest once a day. */
 const EVERY_SIX_HOURS = new Set(["storms"]);

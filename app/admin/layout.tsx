@@ -26,7 +26,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   if (!user) redirect("/login");
   const demo = isDemoEmail(user.email);
   const view = viewFor(user.roleCodes);
-  const [canManageMembers, canViewAudit, canManageSettings, canRouteCapital, canManageCapital, canManagePricing, canViewReports, canIssueLetters, canManageBrokers, unread, newLeads, settings] = await Promise.all([
+  const [canManageMembers, canViewAudit, canManageSettings, canRouteCapital, canManageCapital, canManagePricing, canViewReports, canIssueLetters, canManageBrokers, canManageIncidents, canSendCampaigns, unread, newLeads, settings] = await Promise.all([
     hasPermission(user, "manage_users"),
     hasPermission(user, "view_audit"),
     hasPermission(user, "manage_roles"),
@@ -36,6 +36,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     hasPermission(user, "view_reports"),
     hasPermission(user, "issue_term_sheet"),
     hasPermission(user, "manage_brokers"),
+    hasPermission(user, "manage_incidents"),
+    hasPermission(user, "send_campaigns"),
     unreadCount(user),
     view === "admin" ? unansweredLeads() : 0,
     getSettings(),
@@ -43,7 +45,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // Owners on a real account hear when the nightly jobs stop, and see how many errors are open.
   const watch = canManageSettings && !demo;
   const [stale, openErrors] = watch ? await Promise.all([lastJobRuns().then((runs) => staleJobs(runs, new Date())), recentErrors(new Date(Date.now() - 7 * 86_400_000))]) : [[], 0];
-  const account = { name: user.name, email: user.email, roles: user.roleCodes.map((role) => ROLE_LABEL[role]), demo, canManageMembers, canViewAudit, canManageSettings, canManageFirms: canRouteCapital || canManageCapital, canManagePricing, canViewReports, canIssueLetters, canManageBrokers, staleJobs: stale.map((job) => JOB_LABEL[job]), openErrors, unread, offerSample: settings.offerSampleData !== false };
+  const account = { name: user.name, email: user.email, roles: user.roleCodes.map((role) => ROLE_LABEL[role]), demo, canManageMembers, canViewAudit, canManageSettings, canManageFirms: canRouteCapital || canManageCapital, canManagePricing, canViewReports, canIssueLetters, canManageBrokers, canManageIncidents, canSendCampaigns, staleJobs: stale.map((job) => JOB_LABEL[job]), openErrors, unread, offerSample: settings.offerSampleData !== false };
   return (
     // Every page, demo seats too, prices new quotes on the version the server does, so the two render the same.
     <StoreProvider demo={demo} accountId={user.id} viewerName={user.name} viewerEmail={user.email} initialBook={demo ? undefined : await scopedBook(user)} pricing={(await loadPricing(), pricingPayload([]))} newLeads={newLeads} streetView={!demo && streetViewOn()} targets={targetsFrom(settings.slaTargets as never)} paymentInstructions={demo ? "" : settings.paymentInstructions} referralBonus={demo ? DEMO_BONUS : settings.referralBonusCents / 100} reviewUrl={demo ? "" : settings.reviewUrl} lateFeesToInvestors={!demo && settings.lateFeesToInvestors === true} rules={demo ? DEMO_RULES : rulesFrom(settings)}>

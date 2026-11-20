@@ -35,6 +35,12 @@ import { investorBlocker, ownStatusBlocker, statusProblem } from "./investor-sta
 import { titleUpdateProblem } from "./title-updates";
 import { taxCheckProblem } from "./property-taxes";
 import { condoProblem } from "./condo-check";
+import { floodDisclosureProblem, mitigationProblem } from "./wind-mitigation";
+import { permitProblem } from "./permits";
+import { lessonProblem } from "./broker-kit";
+import { attachmentProblem } from "./draw-attachments";
+import { payeeProblem } from "./draw-payee";
+import { leaseReviewProblem, occupancyProblem } from "./occupancy";
 import { sb264Problem } from "./sb264";
 import { COLLECTIONS, defaultNotice, inBankruptcy, openBankruptcy, stayProblem, stepProblem } from "./collections";
 import { viewFor, type MemberAccess, type Permission } from "./permissions";
@@ -101,7 +107,7 @@ const quietPayoff = (payoff: PayoffRequest): PayoffRequest => ({
 
 /** Removes what identifies the borrower, for a partner or buyer who hasn't closed on the loan. */
 function blind(deal: Deal): Deal {
-  return { ...deal, insurance: undefined, friendReferral: undefined, surveys: undefined, investorUpdates: undefined, workout: undefined, lastSale: undefined, seller: undefined, fileChecks: undefined, taxes: undefined, condo: undefined, sb264: undefined, geo: undefined, stormHold: undefined, transfers: undefined, drawCalls: undefined, releases: undefined, properties: deal.properties?.map(({ id, county, zip, propertyType, value, monthlyRent, taxesAnnual, insuranceAnnual, hoaMonthly, released }) => ({ id, address: "", city: "", zip: `${zip.slice(0, 3)}xx`, county, propertyType, value, monthlyRent, taxesAnnual, insuranceAnnual, hoaMonthly, released })), borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined, closure: undefined, defaults: undefined, extensions: undefined, modifications: undefined, contacts: undefined, promises: undefined, notices: undefined, bankruptcies: undefined, advances: undefined, advancesRepaid: undefined, foreclosure: undefined, reo: undefined, paidOff: undefined, closing: undefined, wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, termSheets: undefined, pricingException: undefined, conditions: undefined, lienFile: undefined, completed: undefined, revenue: undefined, adverseAction: undefined, legalHold: undefined, propertyPhotos: undefined, partnerFunding: undefined, agents: undefined, ...quietPayments(deal, false) };
+  return { ...deal, insurance: undefined, friendReferral: undefined, surveys: undefined, investorUpdates: undefined, workout: undefined, lastSale: undefined, seller: undefined, fileChecks: undefined, taxes: undefined, condo: undefined, leaseReview: undefined, sb264: undefined, geo: undefined, stormHold: undefined, transfers: undefined, drawCalls: undefined, releases: undefined, properties: deal.properties?.map(({ id, county, zip, propertyType, value, monthlyRent, taxesAnnual, insuranceAnnual, hoaMonthly, released }) => ({ id, address: "", city: "", zip: `${zip.slice(0, 3)}xx`, county, propertyType, value, monthlyRent, taxesAnnual, insuranceAnnual, hoaMonthly, released })), borrowerId: "", borrowerName: "", entityName: "", address: "", city: "", zip: deal.zip.slice(0, 3), docs: [], scope: [], scopeSummary: "", brokerId: undefined, brokerPoints: undefined, allocations: [], teaserSentTo: [], route: undefined, source: "", termSheetSignedBy: undefined, termSheetSignedAt: undefined, fundingApprovers: undefined, sponsor: undefined, creditReview: undefined, closure: undefined, defaults: undefined, extensions: undefined, modifications: undefined, contacts: undefined, promises: undefined, notices: undefined, bankruptcies: undefined, advances: undefined, advancesRepaid: undefined, foreclosure: undefined, reo: undefined, paidOff: undefined, closing: undefined, wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, termSheets: undefined, pricingException: undefined, conditions: undefined, lienFile: undefined, completed: undefined, revenue: undefined, adverseAction: undefined, legalHold: undefined, propertyPhotos: undefined, partnerFunding: undefined, agents: undefined, ...quietPayments(deal, false) };
 }
 
 /** The conditions that are the borrower's to meet (Spec B17), without who on the team handled them or why one was waived. */
@@ -141,19 +147,19 @@ const clientAgents = (deal: Deal): Partial<Deal> => ({
 
 /** The insurance file without who on the team entered or checked each part. */
 const clientInsurance = (deal: Deal): Partial<Deal> => ({
-  insurance: deal.insurance && { ...deal.insurance, policies: deal.insurance.policies.map((item) => ({ ...item, by: "" })), flood: deal.insurance.flood && { ...deal.insurance.flood, by: "" }, renewals: deal.insurance.renewals?.map((item) => ({ ...item, decided: item.decided && { ...item.decided, by: "" } })) },
+  insurance: deal.insurance && { ...deal.insurance, policies: deal.insurance.policies.map((item) => ({ ...item, by: "" })), flood: deal.insurance.flood && { ...deal.insurance.flood, by: "" }, mitigation: deal.insurance.mitigation && { ...deal.insurance.mitigation, by: "" }, sellerFlood: deal.insurance.sellerFlood && { ...deal.insurance.sellerFlood, by: "" }, renewals: deal.insurance.renewals?.map((item) => ({ ...item, decided: item.decided && { ...item.decided, by: "" } })) },
 });
 
 /** What only the team sees on a loan it shares with a client. Wire instructions never leave the team: a client who sees them is a client who can be sent fake ones. */
 function forClient(deal: Deal): Deal {
-  return { ...deal, ...latestForClient(deal), ...clientConditions(deal), ...clientRecords(deal), ...clientAgents(deal), ...clientInsurance(deal), ...clientCollections(deal), partnerFunding: undefined, transfers: undefined, drawCalls: undefined, allocations: [], teaserSentTo: [], route: undefined, capitalStatus: "not_started", contractorIsGtAffiliate: undefined, source: "", fundingApprovers: undefined, creditReview: undefined, ...quietPayments(deal, true), ...quietExits(deal), wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, friendReferral: undefined, surveys: undefined, investorUpdates: undefined, workout: undefined, lastSale: undefined, seller: undefined, fileChecks: undefined, taxes: undefined, sb264: undefined };
+  return { ...deal, ...latestForClient(deal), ...clientConditions(deal), ...clientRecords(deal), ...clientAgents(deal), ...clientInsurance(deal), ...clientCollections(deal), partnerFunding: undefined, transfers: undefined, drawCalls: undefined, allocations: [], teaserSentTo: [], route: undefined, capitalStatus: "not_started", contractorIsGtAffiliate: undefined, source: "", fundingApprovers: undefined, creditReview: undefined, ...quietPayments(deal, true), ...quietExits(deal), wires: undefined, fundingWireId: undefined, screenings: undefined, titleLink: undefined, friendReferral: undefined, surveys: undefined, investorUpdates: undefined, workout: undefined, lastSale: undefined, seller: undefined, fileChecks: undefined, taxes: undefined, sb264: undefined, leaseReview: undefined };
 }
 
 /**
  * What a partner or buyer that holds a loan also sees: the team's updates for its investors, any workout, the foreclosure's
  * steps and the bank-owned property's sale, which its statements follow. Not the team's calls, notices or notes.
  */
-const forHolder = (deal: Deal): Deal => ({ ...forClient(deal), investorUpdates: deal.investorUpdates, workout: deal.workout, bankruptcies: deal.bankruptcies?.map((item) => ({ ...item, debtor: "", caseNumber: "", court: "", by: "", ended: item.ended && { ...item.ended, by: "" } })), advances: deal.advances?.map((item) => ({ ...item, note: "", by: "" })), foreclosure: deal.foreclosure && { ...deal.foreclosure, by: "", steps: deal.foreclosure.steps.map((step) => ({ ...step, note: "", by: "" })), stopped: deal.foreclosure.stopped && { ...deal.foreclosure.stopped, note: "", by: "" } }, reo: deal.reo && { ...deal.reo, by: "", listed: deal.reo.listed && { ...deal.reo.listed, by: "" }, sold: deal.reo.sold && { ...deal.reo.sold, by: "" } } });
+const forHolder = (deal: Deal): Deal => ({ ...forClient(deal), investorUpdates: deal.investorUpdates, workout: deal.workout, bankruptcies: deal.bankruptcies?.map((item) => ({ ...item, debtor: "", caseNumber: "", court: "", by: "", ended: item.ended && { ...item.ended, by: "" } })), advances: deal.advances?.map((item) => ({ ...item, note: "", by: "" })), foreclosure: deal.foreclosure && { ...deal.foreclosure, by: "", steps: deal.foreclosure.steps.map((step) => ({ ...step, note: "", by: "" })), stopped: deal.foreclosure.stopped && { ...deal.foreclosure.stopped, note: "", by: "" } }, reo: deal.reo && { ...deal.reo, by: "", listed: deal.reo.listed && { ...deal.reo.listed, by: "" }, sold: deal.reo.sold && { ...deal.reo.sold, by: "" }, occupancy: deal.reo.occupancy && { ...deal.reo.occupancy, note: "", by: "" } } });
 
 /** A partner's own draw shares, and the share transfers it was part of, on a loan it holds or held. */
 const ownMoves = (deal: Deal, partnerId: string) => {
@@ -495,6 +501,14 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
     case "approveBroker": {
       const problem = approveProblem(book.brokers.find((item) => item.id === action.brokerId), action.reason);
       return problem ? no(problem) : staffOnlyAllowed("manage_brokers") ? ok({ ...action, by: viewer.name }) : no(NOT_ALLOWED);
+    }
+    case "passBrokerLesson": {
+      const broker = book.brokers.find((item) => item.id === action.brokerId);
+      if (!broker) return no(GONE);
+      if (!(view === "broker" && firmOf(viewer) === broker.id)) return no(NOT_ALLOWED);
+      if (broker.training?.done.includes(action.lessonId)) return no("That lesson is already passed.");
+      const problem = lessonProblem(action.lessonId, action.answer);
+      return problem ? no(problem) : ok();
     }
     case "saveBrokerBrand": {
       const broker = book.brokers.find((item) => item.id === action.brokerId);
@@ -920,6 +934,11 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       if (!(view === "borrower" && deal.borrowerId === viewer.id)) return no(NOT_ALLOWED);
       if (!FUNDED.includes(deal.status)) return no("Draws start once the loan is funded.");
       if (action.linePhotos?.some((photo) => photo.documentId && !action.photoIds?.includes(photo.documentId))) return no("A photo on this draw wasn't uploaded with it. Try again.");
+      if (action.attachments?.length) {
+        const refused = attachmentProblem(action.attachments.map((item) => ({ name: item.name, size: 0, kind: item.kind })));
+        if (refused) return no(refused);
+        if (action.attachments.some((item) => item.documentId && !action.photoIds?.includes(item.documentId))) return no("A file on this draw wasn't uploaded with it. Try again.");
+      }
       if (action.path === "desk") {
         const lines = action.lines.filter((line) => line.requested > 0);
         const refused = deskProblem(book, deal, lines, action.linePhotos ?? [], new Date().toISOString());
@@ -987,17 +1006,20 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       if (!draw) return no(GONE);
       const blocked = action.t === "releaseDraw" ? ofacBlocker(dealOf(draw.dealId)!, serviceDay(book)) : null;
       if (blocked) return no(`${blocked}.`);
+      if (action.t === "releaseDraw") { const refused = payeeProblem(dealOf(draw.dealId)!, action.payee); if (refused) return no(refused); }
       // Florida's lien law and the insurance hold the money until they're met or an owner releases it past them.
       const holds = action.t === "releaseDraw" ? unreleasedHolds(dealOf(draw.dealId)!, draw, serviceDay(book)) : [];
       return holds.length ? no(holds[0]) : staffOnly("approve_draw");
     }
-    case "saveInsurance": case "setFloodZone": case "decideRenewal": case "saveAssociationPolicy": {
+    case "saveInsurance": case "setFloodZone": case "decideRenewal": case "saveAssociationPolicy": case "saveMitigation": case "saveSellerFlood": {
       const deal = dealOf(action.dealId);
       if (!deal) return no(GONE);
       if (!staffOnlyAllowed("manage_conditions", "service_loans", "approve_draw", "assign_inspection")) return no(NOT_ALLOWED);
       if (!INSURED.includes(deal.status)) return no("The insurance file is kept from an accepted term sheet until the loan is paid off.");
       if (action.t === "saveInsurance") { const refused = policyProblem(deal, action); if (refused) return no(refused); }
       if (action.t === "saveAssociationPolicy" && deal.app.propertyType !== "condo") return no("Only a condo has an association's policy to record.");
+      if (action.t === "saveMitigation") { const refused = mitigationProblem(action.form, serviceDay(book)); if (refused) return no(refused); }
+      if (action.t === "saveSellerFlood") { const refused = floodDisclosureProblem(deal, action.disclosure); if (refused) return no(refused); }
       if (action.t === "decideRenewal") {
         if (!openRenewals(deal).some((item) => item.id === action.renewalId)) return no("That renewal has already been looked at.");
         if (!action.accept && !action.note.trim()) return no("Say what's wrong with it, so the borrower knows what to send.");
@@ -1008,6 +1030,29 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       // The upload route sends this once the file is stored, after checking the uploader is the borrower or the team.
       if (!trusted) return no("Upload the policy itself to send it.");
       return dealOf(action.dealId) ? ok() : no(GONE);
+    case "saveLeaseReview": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      if (!staffOnlyAllowed("review_documents", "manage_conditions")) return no(NOT_ALLOWED);
+      const refused = leaseReviewProblem(deal, action.review);
+      return refused ? no(refused) : ok({ ...action, by: viewer.name });
+    }
+    case "saveOccupancy": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      if (!staffOnlyAllowed("declare_default", "service_loans")) return no(NOT_ALLOWED);
+      const refused = occupancyProblem(deal, action.occupancy, serviceDay(book));
+      return refused ? no(refused) : ok({ ...action, by: viewer.name });
+    }
+    case "savePermit": case "permitNotNeeded": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      if (!staffOnlyAllowed("approve_draw", "assign_inspection", "manage_conditions")) return no(NOT_ALLOWED);
+      if (!deal.scope?.length) return no("This loan has no budget lines to permit.");
+      if (action.t === "savePermit") { const refused = permitProblem(deal, action.permit, serviceDay(book)); if (refused) return no(refused); }
+      if (action.t === "permitNotNeeded" && !deal.scope.some((line) => line.id === action.scopeId)) return no("That budget line isn't on this loan.");
+      return ok({ ...action, by: viewer.name });
+    }
     case "saveLienFile": case "addNoticeToOwner": {
       const deal = dealOf(action.dealId);
       if (!deal) return no(GONE);

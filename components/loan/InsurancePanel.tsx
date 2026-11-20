@@ -11,6 +11,7 @@ import { daysBetween, SERVICED } from "@/lib/servicing";
 import { useStore } from "@/lib/store";
 import { FloodMapLine } from "./FloodMapLine";
 import { useServiceDay } from "./use-service-day";
+import { WindAndFlood } from "./WindAndFlood";
 
 const small = "h-9! px-3! text-xs!";
 type Draft = { kind: PolicyKind; carrier: string; policy: string; expiresOn: string; coverage: string; windIncluded: boolean; mortgagee: boolean; citizens?: boolean; program: "" | "nfip" | "private" };
@@ -147,6 +148,7 @@ export function InsurancePanel({ deal }: { deal: Deal }) {
             </div>
           </div>
         )}
+        <WindAndFlood deal={deal} />
         {warnings.length > 0 && <ul className="space-y-1 text-xs" data-testid="insurance-warnings">{warnings.map((warning) => <li key={warning.key} className={warning.tone === "warn" ? "text-warn" : "text-muted-foreground"} data-testid={`insurance-warning-${warning.key}`}>{warning.text}</li>)}</ul>}
         {gaps.length > 0 && <ul className="space-y-0.5 text-xs text-warn" data-testid="insurance-gaps">{gaps.map((gap) => <li key={gap}>{gap}</li>)}</ul>}
       </div>

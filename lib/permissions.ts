@@ -49,6 +49,8 @@ export const PERMISSIONS = {
   view_reports: "See the business reports",
   assign_loans: "Assign loan officers and processors to loans",
   manage_brokers: "Approve and suspend brokers, and record their fees as paid",
+  manage_incidents: "Record security incidents and send Florida's breach notices",
+  send_campaigns: "Send marketing emails to brokers and borrowers",
 } as const;
 export type Permission = keyof typeof PERMISSIONS;
 
