@@ -113,7 +113,7 @@ export function TermSheetBuilder({ deal }: { deal: Deal }) {
             {problem && !hard && (reasons.length === 0 || covered) && <p className="text-xs text-warn">{problem}</p>}
             <div className="flex flex-wrap items-center gap-2">
               <button type="button" className="btn-primary" data-testid="issue-term-sheet" disabled={busy || Boolean(problem)} onClick={() => void run({ t: "issueTermSheet", dealId: deal.id, ...draft, by: viewerName })}>{busy ? "Sending…" : `Send term sheet version ${version}`}</button>
-              {today && <span className="text-xs text-muted-foreground">The borrower has {TERM_SHEET_DAYS} days to accept it, until {addDays(today, TERM_SHEET_DAYS)}.</span>}
+              {today && <span className="text-xs text-muted-foreground">The borrower has {TERM_SHEET_DAYS} days to accept it, until {shortDay(addDays(today, TERM_SHEET_DAYS))}.</span>}
             </div>
           </div>
         </Section>

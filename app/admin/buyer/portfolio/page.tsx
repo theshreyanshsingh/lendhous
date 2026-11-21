@@ -54,7 +54,7 @@ function Holdings({ me }: { me: LoanBuyer }) {
                 {(() => { const deal = s.deals.find((item) => item.id === sale.dealId); return deal ? <LoanOutlook deal={deal} /> : null; })()}
                 <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
                   <Stat label="Balance" value={usd(tape.balance)} />
-                  <Stat label="You paid" value={usd(holding.paid)} sub={`${sale.soldPct?.toFixed(2)} on ${sale.soldAt}`} />
+                  <Stat label="You paid" value={usd(holding.paid)} sub={`${sale.soldPct?.toFixed(2)} on ${shortDay(sale.soldAt)}`} />
                   <Stat label="Yield" value={`${holding.yield.toFixed(2)}%`} />
                   <Stat label="Monthly" value={usd(holding.monthlyIncome)} sub={`matures ${shortDay(tape.maturity)}`} />
                 </div>

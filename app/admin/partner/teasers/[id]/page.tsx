@@ -8,6 +8,7 @@ import { Badge, GradeBadge, RatioPill, Section, Stat, usd, productLabel, ratioGr
 import { shortDay } from "@/lib/format";
 import { PartnerFunds } from "@/components/loan/PartnerFunds";
 import { PropertyPicture } from "@/components/PropertyPicture";
+import { BackLink } from "@/components/back-link";
 
 export default function TeaserDetail() {
   const { id } = useParams<{ id: string }>(); const { s, dispatch } = useStore();
@@ -21,7 +22,7 @@ export default function TeaserDetail() {
   const rate = form.lenderRate || Number(t.lenderYieldOffered.toFixed(2));
   return (
     <div className="space-y-4">
-      <Link href="/admin/partner" className="text-sm text-link">← Deal feed</Link>
+      <BackLink href="/admin/partner">Deal feed</BackLink>
       <div className="glass p-5"><div className="flex items-start gap-3 sm:gap-4"><PropertyPicture deal={d} variant="header" blind={!won} /><div className="flex min-w-0 flex-1 flex-wrap items-start justify-between gap-2"><div className="min-w-0"><div className="text-xs text-muted-foreground">{t.teaserId} · {productLabel[t.product]} · closing target {shortDay(t.closingDate)}</div><h1 className="text-xl font-normal tracking-tight">{won ? `${d.address}, ${d.city} ${d.zip}` : `${t.county} County · ZIP ${t.zip3}`}</h1><div className="text-sm text-muted-foreground">{won ? `${d.borrowerName} · ${d.entityName}` : "Borrower identity hidden until a binding commitment"}</div></div><GradeBadge grade={t.grade} score={t.score} /></div></div></div>
       <div className="grid gap-4 lg:grid-cols-[1fr_380px]">
         <div className="space-y-4">

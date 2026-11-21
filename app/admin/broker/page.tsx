@@ -72,14 +72,6 @@ export default function BrokerHome() {
         <div className="glass p-4"><Stat label="Fees expected" value={usd(total("expected"))} sub="loans in process" /></div>
         <div className="glass p-4"><Stat label="Fees earned" value={<span className="text-good" data-testid="fees-earned">{usd(total("paid") + total("unpaid"))}</span>} sub={total("unpaid") ? <span className="text-warn" data-testid="fees-unpaid">{usd(total("unpaid"))} not paid yet</span> : "all paid"} /></div>
       </div>
-      <BrokerNumbers deals={mine} />
-      <BrokerStanding firm={firm} />
-      <BrokerEarnings deals={mine} />
-      {firm.referralCode && <ReferralLink code={firm.referralCode} />}
-      <BrokerCourse firm={firm} />
-      {firm.referralCode && <ProgramSheetLink />}
-      {firm.referralCode && <EmbedSnippet referral={firm.referralCode} brandable={Boolean(firm.brand)} title="A quote on your own website">Paste this into a page on your site. Visitors see LendHous&apos;s terms on their deal there, and a quote they save is yours, the same as through your link.</EmbedSnippet>}
-      <div className="grid gap-4 lg:grid-cols-2"><BrokerBrandForm firm={firm} /><BrokerLetters firm={firm} /></div>
       {mine.length === 0 && <EmptyState>No deals yet. Submit your first one to get an instant estimate.</EmptyState>}
       <div className="grid gap-4 lg:grid-cols-2">
         {mine.map((deal) => {
@@ -101,6 +93,15 @@ export default function BrokerHome() {
           );
         })}
       </div>
+      <BrokerNumbers deals={mine} />
+      <BrokerStanding firm={firm} />
+      <BrokerEarnings deals={mine} />
+      <h2 className="eyebrow pt-4" data-testid="broker-tools">Tools to bring in more deals</h2>
+      {firm.referralCode && <ReferralLink code={firm.referralCode} />}
+      <BrokerCourse firm={firm} />
+      {firm.referralCode && <ProgramSheetLink />}
+      {firm.referralCode && <EmbedSnippet referral={firm.referralCode} brandable={Boolean(firm.brand)} title="A quote on your own website">Paste this into a page on your site. Visitors see LendHous&apos;s terms on their deal there, and a quote they save is yours, the same as through your link.</EmbedSnippet>}
+      <div className="grid gap-4 lg:grid-cols-2"><BrokerBrandForm firm={firm} /><BrokerLetters firm={firm} /></div>
     </div>
   );
 }

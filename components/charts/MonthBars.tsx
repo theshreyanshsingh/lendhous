@@ -43,7 +43,7 @@ export function MonthBars({ data, label, money = (n: number) => usd(n, 2), testi
         </div>
       </div>
       <div className="mt-1 flex gap-[2px] pl-11" aria-hidden="true">
-        {data.map((item) => <span key={item.month} className="min-w-0 flex-1 truncate text-center text-[10px] text-muted-foreground">{showYear && item.month.endsWith("-01") ? monthLabel(item.month, "short") : monthLabel(item.month)}</span>)}
+        {data.map((item) => <span key={item.month} className="min-w-0 flex-1 text-center text-[10px] leading-tight text-muted-foreground"><span className="block truncate">{monthLabel(item.month)}</span>{showYear && item.month.endsWith("-01") && <span className="block">{item.month.slice(0, 4)}</span>}</span>)}
       </div>
       {/* a table won't shrink to sr-only's 1px, so it sits in a box that does */}
       <div className="sr-only">

@@ -5,7 +5,7 @@ import { statusWords } from "@/lib/status-words";
 
 export const usd = (n: number, d = 0) => (n < 0 ? "−" : "") + "$" + Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: d, maximumFractionDigits: d });
 export const pct = (x: number, d = 1) => (x * 100).toFixed(d) + "%";
-export const k = (n: number) => (Math.abs(n) >= 1e6 ? "$" + (n / 1e6).toFixed(2) + "M" : "$" + Math.round(n / 1000).toLocaleString() + "k");
+export const k = (n: number) => (n < 0 ? "−" : "") + (Math.abs(n) >= 999_500 ? "$" + (Math.abs(n) / 1e6).toFixed(2) + "M" : Math.abs(n) >= 1000 ? "$" + Math.round(Math.abs(n) / 1000).toLocaleString() + "k" : "$" + Math.round(Math.abs(n)).toLocaleString());
 
 // good / warn / bad are UPB's status tokens; tints match its StatusPill
 const colorCls: Record<Color, string> = {

@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { clientLinkStatus, resendClientLink, type ClientLink } from "@/actions/broker-clients";
-import { Badge, Section, usd } from "@/components/ui";
+import { Badge, points, Section, usd } from "@/components/ui";
 import { FEE_STATE, feeOf } from "@/lib/brokers";
 import { downloadCsv } from "@/lib/csv";
 import { shortDay } from "@/lib/format";
@@ -73,7 +73,7 @@ export function BrokerEarnings({ deals }: { deals: Deal[] }) {
           {rows.map(({ deal, fee }) => (
             <tr key={deal.id} className="border-b border-border last:border-0" data-testid="broker-fee-row">
               <td>{deal.loanNumber}<small className="block text-xs text-muted-foreground">{deal.borrowerName} · {deal.city}</small></td>
-              <td data-label="Fee" className="text-right tabular-nums">{usd(fee.amount, 2)}<small className="block text-xs text-muted-foreground">{deal.brokerPoints ?? 0} points</small></td>
+              <td data-label="Fee" className="text-right tabular-nums">{usd(fee.amount, 2)}<small className="block text-xs text-muted-foreground">{points(deal.brokerPoints)}</small></td>
               <td data-label="Status"><Badge tone={fee.state === "paid" ? "green" : fee.state === "unpaid" ? "amber" : "slate"}>{FEE_STATE[fee.state]}</Badge></td>
               {/* When it's due: paid at closing, so the closing date, set or done. */}
               <td data-label="Paid" data-testid="broker-fee-when">{deal.brokerFeePaid ? `${shortDay(deal.brokerFeePaid.on)}${deal.brokerFeePaid.reference ? ` · ${deal.brokerFeePaid.reference}` : ""}` : deal.closingDate ? <span className="text-muted-foreground">{fee.state === "unpaid" ? `Closed ${shortDay(deal.closingDate)}` : `Closing set for ${shortDay(deal.closingDate)}`}</span> : <span className="text-muted-foreground">At closing</span>}</td>

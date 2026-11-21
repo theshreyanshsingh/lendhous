@@ -37,6 +37,7 @@ import { PropertySchedule } from "@/components/loan/PropertySchedule";
 import { interestBasis, PLAIN_RATIO } from "@/lib/status-words";
 import { Badge, Section, Stat, usd, pct, productLabel, statusLabel } from "@/components/ui";
 import { shortDay } from "@/lib/format";
+import { BackLink } from "@/components/back-link";
 
 
 export default function BorrowerLoan() {
@@ -52,7 +53,7 @@ export default function BorrowerLoan() {
   const keyRatios = e.ratios.filter((r) => ["ltc", "ltarv", "ltv", "dscr"].includes(r.key)); // flip: LTC/LTARV · bridge: LTV · DSCR: LTV/DSCR
   return (
     <div className="space-y-4">
-      <Link href="/admin/borrower" className="text-sm text-link">← My loans</Link>
+      <BackLink href="/admin/borrower">My loans</BackLink>
       <div className="glass p-5">
         <div className="flex items-start gap-3 sm:gap-4">
           <PropertyPicture deal={d} variant="header" />
@@ -69,7 +70,6 @@ export default function BorrowerLoan() {
             )}
         {/* The full width, so its form fits a small phone beside nothing. */}
         {closed && <CloseApplication deal={d} side="borrower" />}
-        {PRE_FUNDING.includes(d.status) && <div className="mt-3"><CloseApplication deal={d} side="borrower" /></div>}
         <LoanTimeline deal={d} side="client" />
       </div>
       <FundedNote deal={d} />
@@ -119,6 +119,12 @@ export default function BorrowerLoan() {
           <Section title="Your team"><TeamContacts deal={d} /><div className="mt-3 rounded-md bg-bad/10 p-2 text-xs text-bad">Wire-fraud warning: we will never email you wire instructions. Always confirm by phone with a number you already have.</div></Section>
         </div>
       </div>
+      {PRE_FUNDING.includes(d.status) && (
+        <section className="rounded-[2px] border border-dashed border-border p-4 text-sm sm:p-5" data-testid="withdraw-card">
+          <p className="text-muted-foreground">Plans changed? You can withdraw this application and start a new one any time.</p>
+          <CloseApplication deal={d} side="borrower" />
+        </section>
+      )}
     </div>
   );
 }

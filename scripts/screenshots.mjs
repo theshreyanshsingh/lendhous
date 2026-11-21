@@ -1947,6 +1947,14 @@ await pp.evaluate(() => window.scrollTo(0, 1800));
 await pp.getByTestId("tab-Documents").click();
 await pp.waitForTimeout(300);
 ok("a loan's tabs stay in reach on a phone and open at their top", await pp.evaluate(() => { const bar = document.querySelector("[data-testid='deal-tabs']").getBoundingClientRect(); const content = document.querySelector("[data-testid='deal-tabs']").nextElementSibling.getBoundingClientRect(); return bar.top >= 0 && bar.top <= 60 && content.top >= bar.bottom && content.top <= bar.bottom + 40; }));
+// A link that opens a loan on a later tab shows that tab in the row, and the header keeps to what identifies the loan.
+await pp.goto(BASE + "/admin/deals/d2?tab=Servicing");
+await pp.getByTestId("tab-Servicing").waitFor();
+await pp.waitForTimeout(300);
+ok("a loan opened on a later tab shows that tab in its row on a phone", await pp.evaluate(() => { const tab = document.querySelector("[data-testid='tab-Servicing']").getBoundingClientRect(); return tab.left >= 0 && tab.right <= window.innerWidth; }) && (await pp.getByTestId("tab-Servicing").getAttribute("aria-selected")) === "true");
+ok("a loan's team and details fold on a phone", !(await pp.getByTestId("loan-team").isVisible()) && (await pp.getByTestId("loan-details-toggle").isVisible()));
+await pp.getByTestId("loan-details-toggle").click();
+ok("and open on a tap", await pp.getByTestId("loan-team").isVisible());
 await phone.close();
 
 // A visitor's phone: the quote's fields don't make iPhones zoom, its button stays under the thumb, and the other pages

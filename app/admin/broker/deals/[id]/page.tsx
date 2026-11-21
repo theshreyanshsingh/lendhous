@@ -12,6 +12,7 @@ import { PropertyPhotos } from "@/components/loan/PropertyPhotos";
 import Tracker from "@/components/Tracker";
 import { Badge, Section, Stat, points, productLabel, statusLabel, usd } from "@/components/ui";
 import { est, useStore } from "@/lib/store";
+import { BackLink } from "@/components/back-link";
 
 export default function BrokerDeal() {
   const { id } = useParams<{ id: string }>();
@@ -21,7 +22,7 @@ export default function BrokerDeal() {
   const e = est(deal.app);
   return (
     <div className="space-y-4">
-      <Link href="/admin/broker" className="text-sm text-link">← My deals</Link>
+      <BackLink href="/admin/broker">My deals</BackLink>
       <div className="glass p-5">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="min-w-0"><div className="text-xs text-muted-foreground">{deal.loanNumber} · {productLabel[deal.app.product]} · {deal.entityName}</div><h1 className="text-xl font-normal tracking-tight">{deal.borrowerName}</h1><div className="text-sm text-muted-foreground">{deal.address}, {deal.city} {deal.zip}</div></div>

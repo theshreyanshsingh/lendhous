@@ -32,7 +32,6 @@ export default function BorrowerHome() {
         <div className="min-w-0"><PageIntro eyebrow="Welcome back" title={viewerName} lede="Your applications and funded loans. Open one to see its next step and upload documents." /></div>
         <Link href="/admin/apply" className="btn-primary mb-6">+ Apply for a loan</Link>
       </div>
-      <PushToggle offer />
       {tasks.length > 0 && (
         <div className="glass flex flex-wrap items-center justify-between gap-3 border-warn/30 bg-warn/12 p-4 text-sm text-warn" data-testid="docs-owed">
           <p className="min-w-0 flex-1 basis-48"><b>{tasks.length} document{tasks.length > 1 ? "s" : ""} needed</b> across your loans.<span className="max-md:hidden"> Open a loan to upload.</span></p>
@@ -41,7 +40,6 @@ export default function BorrowerHome() {
         </div>
       )}
       <BorrowerLetters />
-      <ReferAFriend />
       {closedLoans.length > 0 && (
         <div className="flex gap-2" role="tablist" aria-label="Your loans">
           {([["active", "Active", all.length - closedLoans.length], ["closed", "Paid off, declined and withdrawn", closedLoans.length]] as const).map(([key, label, count]) => <button key={key} type="button" role="tab" aria-selected={shown === key} data-testid={`loans-tab-${key}`} onClick={() => setShown(key)} className={`rounded-full px-3 py-1.5 text-xs font-medium ${shown === key ? "bg-primary text-primary-foreground" : "border border-rule text-muted-foreground hover:text-foreground"}`}>{label} ({count})</button>)}
@@ -91,6 +89,8 @@ export default function BorrowerHome() {
           );
         })}
       </div>
+      <PushToggle offer />
+      <ReferAFriend />
     </div>
   );
 }

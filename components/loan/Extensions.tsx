@@ -85,7 +85,7 @@ function OpenExtension({ deal, extension, today }: { deal: Deal; extension: Loan
   return (
     <div className="space-y-3 text-sm" data-testid="extension-open">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="min-w-0"><b>{extension.months} more month{extension.months === 1 ? "" : "s"}</b>: {extension.fromMaturity} to {after}. Fee {usd(extension.fee, 2)}.</p>
+        <p className="min-w-0"><b>{extension.months} more month{extension.months === 1 ? "" : "s"}</b>: {shortDay(extension.fromMaturity)} to {shortDay(after)}. Fee {usd(extension.fee, 2)}.</p>
         <Badge tone={statusTone[extension.status]}>{statusText[extension.status]}</Badge>
       </div>
       <p className="text-muted-foreground">Asked by {extension.requestedBy} on {shortDate(extension.requestedAt)}: {extension.reason}</p>

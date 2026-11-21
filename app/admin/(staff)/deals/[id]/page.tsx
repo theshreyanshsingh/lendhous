@@ -58,6 +58,9 @@ import { PropertyPicture } from "@/components/PropertyPicture";
 import { Showcase } from "@/components/loan/Showcase";
 import { TeamLoanStatements } from "@/components/loan/LoanStatements";
 import { ExitPlanCard } from "@/components/loan/ExitPlanCard";
+import { ChevronDown } from "lucide-react";
+import { BackLink } from "@/components/back-link";
+import { useScrollRow } from "@/components/scroll-row";
 
 // Closing starts once the term sheet is accepted, and stays as the record of how the money went out.
 const CLOSING_TAB = ["term_sheet_accepted", "conditions", "clear_to_close", "closing", "funded", "servicing_current", "servicing_delinquent", "matured", "default", "paid_off"];
@@ -70,6 +73,8 @@ export default function DealWorkspace() {
   const { id } = useParams<{ id: string }>(); const { s, dispatch, applyReply, local, viewerName } = useStore();
   const d = s.deals.find((x) => x.id === id);
   const [invite, setInvite] = useState("");
+  // On a phone the header keeps to what identifies the loan; the team pickers, broker and the rest open on a tap.
+  const [details, setDetails] = useState(false);
   const [request, setRequest] = useState({ name: "", category: "Property" });
   // Sending a document back says what's still needed, which the borrower sees on it.
   const [sendBack, setSendBack] = useState<{ docId: string; note: string } | null>(null);
@@ -77,11 +82,9 @@ export default function DealWorkspace() {
   // The work queue links straight to the tab where its item is done (?tab=Documents).
   useEffect(() => { const asked = new URLSearchParams(window.location.search).get("tab"); if (asked && (allTabs as readonly string[]).includes(asked)) setTab(asked as Tab); }, []);
   // Opening a tab from far down the page starts it at its top, just under the tab row, and brings the tab itself into view.
+  const tabRow = useScrollRow<HTMLDivElement>(tab);
   const openTab = (next: Tab, button: HTMLElement) => {
     setTab(next);
-    // Sideways only: scrollIntoView would also move the page to where the pinned row started.
-    const row = button.parentElement;
-    if (row) row.scrollTo({ left: button.offsetLeft - (row.clientWidth - button.offsetWidth) / 2, behavior: "smooth" });
     const bar = button.closest<HTMLElement>("[data-testid='deal-tabs']");
     const stuck = bar && bar.getBoundingClientRect().top <= parseFloat(getComputedStyle(bar).top) + 1;
     if (!bar || !stuck) return;
@@ -131,7 +134,7 @@ export default function DealWorkspace() {
 
   return (
     <div className="space-y-4">
-      <Link href="/admin" className="text-sm text-link">← Pipeline</Link>
+      <BackLink href="/admin">Pipeline</BackLink>
       <div className="glass p-5">
         <div className="flex items-start gap-3 sm:gap-4">
         <PropertyPicture deal={d} variant="header" />
@@ -139,11 +142,14 @@ export default function DealWorkspace() {
           <div className="min-w-0"><div className="text-xs text-muted-foreground">{d.loanNumber} · {productLabel[d.app.product]} · source: {d.source.replace("_", " ")}</div>
             <h1 className="text-xl font-normal tracking-tight">{d.address}, {d.city} {d.zip} <span className="font-normal text-faint">({d.app.county})</span></h1>
             <div className="text-sm text-muted-foreground">{d.borrowerName} · {d.entityName} · FICO {d.app.fico} · Tier {e.tier}</div>
-            {d.app.repeat && <div className="text-sm text-muted-foreground" data-testid="deal-repeat">{d.app.repeat.pausedBy ? <span className="text-warn">Repeat borrower, pricing paused: a late payment on {d.app.repeat.pausedBy} in the 24 months before {shortDay(d.app.repeat.asOf)}</span> : <>Repeat borrower: {d.app.repeat.loans} LendHous loan{d.app.repeat.loans === 1 ? "" : "s"} paid as agreed ({d.app.repeat.counted.join(", ")}) when it was submitted</>}</div>}
-            {broker && <div className="text-sm text-muted-foreground" data-testid="deal-broker">Broker: {broker.name} · {points(d.brokerPoints)} ({usd((orig.noteAmount * (d.brokerPoints ?? 0)) / 100)})</div>}
             {PRE_FUNDING.includes(d.status) && <div className="mt-1 text-sm text-muted-foreground" data-testid="loan-facts">Target closing <b className="font-medium text-foreground">{shortDay(d.closingDate)}</b>{today && <> · {closingIn(d.closingDate, today)}</>}</div>}
-            <Showcase deal={d} side="team" />
-            <div className="mt-2"><LoanTeam deal={d} /></div></div>
+            <button type="button" className="-mb-2 inline-flex min-h-11 items-center gap-1 text-sm text-link sm:hidden" aria-expanded={details} aria-controls="loan-details" data-testid="loan-details-toggle" onClick={() => setDetails(!details)}>{details ? "Hide the loan team and details" : "Loan team and details"}<ChevronDown className={`size-3.5 transition-transform ${details ? "rotate-180" : ""}`} aria-hidden="true" /></button>
+            <div id="loan-details" className={details ? "" : "max-sm:hidden"} data-testid="loan-details">
+              {d.app.repeat && <div className="text-sm text-muted-foreground" data-testid="deal-repeat">{d.app.repeat.pausedBy ? <span className="text-warn">Repeat borrower, pricing paused: a late payment on {d.app.repeat.pausedBy} in the 24 months before {shortDay(d.app.repeat.asOf)}</span> : <>Repeat borrower: {d.app.repeat.loans} LendHous loan{d.app.repeat.loans === 1 ? "" : "s"} paid as agreed ({d.app.repeat.counted.join(", ")}) when it was submitted</>}</div>}
+              {broker && <div className="text-sm text-muted-foreground" data-testid="deal-broker">Broker: {broker.name} · {points(d.brokerPoints)} ({usd((orig.noteAmount * (d.brokerPoints ?? 0)) / 100)})</div>}
+              <Showcase deal={d} side="team" />
+              <div className="mt-2"><LoanTeam deal={d} /></div>
+            </div></div>
           <div className="flex flex-wrap items-center gap-2"><GradeBadge grade={e.score.grade} score={e.score.score} /><Badge tone="blue">{statusLabel(d.status)}</Badge><Badge tone={capTone(d.capitalStatus)}>Capital: {statusLabel(d.capitalStatus).toLowerCase()}</Badge></div>
         </div>
         </div>
@@ -181,7 +187,7 @@ export default function DealWorkspace() {
       </div>
       {/* One row that stays under the top bar while the tab scrolls; on a phone it slides sideways, the open tab in view. */}
       <div className="sticky top-14 z-20 -mx-4 -mt-1 border-b border-border bg-background/95 px-4 backdrop-blur md:-mx-[22px] md:px-[22px] lg:top-0" data-testid="deal-tabs">
-        <div role="tablist" aria-label="Loan" data-scroll-row className="flex gap-1 overflow-x-auto [scrollbar-width:none] max-xl:snap-x [&::-webkit-scrollbar]:hidden">
+        <div ref={tabRow.ref} role="tablist" aria-label="Loan" data-scroll-row data-more={tabRow.edges.after ? "1" : undefined} className={`flex gap-1 overflow-x-auto [scrollbar-width:none] max-xl:snap-x [&::-webkit-scrollbar]:hidden ${tabRow.fade}`}>
           {tabs.map((t) => <button key={t} type="button" role="tab" aria-selected={tab === t} data-testid={`tab-${t}`} onClick={(event) => openTab(t, event.currentTarget)} className={`min-h-11 shrink-0 snap-start border-b-2 px-3 py-2 text-sm font-semibold whitespace-nowrap ${tab === t ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>{t}</button>)}
         </div>
       </div>

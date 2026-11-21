@@ -3,6 +3,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { ArrowRight } from "lucide-react";
 import { leverageCap, usd } from "@/lib/site-calculators";
+import { AmountInput } from "./amount-input";
 
 // The site's stated maximums (see the landing page's footnote 1 and /disclosures). Never a quote.
 const MAX_LTC = 95;
@@ -25,7 +26,7 @@ export function QuickCheck() {
         {FIELDS.map((field) => (
           <label key={field.key}>
             {field.label}
-            <input type="number" min="0" step="any" data-testid={`quick-${field.key}`} value={Number.isNaN(values[field.key]) ? "" : values[field.key]} onChange={(event) => setValues((all) => ({ ...all, [field.key]: event.target.value === "" ? NaN : Number(event.target.value) }))} />
+            <AmountInput data-testid={`quick-${field.key}`} value={values[field.key]} onChange={(next) => setValues((all) => ({ ...all, [field.key]: next }))} />
           </label>
         ))}
       </div>

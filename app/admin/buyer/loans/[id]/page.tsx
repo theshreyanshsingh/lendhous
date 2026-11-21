@@ -6,7 +6,9 @@ import { holdingOf, pricePaid, tapeOf, SERVICING_STRIP_PCT } from "@/lib/loan-sa
 import type { LoanBuyer } from "@/lib/mockData";
 import { useStore } from "@/lib/store";
 import { Badge, GradeBadge, RatioPill, Section, Stat, productLabel, ratioGrid, statGrid, usd } from "@/components/ui";
+import { shortDay } from "@/lib/format";
 import { BuyerGate } from "../../buyer-gate";
+import { BackLink } from "@/components/back-link";
 
 export default function LoanDetail() {
   return <BuyerGate>{(me) => <Detail me={me} />}</BuyerGate>;
@@ -32,7 +34,7 @@ function Detail({ me }: { me: LoanBuyer }) {
   const canOffer = sale.status === "listed" && (!offer || offer.status === "declined");
   return (
     <div className="space-y-4">
-      <Link href="/admin/buyer" className="text-sm text-link">← Loans for sale</Link>
+      <BackLink href="/admin/buyer">Loans for sale</BackLink>
       <div className="glass p-5">
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="min-w-0">
@@ -49,7 +51,7 @@ function Detail({ me }: { me: LoanBuyer }) {
             <div className={statGrid}>
               <Stat label="Unpaid balance" value={usd(tape.balance)} sub={`of ${usd(tape.noteAmount)} note`} />
               <Stat label="Note rate" value={`${tape.noteRate.toFixed(2)}%`} sub={`${tape.netRate.toFixed(2)}% after servicing`} />
-              <Stat label="Maturity" value={tape.maturity} sub={`${tape.monthsLeft} of ${tape.termMonths} months left`} />
+              <Stat label="Maturity" value={shortDay(tape.maturity)} sub={`${tape.monthsLeft} of ${tape.termMonths} months left`} />
               <Stat label="Monthly to you" value={usd(tape.monthlyIncome)} sub={tape.product === "dscr" ? "principal + interest" : "interest only"} />
               <Stat label="FICO band" value={tape.ficoBand} />
               <Stat label="Experience" value={`Tier ${tape.tier}`} />

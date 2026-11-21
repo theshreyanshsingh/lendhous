@@ -258,6 +258,19 @@
     @apply inline-flex h-10 items-center justify-center gap-2 rounded-[2px] border border-rule bg-transparent px-5 text-[13.5px] font-medium whitespace-nowrap text-foreground transition-colors hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40;
   }
 
+  /* On a small phone a long label wraps inside its button rather than pushing past the screen; one that fits is
+     unchanged, since a button only shrinks when its row has no room left. */
+  @media (max-width: 639px) {
+    .btn-primary, .btn-ghost {
+      height: auto;
+      min-height: 2.5rem;
+      max-width: 100%;
+      padding-block: 0.5rem;
+      white-space: normal;
+      text-align: center;
+    }
+  }
+
   /* Below the desktop layout a table becomes a stack of labelled rows, so nothing has to scroll sideways.
      Give each cell a data-label; a cell without one takes the full width as the row's heading. */
   @media (max-width: 1023px) {
@@ -333,6 +346,24 @@ a, button, summary, label, select, input, textarea, [role="tab"], [role="radio"]
 @media (pointer: coarse) {
   .btn-primary, .btn-ghost {
     min-height: 44px;
+  }
+}
+/* Small text buttons on a touch screen (Edit, Add to calendar, Download) get a hit area at least 24px tall around them,
+   without moving anything; and a disclosure's summary line is never shorter than that. In the base layer, so a utility
+   on the element (absolute, min-h-11) still wins. */
+@layer base {
+  @media (pointer: coarse) {
+    button.text-link:not(.btn-primary):not(.btn-ghost) {
+      position: relative;
+    }
+    button.text-link:not(.btn-primary):not(.btn-ghost)::after {
+      content: "";
+      position: absolute;
+      inset: -6px -4px;
+    }
+    summary {
+      min-height: 24px;
+    }
   }
 }
 @media (hover: none) {

@@ -47,7 +47,6 @@ export default function Servicing() {
       <PageIntro eyebrow="Servicing" title="Loan servicing" lede="Every funded loan: what's due, what's late, what's maturing and who's paying off." />
       <p className="text-sm text-muted-foreground" data-testid="storm-link">Hurricane forecast cones are checked against these loans every six hours. <Link className="text-link underline underline-offset-2" href="/admin/storms">Storm watch</Link></p>
       <p className="text-sm text-muted-foreground" data-testid="collections-link">Loans behind, in default, in bankruptcy or in foreclosure, with the calls, promises and notices on each. <Link className="text-link underline underline-offset-2" href="/admin/collections">Collections</Link></p>
-      <MaturityDesk />
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <div className="glass p-4"><Stat label="Loans" value={loans.length} /></div>
         <div className="glass p-4"><Stat label="Balance" value={k(loans.reduce((sum, deal) => sum + balanceOf(deal), 0))} /></div>
@@ -57,6 +56,7 @@ export default function Servicing() {
         <div className="glass p-4"><Stat label="Maturing" value={<span className={matured.length ? "text-bad" : ""}>{matured.length ? `${matured.length} past` : maturing.length}</span>} sub={matured.length ? `${maturing.length} in 60 days` : "in 60 days"} /></div>
       </div>
       {checked && <p className={`text-xs ${stale ? "rounded-md bg-bad/10 p-2 text-bad" : "text-muted-foreground"}`} data-testid="servicing-checked">{stale ? `Late payments and maturity were last checked on ${checked}. The nightly job has stopped: check that lendhous-jobs is running on the server.` : `Late payments and maturity checked through ${checked}.`}</p>}
+      <MaturityDesk />
       <Section title={`Payoff requests (${payoffs.length})`}>
         {payoffs.length === 0 && <p className="text-sm text-muted-foreground">No payoff requests.</p>}
         <ul className="divide-y divide-border">
@@ -91,7 +91,7 @@ export default function Servicing() {
               const extension = openExtension(deal)!;
               return (
                 <li key={deal.id} className="flex flex-wrap items-center justify-between gap-2 py-3" data-testid="extension-row">
-                  <div className="min-w-0"><Link href={`/admin/deals/${deal.id}`} className="font-medium text-link hover:underline">{deal.loanNumber}</Link> <span className="text-sm">· {deal.borrowerName}</span><div className="text-xs text-muted-foreground">{extension.months} more month{extension.months === 1 ? "" : "s"}, {extension.fromMaturity} to {maturityAfter(deal, extension)} · fee {usd(extension.fee, 2)}</div></div>
+                  <div className="min-w-0"><Link href={`/admin/deals/${deal.id}`} className="font-medium text-link hover:underline">{deal.loanNumber}</Link> <span className="text-sm">· {deal.borrowerName}</span><div className="text-xs text-muted-foreground">{extension.months} more month{extension.months === 1 ? "" : "s"}, {shortDay(extension.fromMaturity)} to {shortDay(maturityAfter(deal, extension))} · fee {usd(extension.fee, 2)}</div></div>
                   <Badge tone={extension.status === "approved" ? "blue" : "amber"}>{extension.status === "approved" ? "Approved: waiting for signatures" : `${extension.approvers.length} of 2 approvals`}</Badge>
                 </li>
               );

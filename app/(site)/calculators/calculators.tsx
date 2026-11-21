@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { CALCULATOR_DEFAULTS, FIELD_LABELS, fieldMax, fieldMin, flipMargin, leverageCap, rentalCoverage, usd, validInputs, type CalculatorKey } from "@/lib/site-calculators";
+import { AmountInput } from "../amount-input";
 
 const TABS: { key: CalculatorKey; label: string; heading: string }[] = [
   { key: "rental", label: "Rental DSCR", heading: "Rental income & financing" },
@@ -36,7 +37,7 @@ export function Calculators() {
             {Object.keys(current).map((field) => (
               <label key={field}>
                 {FIELD_LABELS[field]}
-                <input type="number" data-testid={`calc-${field}`} min={fieldMin(field)} max={fieldMax(field)} step="any" value={Number.isNaN(current[field]) ? "" : current[field]} onChange={(event) => setField(field, event.target.value)} />
+                {FIELD_LABELS[field].endsWith("($)") ? <AmountInput data-testid={`calc-${field}`} value={current[field]} onChange={(next) => setField(field, Number.isNaN(next) ? "" : String(next))} /> : <input type="number" data-testid={`calc-${field}`} min={fieldMin(field)} max={fieldMax(field)} step="any" value={Number.isNaN(current[field]) ? "" : current[field]} onChange={(event) => setField(field, event.target.value)} />}
               </label>
             ))}
           </div>
