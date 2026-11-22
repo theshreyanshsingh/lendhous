@@ -37,7 +37,7 @@ const ok = (name, cond) => { checks.push(`${cond ? "PASS" : "FAIL"} ${name}`); }
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 }, deviceScaleFactor: 1 });
 const page = await ctx.newPage();
 page.on("pageerror", (e) => errors.push(`pageerror at ${new URL(page.url()).pathname}: ` + e.message));
-page.on("console", (m) => { if (m.type() === "error") errors.push("console: " + m.text()); });
+page.on("console", (m) => { if (m.type() === "error") errors.push(`console: ${m.text()} (${m.location()?.url || "no address"}, on ${page.url()})`); });
 // Every credit question has to be answered on its own.
 const QUESTIONS = ["bankruptcy", "foreclosure", "delinquent", "judgments", "lawsuit", "felony", "borrowedDownPayment"];
 const answerAll = async (p) => { for (const key of QUESTIONS) await p.getByTestId(`decl-${key}-no`).click(); };
@@ -381,7 +381,8 @@ ok("the borrower adds a document nobody asked for", await seen(page.getByTestId(
 await page.getByTestId("docs-tab-todo").click();
 ok("the borrower's loan starts with what's needed from them", (await page.getByTestId("need-item").count()) >= 1 && (await page.getByTestId("needs-progress").innerText()).includes("documents in"));
 ok("and there's one way to apply, in plain words", (await page.getByRole("link", { name: "Apply for a loan" }).count()) >= 1 && (await page.getByRole("link", { name: "New application" }).count()) === 0);
-ok("the borrower sees who's on their loan and how to reach them", (await page.getByTestId("your-team").innerText()).includes("Uma Underwriter (FAKE)") && (await page.getByTestId("your-team").getByRole("link", { name: /^Call/ }).count()) === 2);
+// Uma is away in the demo, so the processor covering her shows with his own number too.
+ok("the borrower sees who's on their loan and how to reach them", (await page.getByTestId("your-team").innerText()).includes("Uma Underwriter (FAKE)") && (await page.getByTestId("your-team").getByRole("link", { name: /^Call/ }).count()) - (await page.getByTestId("your-team-cover").getByRole("link", { name: /^Call/ }).count()) === 2);
 ok("the loan page shows one next step and the loan's journey", (await page.getByTestId("borrower-next-step").count()) === 1 && (await seen(page.getByTestId("loan-timeline"))) && (await page.getByTestId("timeline-point").count()) >= 6 && (await page.getByTestId("timeline-point").filter({ hasText: "Target" }).count()) === 1);
 ok("in plain words and written-out dates", !/full-boat|Dutch|LTARV|Servicing Current|Term Sheet Issued/.test(await page.locator("main").innerText()) && !/\b20\d\d-\d\d-\d\d\b/.test(await page.locator("main").innerText()));
 await shot(page, "03-borrower-loan-document-center.png");
@@ -1973,6 +1974,96 @@ await vp.evaluate(() => window.scrollTo(0, 1200));
 ok("and See my terms stays at the foot of the screen through every step", await vp.getByTestId("quote-see-terms").evaluate((el) => { const box = el.getBoundingClientRect(); return box.top > 0 && box.bottom <= window.innerHeight; }));
 ok("and the kind of loan comes first", (await vp.locator(".quote-step-title").first().innerText()).includes("The loan"));
 await visitorPhone.close();
+
+// No surprises near closing (docs/feature-ideas-2026-11-22.md, ranks 1 to 4), on a fresh demo book.
+const calm = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+const cp = await calm.newPage();
+cp.on("pageerror", (error) => errors.push(`no-surprises: ${error.message}`));
+const as = async (email) => { await calm.clearCookies(); if (sessions[email]) await calm.addCookies(sessions[email]); else await signIn(cp, email); };
+await as(SEATS.staff);
+// Accepted terms hold: a number that moves them goes to the borrower with a reason.
+await cp.goto(BASE + "/admin/deals/d8");
+ok("a change to accepted terms waits for the borrower, with its lines", await seen(cp.getByTestId("term-change-open")) && (await cp.getByTestId("term-change-lines").first().innerText()).includes("Loan amount"));
+await cp.getByTestId("term-change-withdraw").click();
+await seen(cp.getByTestId("term-change-history"));
+await cp.getByLabel("Purchase / as-is").fill("200,000");
+ok("numbers that move accepted terms can't just be saved", await seen(cp.getByTestId("term-change-form")) && (await cp.getByTestId("save-numbers").count()) === 0);
+await cp.getByTestId("term-change-reason").fill("The appraisal came in lower, so the loan is sized on it.");
+await cp.getByTestId("term-change-send").click();
+ok("and go to the borrower once there's a reason", await seen(cp.getByTestId("term-change-open").filter({ hasText: "The appraisal came in lower" })));
+// A late ask waits for a manager; approving it tells the borrower why.
+await cp.goto(BASE + "/admin/deals/d7?tab=Documents");
+ok("a document asked for late waits for a manager", await seen(cp.getByTestId("late-ask").filter({ hasText: "Updated bank statement" })));
+await cp.getByTestId("late-ask-approve").click();
+ok("and once approved, the loan shows why it was asked late", await seen(cp.getByTestId("doc-asked").filter({ hasText: "closing needs one from the last 30 days" })));
+await cp.goto(BASE + "/admin/deals/d7?tab=Conditions");
+await cp.getByTestId("add-condition").click();
+await cp.getByTestId("condition-title").fill("Final contractor bid");
+ok("a condition near closing asks why it's needed now", await seen(cp.getByTestId("condition-reason")) && await cp.getByTestId("save-condition").isDisabled());
+await cp.getByTestId("condition-reason").fill("The inspector asked for it this morning.");
+await cp.getByTestId("save-condition").click();
+ok("and keeps the reason with it", await seen(cp.getByTestId("condition-asked").filter({ hasText: "The inspector asked for it this morning." })));
+// The closing date keeps a record of each move.
+await cp.goto(BASE + "/admin/deals/d3");
+ok("a loan's header says how often its closing moved", (await cp.getByTestId("closing-slips").innerText()) === "moved twice");
+await cp.getByTestId("move-closing").click();
+await cp.getByTestId("move-closing-to").fill("2026-11-20");
+await cp.getByTestId("move-closing-party").selectOption("insurance");
+await cp.getByTestId("move-closing-reason").fill("The windstorm binder is still with the carrier.");
+await cp.getByTestId("move-closing-save").click();
+ok("moving it keeps why and what it waits on", await seen(cp.getByTestId("closing-slips").filter({ hasText: "moved 3 times" })) && (await cp.getByTestId("closing-move").first().innerText()).includes("waiting on insurance"));
+// The settlement statement is checked against the agreed terms before funding.
+await cp.goto(BASE + "/admin/deals/d15?tab=Closing");
+await cp.getByTestId("settlement-enter").click();
+const agreedLoan = (await cp.getByTestId("settlement-loanAmount").locator("xpath=..").innerText()).match(/The terms say \$([\d,.]+)/)?.[1] ?? "";
+await cp.getByTestId("settlement-loanAmount").fill(agreedLoan);
+await cp.getByTestId("settlement-lenderFees").fill("1");
+await cp.getByTestId("settlement-save").click();
+ok("a settlement statement that differs from the terms is flagged line by line", await seen(cp.locator("[data-testid='settlement-line'][data-off]").first()) && (await cp.locator("[data-testid='settlement-line']:not([data-off])").first().innerText()).includes("Loan amount"));
+ok("and holds funding", (await cp.getByTestId("stage-blockers").innerText()).includes("settlement statement"));
+await cp.getByTestId("settlement-reason").fill("Fees are collected outside closing on this loan.");
+await cp.getByTestId("settlement-explain").click();
+ok("until someone who approves funding explains it", await seen(cp.getByTestId("settlement-explained")) && !(await cp.getByTestId("stage-blockers").innerText().catch(() => "")).includes("settlement statement"));
+// A message waiting for a reply shows its clock, and one that needs no answer can be marked so.
+await cp.goto(BASE + "/admin/deals/d1?tab=Messages");
+ok("a message from the borrower shows how long it has waited", await seen(cp.getByTestId("reply-waiting")));
+await cp.getByTestId("no-reply-needed").click();
+ok("and needing no reply takes it off the clock", (await cp.getByTestId("reply-waiting").count()) === 0);
+// Time away, and who covers.
+await cp.goto(BASE + "/admin/account/notifications");
+ok("the team sees who's away and who covers", await seen(cp.getByTestId("away-notice").filter({ hasText: "Pat Processor (FAKE) covers" })));
+await cp.getByTestId("away-backup").selectOption({ label: "Uma Underwriter (FAKE)" });
+await cp.getByTestId("away-from").fill("2026-11-10");
+await cp.getByTestId("away-until").fill("2026-11-14");
+await cp.getByTestId("away-save").click();
+ok("and someone can set their own days away", await seen(cp.getByTestId("away-notice").filter({ hasText: "You're away" })));
+await shot(cp, "60-time-away.png", false);
+// The borrower: when they'll hear back, who covers, and why the date moved.
+await as(SEATS.borrower);
+await cp.goto(BASE + "/admin/borrower/d1");
+ok("the borrower sees why their closing date moved", await seen(cp.getByTestId("closing-move").filter({ hasText: "waiting on the appraisal" })));
+ok("and who covers while their loan officer is away", await seen(cp.getByTestId("your-team-cover").filter({ hasText: "Pat Processor (FAKE)" })));
+await cp.getByTestId("message-text").fill("Has the appraiser been out yet?");
+await cp.getByTestId("send-message").click();
+ok("and when the team will reply to their message", await seen(cp.getByTestId("reply-by").filter({ hasText: /We'll reply by \w+day/ })));
+await shot(cp, "60-borrower-no-surprises.png");
+// The broker sees the same record of the client's closing date.
+await as(SEATS.broker);
+await cp.goto(BASE + "/admin/broker/deals/d3");
+// Demo seats in one browser share the demo book, so this includes the move the team just made.
+ok("the broker sees each move of the client's closing date", (await seen(cp.getByTestId("closing-move").filter({ hasText: "waiting on insurance" }))) && (await cp.getByTestId("closing-move").count()) === 3);
+// The title company checks its statement on its own page.
+await cp.goto(BASE + "/closing/demo");
+ok("the title company sees why the closing date moved", await seen(cp.getByTestId("title-moves")));
+await cp.getByTestId("settlement-loanAmount").fill("296250");
+await cp.getByTestId("settlement-points").fill("5925");
+await cp.getByTestId("settlement-lenderFees").fill("1995");
+await cp.getByTestId("settlement-docStamps").fill("1037.05");
+await cp.getByTestId("settlement-intangibleTax").fill("592.50");
+await cp.getByTestId("title-settlement-save").click();
+ok("and its settlement statement against the agreed terms, line by line", await seen(cp.getByTestId("title-settlement-result")) && (await cp.locator("[data-testid='settlement-line'][data-off]").count()) === 1 && (await cp.locator("[data-testid='settlement-line'][data-off]").innerText()).includes("Lender fees"));
+await shot(cp, "60-title-settlement.png");
+await calm.close();
 
 // cold load of every route in a fresh browser, as the seat that owns it: catches hydration mismatches that
 // client-side navigation hides

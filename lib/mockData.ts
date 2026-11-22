@@ -31,7 +31,11 @@ export interface Doc {
   teamNote?: string;
   /** The borrower added it without being asked. */
   addedBy?: "borrower";
+  /** Why it was asked for near closing, or again after the borrower sent it, as the borrower sees it (lib/late-asks.ts). */
+  asked?: AskedWhy;
 }
+/** The reason given for an ask that came late or asks again for something already sent, and the manager who said yes. */
+export interface AskedWhy { reason: string; late: boolean; again?: string; approvedBy?: string; at: string }
 /** Someone who personally guarantees the loan. Everyone owning 20% or more of the borrowing entity should be one. */
 export interface Guarantor { name: string; ownershipPct: number; fico: number; citizenship: "us" | "resident" | "foreign" }
 /** A deal the borrower says they've done. Staff check it against its settlement statement before it counts for pricing. */
@@ -200,7 +204,19 @@ export interface Deal {
   leaseReview?: LeaseReview;
   /** Answers for Florida's limits on buyers from countries of concern, SB 264 (lib/sb264.ts). */
   sb264?: Sb264Answers;
+  /** Changes to the accepted terms sent to the borrower, oldest first (lib/term-changes.ts). */
+  termChanges?: TermChange[];
+  /** The draft settlement statement's lender lines, checked against the agreed terms before funding. */
+  settlement?: SettlementCheck;
+  /** Conditions and documents asked for late, waiting for a manager or decided (lib/late-asks.ts). Team only. */
+  lateAsks?: LateAsk[];
+  /** Each move of the target closing date, oldest first (lib/closing-moves.ts). */
+  closingMoves?: ClosingMove[];
+  /** The team marked the borrower's or broker's last message as needing no reply (lib/replies.ts). */
+  replyHandled?: { at: string; by: string };
 }
+/** A member of the team away on these days, and who covers their loans meanwhile (lib/replies.ts). The id is the member's. */
+export interface AwayNotice { id: string; name: string; email: string; from: string; until: string; backup: TeamMember; by: string; at: string }
 /** Each buyer's domicile and status, where the borrowing entity is from, and the property's answers (lib/sb264.ts). */
 export interface Sb264Answers {
   people: { name: string; domicile: string; status: "citizen" | "permanent_resident" | "other"; visa: "non_tourist" | "asylum" | "none" }[];
@@ -616,7 +632,36 @@ export interface LoanCondition {
   returned?: { by: string; at: string; reason: string };
   cleared?: { by: string; at: string; note: string };
   waived?: { by: string; at: string; reason: string };
+  /** Why it was asked for near closing, or again (lib/late-asks.ts). */
+  asked?: AskedWhy;
 }
+/** A condition or document asked for late by someone who needs a manager's yes, waiting for it (lib/late-asks.ts). */
+export interface LateAsk {
+  id: string; kind: "condition" | "doc";
+  condition?: import("./conditions").ConditionInput;
+  doc?: { name: string; category: string };
+  reason: string; by: string; at: string;
+  status: "pending" | "approved" | "declined";
+  decided?: { by: string; at: string; note: string };
+}
+/** A change to the loan's numbers after the borrower accepted the term sheet, sent to them to agree to (lib/term-changes.ts). */
+export interface TermChange {
+  id: string; changes: Partial<Application>;
+  /** What it moves, as it was sent. */
+  lines: { key: string; label: string; before: number; after: number }[];
+  reason: string; by: string; at: string;
+  status: "proposed" | "agreed" | "declined" | "withdrawn";
+  answer?: { by: string; at: string; signedName?: string; note?: string };
+}
+/** The draft settlement statement's lender lines, as the title company or the team typed them in (lib/term-changes.ts). */
+export interface SettlementCheck {
+  figures: Partial<Record<"loanAmount" | "points" | "lenderFees" | "brokerFee" | "interestReserve" | "docStamps" | "intangibleTax", number>>;
+  by: string; at: string; via: "title" | "team";
+  /** Someone who approves funding saying why a difference is right, for these figures. */
+  explained?: { reason: string; by: string; at: string };
+}
+/** The closing date moving, why, and who or what it waits on (lib/closing-moves.ts). */
+export interface ClosingMove { id: string; from: string; to: string; party: import("./closing-moves").DelayParty; reason: string; by: string; at: string }
 /** What a term sheet offers, fixed when it's sent. */
 export interface TermSheetTerms {
   noteAmount: number; initialAdvance: number; holdback: number; financedReserve: number;

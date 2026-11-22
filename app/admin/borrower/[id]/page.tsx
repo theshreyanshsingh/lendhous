@@ -38,6 +38,8 @@ import { interestBasis, PLAIN_RATIO } from "@/lib/status-words";
 import { Badge, Section, Stat, usd, pct, productLabel, statusLabel } from "@/components/ui";
 import { shortDay } from "@/lib/format";
 import { BackLink } from "@/components/back-link";
+import { TermChanges } from "@/components/loan/TermChanges";
+import { ClosingDateHistory } from "@/components/loan/ClosingDate";
 
 
 export default function BorrowerLoan() {
@@ -78,6 +80,7 @@ export default function BorrowerLoan() {
       {(funded || d.status === "paid_off") && <NextLoan deal={d} />}
       {!closed && d.status !== "paid_off" && <div id="needs-from-you"><NeedsFromYou deal={d} /></div>}
       <div id="term-sheet"><TermSheetCard deal={d} canSign /></div>
+      <div id="term-changes"><TermChanges deal={d} side="borrower" /></div>
       <div id="conditions"><BorrowerConditions deal={d} canUpload /></div>
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="min-w-0 space-y-4">
@@ -96,6 +99,7 @@ export default function BorrowerLoan() {
               {funded ? <><Stat label="Disbursed" value={usd(b.disbursed)} /><Stat label="Holdback left" value={usd(b.holdbackRemaining)} /><Stat label="Next payment" value={usd(nextPayment)} sub={ledger(d).nextDue ? `due ${shortDay(ledger(d).nextDue!)}` : "—"} /><Stat label="Maturity" value={shortDay(ledger(d).maturity)} sub={`${e.termMonths}-month term${d.extensions?.some((x) => x.status === "executed") || d.modifications?.some((x) => x.status === "executed" && x.months) ? ", extended" : ""}`} /></>
                 : <><Stat label="Cash to close" value={usd(e.cashToClose)} /><Stat label="Target closing" value={shortDay(d.closingDate)} />{keyRatios.map((r) => <Stat key={r.key} label={PLAIN_RATIO[r.key] ?? r.label} value={r.key === "dscr" ? r.actual.toFixed(2) + "x" : pct(r.actual)} />)}<Stat label="Points" value={usd(e.points)} /></>}
             </div>
+            {!funded && <div className="mt-3"><ClosingDateHistory deal={d} /></div>}
           </Section>
           {funded && e.holdback > 0 && <RehabProgress deal={d} />}
           {funded && e.holdback > 0 && <DrawPanel deal={d} />}

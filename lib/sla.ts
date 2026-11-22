@@ -1,7 +1,7 @@
 // How long things may wait: the team's targets (PLACEHOLDER until GT sets them in Settings), and clocks that count
 // business hours in Florida (9 to 5 Eastern, weekdays, less the state's paid holidays) or plain hours.
 
-export type SlaKey = "firstLook" | "termSheet" | "drawDecision" | "docReview";
+export type SlaKey = "firstLook" | "termSheet" | "drawDecision" | "docReview" | "reply" | "extensionAnswer";
 export type Target = { label: string; hours: number; business: boolean };
 
 /** PLACEHOLDER targets. Business targets count working hours: 8 of them is one business day. */
@@ -10,6 +10,9 @@ export const SLA_TARGETS: Record<SlaKey, Target> = {
   termSheet: { label: "Complete application to term sheet", hours: 8, business: true },
   drawDecision: { label: "Draw request decided", hours: 24, business: false },
   docReview: { label: "Document reviewed", hours: 8, business: true },
+  // The reply-by time a borrower or broker sees under their message (lib/replies.ts).
+  reply: { label: "Message from a borrower or broker answered", hours: 8, business: true },
+  extensionAnswer: { label: "Extension request answered", hours: 16, business: true },
 };
 export const SLA_KEYS = Object.keys(SLA_TARGETS) as SlaKey[];
 export type Targets = Record<SlaKey, Target>;

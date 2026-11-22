@@ -177,4 +177,23 @@ export async function askTitleForUpdate(drawId: string): Promise<StaffReply> {
   return { book: scopeBook(asked.after, viewer), link };
 }
 
+const figure = z.number().finite().min(0).max(100_000_000).optional();
+const settlementInput = z.object({ loanAmount: figure, points: figure, lenderFees: figure, brokerFee: figure, interestReserve: figure, docStamps: figure, intangibleTax: figure });
+
+/**
+ * The title company types in its draft settlement statement's lender lines, and they're checked against the agreed terms
+ * (lib/term-changes.ts). A line that differs holds funding until it's fixed or LendHous explains it.
+ */
+export async function titleSettlement(token: string, raw: unknown): Promise<TitleReply> {
+  const { link, error } = await titleLink(token);
+  if (!link) return { error };
+  const parsed = settlementInput.safeParse(raw);
+  if (!parsed.success) return { error: "Each line is a dollar amount." };
+  const result = await runAction(titleActor(link.deal), { t: "saveSettlement", dealId: link.deal.id, figures: parsed.data, by: titleActor(link.deal).name, via: "title" }, { trusted: true });
+  if ("error" in result) return { error: result.error };
+  await sendAlerts(result.before, result.after, result.action);
+  await audit({ actorId: null, action: "closing.settlement_entered", entityType: "LoanBook", entityId: link.deal.id });
+  return { view: viewOf(result.after, link.deal.id) };
+}
+
 const viewOf = (book: Book, dealId: string) => { const deal = book.deals.find((item) => item.id === dealId)!; return titleView(deal, evaluate(deal.app).noteAmount, book.draws); };

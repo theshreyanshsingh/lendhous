@@ -1,0 +1,62 @@
+# Feature Ideas from Borrower Complaints, November 22, 2026
+
+Borrowers' worst reviews of national lenders are not about rates. They are about surprises late in a loan: fees added after signing, new conditions the day before closing, closing dates that slip with no reason, appraisals that arrive late or low, and calls nobody returns. LendHous already covers most of the end of a loan (maturity warnings, extension requests, payoff letters, the lien-release clock). It has nothing that freezes the deal once the borrower accepts it. **The best next builds are a set of "no surprises" guards: fees and conditions that can't change quietly after the term sheet, a dated record of every closing-date move, and a reply-by time on every message.** None needs a vendor. After those come Florida's stop-advance notice, project pace alerts, Spanish for borrowers, and links that let insurance agents and contractors send their own papers.
+
+## How this was found
+
+A research pass read the Trustpilot pages of Kiavi, RCN, Lima One, LendingOne, CIVIC, Easy Street, Visio and Groundfloor. It also read the September to November 2026 release notes of Lendr, LendingWise, Mortgage Automator and The Mortgage Office, and the Backflip launch. Reddit was blocked, BiggerPockets refused the reader and Google and BBB reviews were out of reach. BiggerPockets facts come from search summaries and are marked **[snippet]**. Each idea was then checked against LendHous's code on November 22. Reviews are one person's account; they show what upsets borrowers, not how often it happens.
+
+## Already built, so left off
+
+The research suggested these; the code already has them:
+- Maturity warnings and borrower extension requests.
+- A Notice of Commencement expiry check, plus lien waivers from every party who served a Notice to Owner.
+- The 60-day mortgage-release clock after payoff, and the 10-day payoff-letter clock.
+- Twelve months' broker protection on a referred borrower.
+- Interest reserves.
+- Release prices on portfolio loans.
+- Exit plans and payoff forecasts for partners and buyers.
+- Property-tax reminders with the November discount.
+- Workout updates to holders on troubled loans.
+- Surveys after closing.
+
+A notice to the borrower when a loan is sold isn't needed either, because LendHous keeps servicing sold loans (`lib/loan-sale.ts`).
+
+## Ranked, buildable now
+
+**Effort:** **S** extends an existing record or screen; **M** adds a new record or workflow; **L** touches money flows or every screen.
+
+| # | Feature | Who it helps | Evidence | LendHous today | Effort |
+|---|---------|--------------|----------|----------------|--------|
+| 1 | **No changes after the term sheet without a reason** (built 2026-11-22: `lib/term-changes.ts`). Once accepted, rate, points and every fee are fixed. A change needs a reason and the borrower's yes, and the broker sees it. Title uploads the draft settlement statement, and the app checks it line by line against the term sheet before signing. | Borrower, broker, title | An RCN borrower says $2,300 of broker fees were added after signing ([Trustpilot](https://www.trustpilot.com/review/www.rcncapital.com?stars=1&stars=2)). Easy Street and CIVIC reviewers say the same of charges at closing ([Easy Street](https://www.trustpilot.com/review/easystreetcap.com), [CIVIC](https://www.trustpilot.com/review/civicfs.com)). | Accepting locks rate and points. Staff can still change the loan's numbers until clear to close without the borrower's yes. The settlement statement is a checklist item, not compared | M |
+| 2 | **Late conditions need a manager** (built 2026-11-22: `lib/late-asks.ts`). After clear to close, or within a set number of days of closing, a new condition needs a manager's approval and a reason the borrower sees. Asking again for a paper already on file is flagged. | Borrower, broker, staff | Lima One sent new requests the day before closing. LendingOne added last-minute requirements and missed a close. Kiavi coordinators each asked for different documents, often twice ([Lima One](https://www.trustpilot.com/review/limaone.com), [Kiavi](https://www.trustpilot.com/review/kiavi.com?stars=1&stars=2)). Lendr added a due stage to checklist items on November 11 ([changelog](https://joinlendr.com/changelog/)). | Conditions have an owner and due days; nothing stops one added late | S–M |
+| 3 | **A record of every closing-date move** (built 2026-11-22: `lib/closing-moves.ts`). Each change keeps the old date, the new one, a reason and who is holding it up (borrower, title, appraiser, insurance or LendHous). The borrower, broker and title company see it. | Borrower, broker, title | One Kiavi closing date moved four times, and another settlement slipped three times. CIVIC closings slipped two weeks at a time (Trustpilot pages above). Lendr added days in stage and a borrower progress bar in November. | The target closing date is overwritten | S |
+| 4 | **A reply-by time on every message and request** (built 2026-11-22: `lib/replies.ts`; payoff requests keep their legal 10-day clock, and draws their "We'll decide by"). Messages, payoff requests, extension requests and draw questions show when the borrower will hear back. A loan's rep can mark themselves away, and their loans go to a named backup. Staff see unanswered threads by age. | Borrower, broker, staff | The most common one-star theme after fees: calls never returned at Kiavi, three to four days for an email at Lima One, reps "always on vacation" at RCN. Kiavi publishes turnaround promises ([servicing](https://kiavi.com/servicing)). | Draws have a "We'll decide by" clock; messages and other requests don't | S–M |
+| 5 | **Florida stop-advance notice.** When draws stop before the loan is fully funded (default, a stalled project, a storm hold), the app drafts the written notice to the contractor and every lienor who gave notice. It tracks the 5-business-day deadline. | Staff | [Fla. Stat. 713.3471](https://www.flsenate.gov/Laws/Statutes/2025/713.3471). | Holds stop draws; no notice goes out | S |
+| 6 | **Project pace and stalled-project alerts.** Compare the share drawn with the time used and the time left to maturity. A loan with no draw for a set number of days asks the borrower for a photo update. Partners and buyers see the pace. | Staff, partner, buyer | Mortgage Automator's Project Health score, August 10 ([release](https://www.mortgageautomator.com/news/mortgage-automator-launches-draw-management)). Lendr's draw-inactivity measure and update requests, October. | Rehab progress shows what's drawn, not whether it's on pace | S–M |
+| 7 | **Appraisal tracker and a value review request.** The borrower sees the order, inspection and expected delivery dates. They can ask for a second look at a low value with up to five sales. The policy on reusing an appraisal shows up front. Before any appraisal fee is taken, a check confirms the loan can be made. | Borrower, broker, staff | Kiavi appraisals took over a month. One was rejected the day before closing, and another couldn't be transferred. Visio questioned a refinance for "rapid appreciation" ([Visio](https://www.trustpilot.com/review/visiolending.com)). A CIVIC borrower paid $750 for an appraisal, then was declined. | Only a "valuation supports the loan" condition | M |
+| 8 | **A draw cash planner.** Show how much cash the borrower carries between draws, given the budget, inspection time and holdback. Offer a materials draw at closing where GT allows it. | Borrower, broker | BiggerPockets threads ask whether it is really 100% rehab financing if you front every draw, and whether borrowers would pay more for a better draw process [snippet]. | The budget and draw schedule exist; the carry isn't shown | S |
+| 9 | **An insurance agent's link.** Like the title company's link, the borrower's agent opens a page for the loan, uploads the binder and evidence, and the app checks the mortgagee clause, wind and flood cover and dates. | Borrower, staff | Insurance is the hardest part of a Florida closing (November 7 scan). | Borrowers name their agent; only the borrower or staff can upload | S–M |
+| 10 | **A contractor's link.** The general contractor sends invoices, lien waivers and photos for a draw, and sees when it pays. | Borrower, staff | Draws already name a payee and tell the contractor; no competitor evidence was gathered for this one. | Contractors get an email, no link | M |
+| 11 | **Spanish for borrowers.** The site, quote, application, borrower pages and emails, with English as the governing text. | Borrower, broker | 75.3% of Miami-Dade residents speak a language other than English at home ([Census](https://census.gov/quickfacts/fact/table/miamidadecountyflorida/POP815223)) [snippet]. No Florida lender checked on November 9 had a Spanish page. | None | L (needs a translator, and the attorney for legal text) |
+| 12 | **Partner beneficiaries and IRA money.** A partner can name primary and backup beneficiaries, a trust included. A self-directed IRA's share is titled to the custodian, and its proceeds go to the custodian. | Partner | Lendr added beneficiaries, trust beneficiaries and an IRA question at onboarding, October and November ([changelog](https://joinlendr.com/changelog/)). IRA custodians require payment to the custodian ([IRA Financial](https://www.irafinancial.com/blog/how-to-buy-mortgage-notes-with-a-self-directed-ira/)) [snippet]. | None | S–M |
+| 13 | **Staff speed-ups.** Saved replies for messages, files on messages, and saved pipeline views. | Staff, borrower | Found in the code check. | None of the three | S each |
+| 14 | **Broker team seats.** A brokerage's loan officers and processors share its deals, each with their own sign-in, and the broker sees who did what. | Broker | Found in the code check. | One sign-in per broker | M |
+| 15 | **Low survey scores reach a manager.** A score of 6 or less opens a follow-up on the work queue. | Staff | Lendr added a follow-up for low ratings on October 15. | High scores are asked for a review; low scores are counted in Reports, not sent to anyone | S |
+
+## Worth doing, but waiting on someone
+
+| Feature | Waits on | Evidence |
+|---------|----------|----------|
+| A foreign-national path: passport ID, foreign bank statements, a source-of-funds trail, an international wire date, remote notarization through title | GT deciding whether to lend to foreign nationals | Florida had 20% of U.S. foreign buyers ([NAR](https://www.nar.realtor/newsroom/foreign-buyers-purchased-45-3-billion-worth-of-us-homes-from-april-25-to-march-26)) [snippet]; Vaster and Altaloans already do |
+| Text and WhatsApp alerts, with consent records | A vendor (Twilio or the WhatsApp Business API) | Pew: 54% of Hispanic adults use WhatsApp [snippet]; Lendr added texts in September |
+| Bank verification before a proof-of-funds letter and on any change of payee bank | A vendor (Plaid) | Kiavi sends a Plaid link on every bank change ([servicing](https://kiavi.com/servicing)); the FBI counted $275M of real-estate fraud in 2025 [snippet] |
+| A soft credit pull at the quote | A credit vendor and the attorney (permitted purpose) | LendingWise, Backflip and Lendr added it this fall |
+| Sunbiz checks of the borrower's LLC at application, before closing and yearly | A data vendor, since Sunbiz has no API | Florida dissolves LLCs that miss the annual report in September [snippet] |
+| A homestead watch on loans to individuals | County property-appraiser data | Florida bars passing off a home loan as business purpose (2018 law) [snippet] |
+| HMDA register fields | The attorney: flips that buy homes may be reportable at 25 or more a year | Lendr added a HMDA report on November 2; Rehab Financial Group filed HMDA |
+| A FIRPTA estimate at exit for foreign sellers | The CPA | The IRS withholds 15% of the price; no complaint was found, so this is an inference |
+
+## Suggested order
+
+Ranks 1 to 4 were built together on November 22 as one "no surprises" pass; the README says how each works. Next, build 5 and 6 together, since both act when a project stalls. Items 8, 13 and 15 are small enough to slot in anywhere.

@@ -1,7 +1,10 @@
 "use client";
 import { Check, FileUp, Lock } from "lucide-react";
 import { useRef, useState } from "react";
-import { titleConfirmFunds, titleEnterWire, titleRecordMortgage, titleVerifySeller } from "@/actions/title-links";
+import { titleConfirmFunds, titleEnterWire, titleRecordMortgage, titleSettlement, titleVerifySeller } from "@/actions/title-links";
+import { draftOf, figuresOf, SettlementFields, SettlementLines, type SettlementDraft } from "@/components/loan/SettlementCheck";
+import { linesFrom } from "@/lib/term-changes";
+import { moveLine, timesWord } from "@/lib/closing-moves";
 import { Logo } from "@/components/logo";
 import { Arrive, Reveal } from "@/components/motion";
 import { wireProblem, type TitleView } from "@/lib/closing";
@@ -81,6 +84,12 @@ export function TitlePortal({ token, initial, expiresAt }: { token: string | nul
             <div><dt className="text-xs text-muted-foreground">Borrower (vesting)</dt><dd className="font-medium wrap-anywhere">{view.entity}</dd></div>
             <div><dt className="text-xs text-muted-foreground">Target closing</dt><dd className="font-medium">{shortDay(view.closingDate)}</dd></div>
           </dl>
+          {view.moves.length > 0 && !view.funded && (
+            <div className="mt-3 text-sm" data-testid="title-moves">
+              <p className="text-xs text-muted-foreground">The closing date moved {timesWord(view.moves.length)}:</p>
+              <ol className="mt-1 space-y-1">{[...view.moves].reverse().map((move) => <li key={move.id} className="text-xs wrap-anywhere">{moveLine({ ...move, by: "" })}</li>)}</ol>
+            </div>
+          )}
         </section>
 
         <Reveal open={Boolean(error || notice)}>
@@ -88,6 +97,7 @@ export function TitlePortal({ token, initial, expiresAt }: { token: string | nul
         </Reveal>
 
         {view.updates.length > 0 && <TitleSearches token={token} view={view} onView={setView} onSaid={(text, failed) => { setNotice(failed ? "" : text); setError(failed ? text : ""); }} />}
+        {view.settlement && !view.funded && <SettlementCard token={token} view={view} onView={setView} onSaid={(text, failed) => { setNotice(failed ? "" : text); setError(failed ? text : ""); }} />}
         {view.sellerCheck && !view.funded && <SellerIdCard token={token} view={view} onView={setView} onSaid={(text, failed) => { setNotice(failed ? "" : text); setError(failed ? text : ""); }} />}
 
         <section className="glass p-5">
@@ -181,6 +191,48 @@ export function TitlePortal({ token, initial, expiresAt }: { token: string | nul
 
 type Part = { token: string | null; view: TitleView; onView: (view: TitleView) => void; onSaid: (text: string, failed?: boolean) => void };
 const longDay = (day: string) => new Date(`${day.slice(0, 10)}T12:00:00Z`).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+
+/**
+ * The draft settlement statement's lender lines (lib/term-changes.ts): the closer types them in and sees at once whether
+ * each matches the terms the borrower agreed to. LendHous funds once they match, or once it has explained a difference.
+ */
+function SettlementCard({ token, view, onView, onSaid }: Part) {
+  const settlement = view.settlement!;
+  const [editing, setEditing] = useState(!settlement.entered);
+  const [draft, setDraft] = useState<SettlementDraft>(() => draftOf(settlement.entered ?? undefined));
+  const [busy, setBusy] = useState(false);
+  const off = settlement.lines.filter((line) => line.off);
+  const send = async () => {
+    setBusy(true);
+    const figures = figuresOf(draft);
+    if (!token) {
+      onView({ ...view, settlement: { ...settlement, entered: { at: new Date().toISOString(), via: "title", figures }, lines: linesFrom(settlement.expected, figures), explained: false } });
+      setBusy(false); setEditing(false); return;
+    }
+    const reply = await titleSettlement(token, figures).catch(() => ({ error: "That didn't go through." }));
+    setBusy(false);
+    if ("view" in reply && reply.view) { onView(reply.view); setEditing(false); onSaid("Thank you. The figures are checked against the loan's terms below."); } else onSaid(reply.error ?? "That didn't go through.", true);
+  };
+  return (
+    <section className="glass space-y-3 p-5" data-testid="title-settlement">
+      <h2 className="eyebrow">Settlement statement check</h2>
+      <p className="text-sm text-muted-foreground">Type in the lender lines from your draft settlement statement. Each is checked against the terms the borrower agreed to, so a difference is caught before anyone signs.</p>
+      {settlement.entered && !editing && (
+        <>
+          <SettlementLines lines={settlement.lines} />
+          <p className={`text-sm ${off.length && !settlement.explained ? "text-bad" : "text-good"}`} data-testid="title-settlement-result">{!off.length ? "Every line matches the terms." : settlement.explained ? "LendHous has explained the difference: no change needed." : "These lines differ from the terms. Please correct the statement, or LendHous will be in touch about them."}</p>
+          {settlement.open && <button type="button" className="btn-ghost" data-testid="title-settlement-edit" onClick={() => setEditing(true)}>Enter new figures</button>}
+        </>
+      )}
+      {editing && settlement.open && (
+        <>
+          <SettlementFields draft={draft} onChange={setDraft} expected={settlement.expected} />
+          <button type="button" className="btn-primary" data-testid="title-settlement-save" disabled={!draft.loanAmount.trim() || busy} onClick={() => void send()}>{busy ? "Checking…" : "Check the statement"}</button>
+        </>
+      )}
+    </section>
+  );
+}
 
 /**
  * Who's selling (lib/seller-checks.ts): on a sale of land, or by an owner who lives elsewhere and owes nothing on the

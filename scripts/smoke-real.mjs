@@ -524,7 +524,24 @@ try {
   await go(under, dealHref);
   await under.getByTestId("tab-Term sheet").click();
   ok("acceptance locks the rate and points", (await under.getByTestId("term-sheet-builder").innerText()).includes("locked at what the borrower accepted"));
+  // No surprises (lib/term-changes.ts): a number that moves the accepted terms goes to the borrower, who answers in their
+  // own browser. Here they say no, so the loan stays on the terms they accepted.
   await go(under, dealHref);
+  const price = under.getByLabel("Purchase / as-is");
+  const priceBefore = await price.inputValue();
+  await price.fill(String(Number(priceBefore.replace(/,/g, "")) - 5_000));
+  ok("numbers that move the accepted terms can't just be saved", (await seen(under.getByTestId("term-change-form"))) && (await under.getByTestId("save-numbers").count()) === 0);
+  await under.getByTestId("term-change-reason").fill("The seller took $5,000 off after the inspection.");
+  await under.getByTestId("term-change-send").click();
+  ok("they go to the borrower with the reason", (await seen(under.getByTestId("term-change-open"))) && (await prisma.notification.count({ where: { toEmail: `borrower@${DOMAIN}`, eventCode: "loan.terms_change" } })) === 1);
+  await go(borrower, `/admin/borrower/${dealId}`);
+  ok("the borrower sees each line before and after", (await seen(borrower.getByTestId("term-change-open"))) && (await borrower.getByTestId("term-change-lines").innerText()).includes("Loan amount"));
+  await borrower.getByTestId("term-change-decline").click();
+  await borrower.getByTestId("term-change-note").fill("I'd like to keep the loan as it is.");
+  await borrower.getByTestId("term-change-decline-confirm").click();
+  ok("and can turn it down, keeping the terms they accepted", await seen(borrower.getByTestId("term-change-history").getByText("Turned down")));
+  await go(under, dealHref);
+  ok("the team hears, and the numbers stay", (await prisma.notification.count({ where: { toEmail: `owner@${DOMAIN}`, eventCode: "loan.terms_change" } })) >= 1 && (await under.getByLabel("Purchase / as-is").inputValue()) === priceBefore);
   await under.getByTestId("advance-loan").filter({ hasText: "Start clearing conditions" }).click();
   ok("the loan can't clear to close yet", await seen(under.getByTestId("stage-blockers").getByText("still open")));
 
@@ -628,6 +645,14 @@ try {
   const titleLink = await under.getByTestId("title-link-url").inputValue();
   ok("staff send the title company its secure link", titleLink.includes("/closing/") && (await prisma.notification.count({ where: { toEmail: `title@${DOMAIN}`, eventCode: "closing.link" } })) === 1);
   ok("and wait for title to enter the wire, instead of typing it", await seen(under.getByTestId("wire-waiting-title")));
+  // The closing date keeps a record of each move, and the borrower and the title company hear why (lib/closing-moves.ts).
+  await under.getByTestId("move-closing").click();
+  await under.getByTestId("move-closing-to").fill(new Date(Date.now() + 50 * 86_400_000).toISOString().slice(0, 10));
+  await under.getByTestId("move-closing-party").selectOption("title");
+  await under.getByTestId("move-closing-reason").fill("The commitment needs a corrected legal description.");
+  await under.getByTestId("move-closing-save").click();
+  await seen(under.getByTestId("closing-slips"));
+  ok("moving the closing date tells the borrower and the title company why", (await prisma.notification.count({ where: { toEmail: `borrower@${DOMAIN}`, eventCode: "closing.date_moved" } })) === 1 && (await prisma.notification.count({ where: { toEmail: `title@${DOMAIN}`, eventCode: "closing.date_moved" } })) === 1);
   const titleContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const title = await titleContext.newPage();
   title.on("pageerror", (error) => errors.push(`title: ${error.message}`));
@@ -651,6 +676,15 @@ try {
   await title.getByTestId("title-wire-confirm").fill("5544332211");
   await title.getByTestId("title-save-wire").click();
   ok("title enters its own escrow wire instructions", await seen(title.getByTestId("title-wire").getByText(/waiting for LendHous to call/i)));
+  ok("title sees why the closing date moved", await seen(title.getByTestId("title-moves").getByText(/corrected legal description/)));
+  // The settlement statement's lender lines, checked against the agreed terms (lib/term-changes.ts).
+  for (const key of ["loanAmount", "points", "lenderFees", "brokerFee", "interestReserve", "docStamps", "intangibleTax"]) {
+    const hint = await title.getByTestId(`settlement-${key}`).locator("xpath=..").innerText();
+    const agreed = hint.match(/The terms say \$([\d,.]+)/)?.[1]?.replace(/,/g, "") ?? "";
+    if (Number(agreed)) await title.getByTestId(`settlement-${key}`).fill(agreed);
+  }
+  await title.getByTestId("title-settlement-save").click();
+  ok("title checks its settlement statement against the agreed terms", await seen(title.getByTestId("title-settlement-result").getByText("Every line matches the terms.")));
   await go(under, dealHref);
   await under.getByTestId("tab-Documents").click();
   await acceptAll();

@@ -6,6 +6,7 @@ import { docBadge, OWN_DOC_ID, ownDocProblem, splitDocs, uploadLabel } from "@/l
 import type { Deal, Doc } from "@/lib/mockData";
 import { useStore } from "@/lib/store";
 import { BulkUpload } from "./BulkUpload";
+import { askedLine } from "@/lib/late-asks";
 
 const newDocId = () => `own-${Math.random().toString(36).slice(2, 12)}`;
 const CATEGORY_ORDER = ["Identity", "Entity", "Property", "Liquidity", "Experience", "Credit", "Closing", "Other"];
@@ -65,7 +66,7 @@ export function BorrowerDocuments({ deal, settled = false }: { deal: Deal; settl
         onDrop={(event) => { event.preventDefault(); setDrag(null); const file = event.dataTransfer.files?.[0]; if (file) void upload(x.id, file); }}
         className={`rounded-[2px] border border-border p-3 ${drag === x.id ? "bg-active" : "bg-card"}`}>
         <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0"><p className="text-sm font-medium">{x.name}</p>{x.note && x.status !== "accepted" && <p className="text-xs text-muted-foreground">{x.note}</p>}</div>
+          <div className="min-w-0"><p className="text-sm font-medium">{x.name}</p>{x.note && x.status !== "accepted" && <p className="text-xs text-muted-foreground">{x.note}</p>}{askedLine(x.asked) && x.status !== "accepted" && <p className="text-xs text-warn" data-testid="doc-asked-why">{askedLine(x.asked)}</p>}</div>
           <Badge tone={badge.tone}>{badge.label}</Badge>
         </div>
         {x.status === "rejected" && (

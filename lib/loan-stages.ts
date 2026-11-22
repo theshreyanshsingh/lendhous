@@ -9,6 +9,8 @@ import { partnerFundsBlocker } from "./partner-funding";
 import { sellerBlockers } from "./seller-checks";
 import { condoBlocker } from "./condo-check";
 import { sb264Blocker } from "./sb264";
+import { openTermChange, settlementHold } from "./term-changes";
+import { pendingAsks } from "./late-asks";
 import type { Deal, LoanStatus } from "./mockData";
 
 // action is the button; next says what happens, for the line above it.
@@ -56,7 +58,13 @@ export function nextStage(deal: Deal, e: Estimate, today?: string): NextStage | 
     if (foreign) blockers.push(foreign);
     const allocated = deal.allocations.reduce((sum, item) => sum + item.amount, 0);
     if (allocated !== e.noteAmount) blockers.push("Capital doesn't cover the whole loan yet");
+    // A change to the accepted terms waits for the borrower's answer (lib/term-changes.ts).
+    if (openTermChange(deal)) blockers.push("The borrower hasn't answered the change to their terms yet");
   }
+  // Something asked for late waits for a manager's yes or no before the loan moves on (lib/late-asks.ts).
+  if (step.to === "clear_to_close" || step.to === "funded") { const asks = pendingAsks(deal).length; if (asks) blockers.push(`${asks} late ask${asks > 1 ? "s" : ""} waiting for a manager (Conditions tab)`); }
+  // The title company's settlement statement has to match the agreed terms, or someone says why it doesn't.
+  if (step.to === "funded") { const held = settlementHold(deal); if (held) blockers.push(held); }
   if ((step.to === "clear_to_close" || step.to === "funded") && deal.capitalStatus !== "committed") blockers.push("Capital isn't committed");
   if (step.to === "funded") {
     const unsigned = deal.docs.filter((doc) => doc.stage === "funding" && doc.status !== "accepted" && doc.status !== "waived");

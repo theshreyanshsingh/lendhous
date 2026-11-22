@@ -19,6 +19,9 @@ const DEMO: TitleView = {
   wire: null, fundsReceived: null, recording: null, funded: false,
   // A lot bought from an owner who lives out of state: the closer confirms how it checked who's selling.
   sellerCheck: { done: null }, updates: [],
+  moves: [{ id: "demo-move", from: "2026-11-06", to: "2026-11-12", party: "appraiser", reason: "The appraiser's visit moved to Monday, November 9. (FAKE)", at: "2026-11-02T15:00:00Z" }],
+  // What the agreed terms say each lender line on the statement should be, for the closer to check theirs against.
+  settlement: { open: true, expected: { loanAmount: 296_250, points: 5_925, lenderFees: 1_495, brokerFee: 0, interestReserve: 0, docStamps: 1_037.05, intangibleTax: 592.5 }, lines: [], entered: null, explained: false },
 };
 
 // The same file after funding, when the team asks for a title search before releasing a draw.
@@ -27,7 +30,7 @@ const DEMO_DRAW: TitleView = {
   items: DEMO.items.map((item) => ({ ...item, status: "accepted", fileName: item.fileName ?? `${item.name}.pdf` })),
   wire: { bankName: "Sample Bank (FAKE)", beneficiary: "Sample Title & Escrow (FAKE) Escrow Account", account: "•••• 4821", verified: true, enteredAt: "2026-07-14T15:00:00Z" },
   fundsReceived: { amount: 512_000, on: "2026-07-18", by: "Sample Title & Escrow (FAKE)", at: "2026-07-18T18:00:00Z" }, recording: { on: "2026-07-21", reference: "Instr. 2026-0123456 (FAKE)", by: "Sample Title & Escrow (FAKE)", at: "2026-07-21T16:00:00Z" }, funded: true,
-  sellerCheck: null,
+  sellerCheck: null, moves: [], settlement: null,
   updates: [{ drawId: "demo-draw", askedAt: new Date(Date.now() - 86_400_000).toISOString(), amount: 120_000, since: "2026-07-21", answered: null }],
 };
 

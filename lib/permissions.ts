@@ -29,6 +29,7 @@ export const PERMISSIONS = {
   review_documents: "Accept or reject documents",
   manage_conditions: "Add and clear conditions",
   waive_conditions: "Waive conditions (reason required)",
+  approve_late_conditions: "Ask for conditions and documents close to closing, and approve others' late asks",
   issue_term_sheet: "Issue term sheets (up to the limit)",
   approve_matrix_exception: "Approve exceptions to the pricing matrix",
   manage_pricing: "Edit and publish pricing matrices",
@@ -63,7 +64,7 @@ const all = Object.fromEntries((Object.keys(PERMISSIONS) as Permission[]).map((k
 // PLACEHOLDER defaults, like the pricing matrix: GT replaces the limits.
 export const DEFAULT_MATRIX: Matrix = {
   ADMIN_OWNER: all,
-  UNDERWRITER: { assign_loans: on, view_pipeline: on, view_credit: on, review_documents: on, manage_conditions: on, waive_conditions: on, issue_term_sheet: { enabled: true, limitCents: 150_000_000 }, route_capital: on, approve_funding: on, approve_draw: on, approve_extension: on, clear_ofac: on },
+  UNDERWRITER: { assign_loans: on, view_pipeline: on, view_credit: on, review_documents: on, manage_conditions: on, waive_conditions: on, approve_late_conditions: on, issue_term_sheet: { enabled: true, limitCents: 150_000_000 }, route_capital: on, approve_funding: on, approve_draw: on, approve_extension: on, clear_ofac: on },
   PROCESSOR: { view_pipeline: on, review_documents: on, manage_conditions: on },
   CAPITAL_MANAGER: { view_pipeline: on, route_capital: on, manage_capital: on, approve_funding: on, view_reports: on },
   SERVICER: { view_pipeline: on, service_loans: on, waive_fee: on },

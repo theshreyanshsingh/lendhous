@@ -61,6 +61,13 @@ import { ExitPlanCard } from "@/components/loan/ExitPlanCard";
 import { ChevronDown } from "lucide-react";
 import { BackLink } from "@/components/back-link";
 import { useScrollRow } from "@/components/scroll-row";
+import { TermChangeForm, TermChanges } from "@/components/loan/TermChanges";
+import { SettlementCheck } from "@/components/loan/SettlementCheck";
+import { ClosingDateHistory, MoveClosingDate } from "@/components/loan/ClosingDate";
+import { demoApproves, LateAsks } from "@/components/loan/LateAsks";
+import { termLines, termsHeld } from "@/lib/term-changes";
+import { askNeeds, askProblem, teamAskedLine } from "@/lib/late-asks";
+import { slips, timesWord } from "@/lib/closing-moves";
 
 // Closing starts once the term sheet is accepted, and stays as the record of how the money went out.
 const CLOSING_TAB = ["term_sheet_accepted", "conditions", "clear_to_close", "closing", "funded", "servicing_current", "servicing_delinquent", "matured", "default", "paid_off"];
@@ -70,12 +77,12 @@ const BEFORE_UNDERWRITING = ["submitted", "initial_review"];
 type Tab = (typeof allTabs)[number];
 
 export default function DealWorkspace() {
-  const { id } = useParams<{ id: string }>(); const { s, dispatch, applyReply, local, viewerName } = useStore();
+  const { id } = useParams<{ id: string }>(); const { s, dispatch, applyReply, local, viewerName, viewer } = useStore();
   const d = s.deals.find((x) => x.id === id);
   const [invite, setInvite] = useState("");
   // On a phone the header keeps to what identifies the loan; the team pickers, broker and the rest open on a tap.
   const [details, setDetails] = useState(false);
-  const [request, setRequest] = useState({ name: "", category: "Property" });
+  const [request, setRequest] = useState({ name: "", category: "Property", reason: "" });
   // Sending a document back says what's still needed, which the borrower sees on it.
   const [sendBack, setSendBack] = useState<{ docId: string; note: string } | null>(null);
   const [tab, setTab] = useState<Tab>("Numbers & Ratios");
@@ -142,13 +149,14 @@ export default function DealWorkspace() {
           <div className="min-w-0"><div className="text-xs text-muted-foreground">{d.loanNumber} · {productLabel[d.app.product]} · source: {d.source.replace("_", " ")}</div>
             <h1 className="text-xl font-normal tracking-tight">{d.address}, {d.city} {d.zip} <span className="font-normal text-faint">({d.app.county})</span></h1>
             <div className="text-sm text-muted-foreground">{d.borrowerName} · {d.entityName} · FICO {d.app.fico} · Tier {e.tier}</div>
-            {PRE_FUNDING.includes(d.status) && <div className="mt-1 text-sm text-muted-foreground" data-testid="loan-facts">Target closing <b className="font-medium text-foreground">{shortDay(d.closingDate)}</b>{today && <> · {closingIn(d.closingDate, today)}</>}</div>}
+            {PRE_FUNDING.includes(d.status) && <div className="mt-1 text-sm text-muted-foreground" data-testid="loan-facts">Target closing <b className="font-medium text-foreground">{shortDay(d.closingDate)}</b>{today && <> · {closingIn(d.closingDate, today)}</>}{slips(d) > 0 && <> · <span className="text-warn" data-testid="closing-slips">moved {timesWord(slips(d))}</span></>} · <MoveClosingDate deal={d} /></div>}
             <button type="button" className="-mb-2 inline-flex min-h-11 items-center gap-1 text-sm text-link sm:hidden" aria-expanded={details} aria-controls="loan-details" data-testid="loan-details-toggle" onClick={() => setDetails(!details)}>{details ? "Hide the loan team and details" : "Loan team and details"}<ChevronDown className={`size-3.5 transition-transform ${details ? "rotate-180" : ""}`} aria-hidden="true" /></button>
             <div id="loan-details" className={details ? "" : "max-sm:hidden"} data-testid="loan-details">
               {d.app.repeat && <div className="text-sm text-muted-foreground" data-testid="deal-repeat">{d.app.repeat.pausedBy ? <span className="text-warn">Repeat borrower, pricing paused: a late payment on {d.app.repeat.pausedBy} in the 24 months before {shortDay(d.app.repeat.asOf)}</span> : <>Repeat borrower: {d.app.repeat.loans} LendHous loan{d.app.repeat.loans === 1 ? "" : "s"} paid as agreed ({d.app.repeat.counted.join(", ")}) when it was submitted</>}</div>}
               {broker && <div className="text-sm text-muted-foreground" data-testid="deal-broker">Broker: {broker.name} · {points(d.brokerPoints)} ({usd((orig.noteAmount * (d.brokerPoints ?? 0)) / 100)})</div>}
               <Showcase deal={d} side="team" />
               <div className="mt-2"><LoanTeam deal={d} /></div>
+              <div className="mt-2"><ClosingDateHistory deal={d} side="team" /></div>
             </div></div>
           <div className="flex flex-wrap items-center gap-2"><GradeBadge grade={e.score.grade} score={e.score.score} /><Badge tone="blue">{statusLabel(d.status)}</Badge><Badge tone={capTone(d.capitalStatus)}>Capital: {statusLabel(d.capitalStatus).toLowerCase()}</Badge></div>
         </div>
@@ -194,7 +202,7 @@ export default function DealWorkspace() {
 
       {tab === "Numbers & Ratios" && (
         <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
-          <Section title="Underwritten inputs" right={Object.keys(ov).length > 0 ? <span className="flex items-center gap-3">{!locked && <button className="text-xs font-semibold text-link underline" data-testid="save-numbers" onClick={async () => { if (await dispatch({ t: "updateDealNumbers", dealId: d.id, changes: ov })) setOv({}); }}>Save</button>}<button className="text-xs text-link underline" onClick={() => setOv({})}>reset</button></span> : undefined}>
+          <Section title="Underwritten inputs" right={Object.keys(ov).length > 0 ? <span className="flex items-center gap-3">{!locked && !(termsHeld(d) && termLines(d.app, ov).length) && <button className="text-xs font-semibold text-link underline" data-testid="save-numbers" onClick={async () => { if (await dispatch({ t: "updateDealNumbers", dealId: d.id, changes: ov })) setOv({}); }}>Save</button>}<button className="text-xs text-link underline" onClick={() => setOv({})}>reset</button></span> : undefined}>
             <div className="space-y-3">
               {num("purchasePrice", d.app.product === "ground_up" ? "Land value" : "Purchase / as-is")}
               {num("appraisedAsIs", "Appraised as-is (optional)")}
@@ -211,10 +219,12 @@ export default function DealWorkspace() {
                 {num("insuranceAnnual", "Insurance / yr")}{num("floodAnnual", "Flood insurance / yr")}
               </>}
               {num("fico", "FICO (pulled)")}{num("verifiedDeals", "Verified deals (36 mo)")}{num("liquidity", "Verified liquidity")}
-              <p className="text-[11px] text-faint">{locked ? "Edits are a live what-if. These numbers are locked once a loan clears to close." : "Edits are a live what-if until you save them."}</p>
+              <p className="text-[11px] text-faint">{locked ? "Edits are a live what-if. These numbers are locked once a loan clears to close." : termsHeld(d) ? "Edits are a live what-if. The borrower accepted these terms: a change to them goes to the borrower to agree." : "Edits are a live what-if until you save them."}</p>
+              {termsHeld(d) && Object.keys(ov).length > 0 && <TermChangeForm deal={d} changes={ov} onSent={() => setOv({})} />}
             </div>
           </Section>
           <div className="min-w-0 space-y-4">
+            <TermChanges deal={d} side="team" />
             <Section title="Ratios vs. matrix limits">
               <div className={ratioGrid(e.ratios.length)}>{e.ratios.map((r) => <RatioPill key={r.key} label={r.label} value={r.actual} limit={r.limit} color={r.color} kind={r.kind} isMultiple={r.key === "dscr"} />)}</div>
               {d.app.product !== "bridge" && d.app.product !== "dscr" && <div className="mt-2 text-xs text-muted-foreground">Total loan ÷ as-is = {pct(e.noteAmount / uwApp.purchasePrice)} (normal for rehab loans; the holdback is released by draws).</div>}
@@ -323,7 +333,7 @@ export default function DealWorkspace() {
       {tab === "Term sheet" && <TermSheetBuilder deal={d} />}
       {tab === "Conditions" && <ConditionsPanel deal={d} />}
       {tab === "Credit review" && <div className="space-y-4"><ApplicationRecord deal={d} /><ApplicationOnFile deal={d} /><OfacPanel deal={d} /><Sb264Panel deal={d} /><CreditReview deal={d} /></div>}
-      {tab === "Closing" && <div className="space-y-4"><ClosingPanel deal={d} />{INSURED.includes(d.status) && <InsurancePanel deal={d} />}{(d.app.product === "fix_flip" || d.app.product === "ground_up" || d.lienFile) && <LienProtection deal={d} />}{d.scope?.length ? <PermitsPanel deal={d} /> : null}<OfacPanel deal={d} /></div>}
+      {tab === "Closing" && <div className="space-y-4"><ClosingPanel deal={d} /><SettlementCheck deal={d} />{INSURED.includes(d.status) && <InsurancePanel deal={d} />}{(d.app.product === "fix_flip" || d.app.product === "ground_up" || d.lienFile) && <LienProtection deal={d} />}{d.scope?.length ? <PermitsPanel deal={d} /> : null}<OfacPanel deal={d} /></div>}
       {tab === "Servicing" && (SERVICED.includes(d.status) || d.status === "paid_off") && <LoanLedger deal={d} />}
       {tab === "Servicing" && d.status === "reo" && <div className="space-y-4"><ForeclosurePanel deal={d} /><ReoOccupancyCard deal={d} /><CollectionsPanel deal={d} /></div>}
       {tab === "Servicing" && SERVICED.includes(d.status) && d.properties?.length ? <ReleaseProperty deal={d} /> : null}
@@ -348,7 +358,7 @@ export default function DealWorkspace() {
         {((d.scope?.length ?? 0) > 0 || s.photoRequests.some((request) => request.dealId === d.id && request.stormId)) && <Section title="Site photos"><PhotoRequests deal={d} /></Section>}
         <Section title="Documents">
           <ul className="divide-y divide-border">{d.docs.map((x) => (
-            <li key={x.id} className="flex flex-wrap items-center justify-between gap-2 py-2"><div className="min-w-0"><div className="text-sm font-medium">{x.name}{x.addedBy === "borrower" && <span className="ml-2 text-xs font-normal text-link">added by the borrower</span>}</div>{x.status === "rejected" && x.teamNote && <div className="text-xs text-bad">Sent back: {x.teamNote}</div>}<div className="text-xs text-muted-foreground">{x.category}{x.fileName && !x.documentId && ` · ${x.fileName}`}{x.documentId && <> · <a className="text-link underline underline-offset-2" href={`/api/documents/${x.documentId}`} data-testid="doc-file">{x.fileName}</a></>}{x.carriedFrom && <> · <span className="text-good" data-testid="doc-carried">carried over from {x.carriedFrom}</span> <button type="button" className="text-link underline underline-offset-2" data-testid="doc-ask-again" onClick={() => dispatch({ t: "docStatus", dealId: d.id, docId: x.id, status: "requested" })}>ask again</button></>}</div></div>
+            <li key={x.id} className="flex flex-wrap items-center justify-between gap-2 py-2"><div className="min-w-0"><div className="text-sm font-medium">{x.name}{x.addedBy === "borrower" && <span className="ml-2 text-xs font-normal text-link">added by the borrower</span>}</div>{x.status === "rejected" && x.teamNote && <div className="text-xs text-bad">Sent back: {x.teamNote}</div>}{teamAskedLine(x) && <div className="text-xs text-warn" data-testid="doc-asked">{teamAskedLine(x)}</div>}<div className="text-xs text-muted-foreground">{x.category}{x.fileName && !x.documentId && ` · ${x.fileName}`}{x.documentId && <> · <a className="text-link underline underline-offset-2" href={`/api/documents/${x.documentId}`} data-testid="doc-file">{x.fileName}</a></>}{x.carriedFrom && <> · <span className="text-good" data-testid="doc-carried">carried over from {x.carriedFrom}</span> <button type="button" className="text-link underline underline-offset-2" data-testid="doc-ask-again" onClick={() => dispatch({ t: "docStatus", dealId: d.id, docId: x.id, status: "requested" })}>ask again</button></>}</div></div>
               <div className="flex flex-wrap items-center gap-2"><Badge>{statusLabel(x.status)}</Badge><DocUpload dealId={d.id} doc={x} />{(x.status === "uploaded" || x.status === "in_review") && <><button className="btn-ghost py-1 text-xs" onClick={() => dispatch({ t: "docStatus", dealId: d.id, docId: x.id, status: "accepted" })}>Accept</button><button className="btn-ghost py-1 text-xs" data-testid={`send-back-${x.id}`} onClick={() => setSendBack({ docId: x.id, note: "" })}>Send back</button></>}{x.status === "requested" && <button className="btn-ghost py-1 text-xs" data-testid={`waive-${x.id}`} onClick={() => dispatch({ t: "docStatus", dealId: d.id, docId: x.id, status: "waived" })}>Waive</button>}</div>{sendBack?.docId === x.id && (
                 <div className="mt-2 flex w-full flex-wrap items-end gap-2" data-testid="send-back-form">
                   <label className="block min-w-0 flex-1 basis-56"><span className="label">What the borrower still needs to send (they see this)</span><input className="desk-input" data-testid="send-back-note" maxLength={300} placeholder="e.g. All pages of the October statement" value={sendBack.note} onChange={(event) => setSendBack({ ...sendBack, note: event.target.value })} /></label>
@@ -359,8 +369,10 @@ export default function DealWorkspace() {
           <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-border pt-3" data-testid="request-doc">
             <label className="block min-w-0 flex-1 basis-48"><span className="label">Ask for another document</span><input data-testid="request-doc-name" className="desk-input" placeholder="e.g. Updated insurance binder" value={request.name} onChange={(ev) => setRequest({ ...request, name: ev.target.value })} /></label>
             <label className="block"><span className="label">Category</span><select className="desk-input w-auto!" value={request.category} onChange={(ev) => setRequest({ ...request, category: ev.target.value })}>{["Identity", "Entity", "Property", "Liquidity", "Closing", "Experience"].map((category) => <option key={category}>{category}</option>)}</select></label>
-            <button className="btn-ghost" data-testid="request-doc-send" disabled={!request.name.trim()} onClick={async () => { if (await dispatch({ t: "addDocRequest", dealId: d.id, name: request.name.trim(), category: request.category })) setRequest({ ...request, name: "" }); }}>Ask</button>
+            {today && request.name.trim() && (askNeeds(d, request.name, today).late || askNeeds(d, request.name, today).again) && <label className="block min-w-0 basis-full"><span className="label">{askNeeds(d, request.name, today).late ? `${askNeeds(d, request.name, today).late}: why is it needed now?` : `Already sent: ${askNeeds(d, request.name, today).again!.name}. Why again?`} (the borrower sees this)</span><input data-testid="request-doc-reason" className="desk-input" maxLength={1000} value={request.reason} onChange={(ev) => setRequest({ ...request, reason: ev.target.value })} /></label>}
+            <button className="btn-ghost" data-testid="request-doc-send" disabled={!request.name.trim() || Boolean(today && askProblem(d, request.name, request.reason, today))} onClick={async () => { if (await dispatch({ t: "addDocRequest", dealId: d.id, name: request.name.trim(), category: request.category, ...(request.reason.trim() ? { reason: request.reason.trim() } : {}), ...(local && demoApproves(viewer.email) ? { approved: true } : {}), by: viewerName })) setRequest({ ...request, name: "", reason: "" }); }}>Ask</button>
           </div>
+          <LateAsks deal={d} kind="doc" />
         </Section>
       </div>)}
     </div>

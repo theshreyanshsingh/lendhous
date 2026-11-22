@@ -17,6 +17,9 @@ import { brokerStanding, PRIORITY_TIERS } from "./broker-program";
 import { openDrawCalls, proceedsToSend, unsettledTransfers } from "./capital-moves";
 import { claimDueOn, latestPromise, nextAction, openBankruptcy, promiseState, stageOf } from "./collections";
 import { openModification } from "./modifications";
+import { askTitle, pendingAsks } from "./late-asks";
+import { awaitingReply, covering } from "./replies";
+import { openTermChange, settlementHold } from "./term-changes";
 
 const SERVICED_STATUSES = new Set(SERVICED);
 import { clockOf, SLA_TARGETS, type Clock, type Targets } from "./sla";
@@ -55,7 +58,8 @@ export function workQueue(book: Book, viewer: { id: string; email?: string }, no
     const { deal } = item;
     const repeat = Boolean(deal && repeatBorrower(deal));
     const tier = deal?.brokerId ? tierOf(deal.brokerId) : undefined;
-    items.push({ ...item, deal: deal && { id: deal.id, loanNumber: deal.loanNumber, borrowerName: deal.borrowerName, address: deal.address }, mine: Boolean(deal && isMine(deal, viewer)), owner: deal?.team?.officer?.name ?? deal?.team?.processor?.name, ...(repeat ? { repeat } : {}), ...(tier ? { brokerTier: tier } : {}), ...(repeat || tier ? { priority: item.priority - 0.5 } : {}) });
+    // Someone covering for a colleague who's away has the colleague's loans as their own until they're back (lib/replies.ts).
+    items.push({ ...item, deal: deal && { id: deal.id, loanNumber: deal.loanNumber, borrowerName: deal.borrowerName, address: deal.address }, mine: Boolean(deal && (isMine(deal, viewer) || covering(deal, viewer, book.away, today))), owner: deal?.team?.officer?.name ?? deal?.team?.processor?.name, ...(repeat ? { repeat } : {}), ...(tier ? { brokerTier: tier } : {}), ...(repeat || tier ? { priority: item.priority - 0.5 } : {}) });
   };
   const today = servicingDate(now);
   // Each broker's tier once, not once per item.
@@ -99,7 +103,14 @@ export function workQueue(book: Book, viewer: { id: string; email?: string }, no
     if (renewals.length) add({ key: `renewal:${deal.id}`, label: `Check ${renewals.length === 1 ? "an insurance renewal" : `${renewals.length} insurance renewals`}`, href: tab(deal, "Servicing"), deal, since: oldest(renewals.map((item) => item.at)), priority: 12 });
     if (deal.status === "matured" && !bankruptcy) add({ key: `matured:${deal.id}`, label: "Past maturity", href: tab(deal, "Servicing"), deal, priority: 6 });
     else if (!bankruptcy && needsExitAnswer(deal)) add({ key: `exit:${deal.id}`, label: "Call about the exit plan: no answer yet", href: tab(deal, "Servicing"), deal, priority: 6 });
-    if (openExtension(deal)) add({ key: `extension:${deal.id}`, label: "Decide the extension request", href: tab(deal, "Servicing"), deal, priority: 7 });
+    const extension = openExtension(deal);
+    if (extension) add({ key: `extension:${deal.id}`, label: "Decide the extension request", href: tab(deal, "Servicing"), deal, since: extension.requestedAt, clock: clockOf(extension.requestedAt, now, targets.extensionAnswer), priority: 7 });
+    // The no-surprises steps (lib/late-asks.ts, lib/term-changes.ts): late asks for a manager, and a settlement statement that doesn't match.
+    for (const ask of pendingAsks(deal)) add({ key: `lateask:${ask.id}`, label: `Approve or turn down a late ask: ${askTitle(ask)}`, href: tab(deal, "Conditions"), deal, since: ask.at, priority: 3 });
+    const settlement = settlementHold(deal);
+    if (settlement) add({ key: `settlement:${deal.id}`, label: "Settlement statement doesn't match the terms", href: tab(deal, "Closing"), deal, since: deal.settlement?.at, priority: 3 });
+    const change = openTermChange(deal);
+    if (change) add({ key: `termchange:${deal.id}`, label: "Waiting for the borrower to answer a change to their terms", href: tab(deal, "Numbers & Ratios"), deal, since: change.at, priority: 14 });
     if (lienReleaseOpen(deal)) add({ key: `release:${deal.id}`, label: "Record the mortgage release", href: tab(deal, "Servicing"), deal, priority: 8 });
     if (deal.pricingException?.status === "pending") add({ key: `exception:${deal.id}`, label: "Decide the pricing exception", href: tab(deal, "Term sheet"), deal, since: deal.pricingException.requestedAt, priority: 9 });
     if (book.bids.some((bid) => bid.dealId === deal.id && bid.status === "submitted")) add({ key: `bids:${deal.id}`, label: "Decide the partner bids", href: tab(deal, "Capital Routing"), deal, priority: 10 });
@@ -123,6 +134,11 @@ export function workQueue(book: Book, viewer: { id: string; email?: string }, no
     if (SERVICED_STATUSES.has(deal.status) && (deal.scope?.length ?? 0) > 0 && !budgetBalance(deal).inBalance) add({ key: `balance:${deal.id}`, label: "Out of balance: draws held until the overrun is covered", href: tab(deal, "Servicing"), deal, priority: 8 });
     if (bonusOf(deal).state === "earned") add({ key: `referral:${deal.id}`, label: `Pay ${deal.friendReferral!.referrerName}'s referral bonus`, href: tab(deal, "Capital Routing"), deal, since: firstStage(deal, ["funded"]) ?? deal.closingDate, priority: 19 });
     if (needsOfficer(deal)) add({ key: `officer:${deal.id}`, label: "Needs a loan officer", href: tab(deal), deal, priority: 16 });
+  }
+  // Borrowers and brokers waiting on an answer, against the reply time they were promised (lib/replies.ts).
+  for (const deal of book.deals) {
+    const waiting = awaitingReply(book.messages, deal.id, deal.replyHandled?.at);
+    if (waiting) add({ key: `reply:${deal.id}`, label: `Reply to ${waiting.from}'s message`, href: tab(deal, "Messages"), deal, since: waiting.since, clock: clockOf(waiting.since, now, targets.reply), priority: 6 });
   }
   for (const payoff of book.payoffs) {
     const deal = book.deals.find((item) => item.id === payoff.dealId);

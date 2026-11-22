@@ -118,8 +118,10 @@ describe("the borrower's answer", () => {
     expect(latestSheet(deal(after))).toMatchObject({ status: "accepted", response: { signedName: "Alex Sample" } });
     expect(alertsFor(b, after, action)[0]).toMatchObject({ to: "team" });
     const rate = deal(after).app.termRate;
-    const edited = reducer(after, { t: "updateDealNumbers", dealId: "d1", changes: { termRate: 5, termPoints: 0, pricingVersion: "x", purchasePrice: deal(after).app.purchasePrice + 10_000 } });
-    expect(deal(edited).app).toMatchObject({ termRate: rate, pricingVersion: deal(after).app.pricingVersion, purchasePrice: deal(after).app.purchasePrice + 10_000 });
+    // An edit that moves what the borrower accepted waits for their yes (lib/term-changes.ts), so it changes nothing here.
+    expect(reducer(after, { t: "updateDealNumbers", dealId: "d1", changes: { purchasePrice: deal(after).app.purchasePrice + 10_000 } })).toBe(after);
+    const edited = reducer(after, { t: "updateDealNumbers", dealId: "d1", changes: { termRate: 5, termPoints: 0, pricingVersion: "x", fico: deal(after).app.fico } });
+    expect(deal(edited).app).toMatchObject({ termRate: rate, pricingVersion: deal(after).app.pricingVersion });
     expect(parseAction({ t: "updateDealNumbers", dealId: "d1", changes: { termRate: 5 } })).toEqual({ t: "updateDealNumbers", dealId: "d1", changes: {} });
   });
   it("asking for changes sends it back to underwriting, and the next version replaces it", () => {

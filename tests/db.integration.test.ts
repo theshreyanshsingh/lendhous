@@ -1713,3 +1713,84 @@ describe("a broker's client filling in their own details", () => {
     vi.restoreAllMocks();
   });
 });
+
+describe("the no-surprises records", () => {
+  it("keeps time away in its own list, and a closing move and the title's settlement figures on the loan", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const { demoBook } = await import("@/lib/book");
+    const { readBook, runAction } = await import("@/lib/book-store");
+    const { addDays, servicingDate } = await import("@/lib/servicing");
+    const d7 = demoBook().deals.find((deal) => deal.id === "d7")!;
+    await prisma.bookRecord.create({ data: { id: "deals:ns-7", kind: "deals", data: JSON.parse(JSON.stringify({ ...d7, id: "ns-7", loanNumber: "LH-7601", lateAsks: undefined })) } });
+    const server = { id: "server", name: "LendHous", roleCodes: [] };
+    const owner = { id: "ns-owner", name: "Olga Owner", roleCodes: ["ADMIN_OWNER" as const] };
+    const member = { id: "ns-m1", name: "Mia Member", email: "mia@example.com", phone: "", title: "Underwriter" };
+    const backup = { id: "ns-m2", name: "Ben Backup", email: "ben@example.com", phone: "", title: "Processor" };
+    const day = servicingDate(new Date());
+
+    expect(await runAction(server, { t: "setAway", member, backup, from: day, until: addDays(day, 3), by: "Mia Member" }, { trusted: true })).toHaveProperty("after");
+    expect(await prisma.bookRecord.count({ where: { id: "away:ns-m1" } })).toBe(1);
+    expect((await readBook()).book.away).toEqual([expect.objectContaining({ id: "ns-m1", backup: expect.objectContaining({ email: "ben@example.com" }) })]);
+    // Nobody sets it from a browser: the server looks both people up.
+    expect(await runAction(owner, { t: "setAway", member, backup, from: day, until: day, by: "" })).toHaveProperty("error");
+
+    expect(await runAction(owner, { t: "moveClosingDate", dealId: "ns-7", moveId: "ns-mv", to: addDays(day, 10), party: "title", reason: "The commitment is late", by: "" })).toHaveProperty("after");
+    expect(await runAction(server, { t: "saveSettlement", dealId: "ns-7", figures: { loanAmount: 1_000 }, by: "Terry Title", via: "title" }, { trusted: true })).toHaveProperty("after");
+    const stored = (await readBook()).book.deals.find((deal) => deal.id === "ns-7")!;
+    expect(stored.closingDate).toBe(addDays(day, 10));
+    expect(stored.closingMoves?.[0]).toMatchObject({ from: d7.closingDate, party: "title", by: "Olga Owner" });
+    expect(stored.settlement).toMatchObject({ via: "title", by: "Terry Title", figures: { loanAmount: 1_000 } });
+
+    expect(await runAction(server, { t: "endAway", memberId: "ns-m1", by: "Mia Member" }, { trusted: true })).toHaveProperty("after");
+    expect(await prisma.bookRecord.count({ where: { id: "away:ns-m1" } })).toBe(0);
+  });
+});
+
+describe("saving under load (docs/stress-test-2026-11-22.md)", () => {
+  it("saves ten changes made at the same moment, none lost, and keeps the book in memory between them", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const { demoBook } = await import("@/lib/book");
+    const { readBook, runAction, forgetBook, records } = await import("@/lib/book-store");
+    const d1 = demoBook().deals.find((deal) => deal.id === "d1")!;
+    for (let i = 0; i < 10; i++) await prisma.bookRecord.create({ data: { id: `deals:load-${i}`, kind: "deals", data: JSON.parse(JSON.stringify({ ...d1, id: `load-${i}`, loanNumber: `LH-90${i}` })) } });
+    forgetBook();
+    const start = (await readBook()).version;
+    const staff = { id: "load-staff", name: "Lou Load", roleCodes: ["ADMIN_OWNER" as const] };
+    const results = await Promise.all(Array.from({ length: 10 }, (_, i) => runAction(staff, { t: "sendMessage", dealId: `load-${i % 3}`, from: "", side: "internal", text: `Note ${i}` })));
+    expect(results.filter((result) => "error" in result)).toEqual([]);
+    const { book, version } = await readBook();
+    expect(book.messages.filter((message) => message.text.startsWith("Note "))).toHaveLength(10);
+    expect(version).toBe(start + 10);
+    // Nothing changed since, so the same book comes back without reading every record again.
+    const findMany = vi.spyOn(records, "readAll");
+    expect((await readBook()).book).toBe(book);
+    expect(findMany).not.toHaveBeenCalled();
+    // A record written some other way (a key rotation, a restore) is noticed, though the version didn't move.
+    await prisma.bookRecord.create({ data: { id: "deals:load-new", kind: "deals", data: JSON.parse(JSON.stringify({ ...d1, id: "load-new", loanNumber: "LH-911" })) } });
+    expect((await readBook()).book.deals.some((deal) => deal.id === "load-new")).toBe(true);
+    expect(findMany).toHaveBeenCalledTimes(1);
+    findMany.mockRestore();
+  });
+
+  it("reads again when the database drops a read, and says to try again when it keeps dropping", async () => {
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    const { Prisma } = await import("@prisma/client");
+    const { demoBook } = await import("@/lib/book");
+    const { readBook, runAction, forgetBook, records, BUSY } = await import("@/lib/book-store");
+    const d1 = demoBook().deals.find((deal) => deal.id === "d1")!;
+    await prisma.bookRecord.create({ data: { id: "deals:drop-1", kind: "deals", data: JSON.parse(JSON.stringify({ ...d1, id: "drop-1", loanNumber: "LH-921" })) } });
+    const eof = () => new Prisma.PrismaClientKnownRequestError("Raw query failed. Code: `unknown`. Message: `Kind: I/O error: early eof, labels: {}, source: None`", { code: "P2010", clientVersion: "test" });
+    forgetBook();
+    const findMany = vi.spyOn(records, "readAll").mockRejectedValueOnce(eof());
+    expect((await readBook()).book.deals.map((deal) => deal.id)).toContain("drop-1");
+    forgetBook();
+    findMany.mockRejectedValue(eof());
+    const staff = { id: "drop-staff", name: "Dee Drop", roleCodes: ["ADMIN_OWNER" as const] };
+    expect(await runAction(staff, { t: "sendMessage", dealId: "drop-1", from: "", side: "internal", text: "x" })).toEqual({ error: BUSY });
+    findMany.mockRestore();
+    // A mistake that isn't the connection still shows, rather than being retried.
+    forgetBook();
+    vi.spyOn(records, "readAll").mockRejectedValueOnce(new Error("Something else broke"));
+    await expect(readBook()).rejects.toThrow("Something else broke");
+  });
+});

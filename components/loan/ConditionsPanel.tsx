@@ -7,6 +7,8 @@ import type { ConditionCategory, ConditionOwner, Deal, LoanCondition } from "@/l
 import { useStore } from "@/lib/store";
 import { useServiceDay } from "./use-service-day";
 import { shortDay } from "@/lib/format";
+import { askNeeds, askProblem, teamAskedLine } from "@/lib/late-asks";
+import { demoApproves, LateAsks } from "./LateAsks";
 
 const small = "h-9! px-3! text-xs!";
 export const conditionTone = (status: LoanCondition["status"]) => (status === "cleared" ? "green" : status === "submitted" ? "blue" : status === "waived" ? "slate" : "amber") as "green";
@@ -38,15 +40,15 @@ export function ConditionFiles({ condition, local }: { condition: LoanCondition;
   return <ul className="text-xs">{condition.files.map((file, n) => <li key={n}>{file.documentId && !local ? <a className="text-link underline" href={`/api/documents/${file.documentId}?view=1`} target="_blank" rel="noreferrer">{file.fileName}</a> : file.fileName}<span className="text-muted-foreground"> · {shortDate(file.at)}{file.by ? ` · ${file.by}` : ""}</span></li>)}</ul>;
 }
 
-type Draft = { templateId: string; title: string; detail: string; category: ConditionCategory; owner: ConditionOwner; needsUpload: boolean; dueOn: string };
-const blank: Draft = { templateId: "", title: "", detail: "", category: "prior_to_funding", owner: "borrower", needsUpload: true, dueOn: "" };
+type Draft = { templateId: string; title: string; detail: string; category: ConditionCategory; owner: ConditionOwner; needsUpload: boolean; dueOn: string; reason: string };
+const blank: Draft = { templateId: "", title: "", detail: "", category: "prior_to_funding", owner: "borrower", needsUpload: true, dueOn: "", reason: "" };
 
 /**
  * The loan's conditions for the team (Spec A10): what's needed before the loan documents, before funding and after
  * closing, who it's for and when it's due. Clearing and sending back take condition authority; waiving takes its own.
  */
 export function ConditionsPanel({ deal }: { deal: Deal }) {
-  const { s, dispatch, viewerName, local } = useStore();
+  const { s, dispatch, viewerName, local, viewer } = useStore();
   const today = useServiceDay();
   const [acting, setActing] = useState<{ id: string; kind: "clear" | "return" | "waive" } | null>(null);
   const [text, setText] = useState("");
@@ -56,7 +58,10 @@ export function ConditionsPanel({ deal }: { deal: Deal }) {
   const library = missingStandard(deal, libraryOf(s));
   const blocking = blockingConditions(deal).length;
   const input: ConditionInput = draft.templateId ? { ...(library.find((item) => item.id === draft.templateId) ?? blank), templateId: draft.templateId, ...(draft.dueOn ? { dueOn: draft.dueOn } : {}) } : { title: draft.title, detail: draft.detail, category: draft.category, owner: draft.owner, needsUpload: draft.needsUpload, ...(draft.dueOn ? { dueOn: draft.dueOn } : {}) };
-  const problem = today ? addProblem(deal, input, today) : null;
+  // Close to closing, or again after the borrower sent it, an ask needs a reason the borrower sees (lib/late-asks.ts).
+  const afterClosing = input.category === "post_closing";
+  const needs = today ? askNeeds(deal, input.title, today, afterClosing) : { late: null, again: null };
+  const problem = today ? addProblem(deal, input, today) ?? askProblem(deal, input.title, draft.reason, today, afterClosing) : null;
   const close = () => { setActing(null); setText(""); };
   const act = async (condition: LoanCondition) => {
     if (!acting) return;
@@ -64,7 +69,7 @@ export function ConditionsPanel({ deal }: { deal: Deal }) {
     const done = await dispatch(acting.kind === "clear" ? { t: "clearCondition", ...base, note: text } : acting.kind === "return" ? { t: "returnCondition", ...base, reason: text } : { t: "waiveCondition", ...base, reason: text });
     if (done) close();
   };
-  const add = async () => { if (await dispatch({ t: "addCondition", dealId: deal.id, condition: input, by: viewerName })) { setDraft(blank); setAdding(false); } };
+  const add = async () => { if (await dispatch({ t: "addCondition", dealId: deal.id, condition: input, by: viewerName, ...(draft.reason.trim() ? { reason: draft.reason.trim() } : {}), ...(local && demoApproves(viewer.email) ? { approved: true } : {}) })) { setDraft(blank); setAdding(false); } };
   return (
     <div className="space-y-4" data-testid="conditions-panel">
       <p className={`text-sm ${blocking ? "text-warn" : "text-muted-foreground"}`} data-testid="conditions-summary">{conditions.length === 0 ? "No conditions yet. The library's standard ones are added when the loan starts clearing conditions." : blocking ? `${blocking} condition${blocking === 1 ? "" : "s"} to clear or waive before the loan can clear to close.` : "Everything before closing is cleared or waived."}</p>
@@ -82,6 +87,7 @@ export function ConditionsPanel({ deal }: { deal: Deal }) {
                   </div>
                   <p className={`text-xs ${today && overdue(condition, today) ? "text-bad" : "text-muted-foreground"}`}>{condition.dueOn ? `Due ${shortDay(condition.dueOn)}${today && overdue(condition, today) ? " (overdue)" : ""}` : "No due date"} · added by {condition.addedBy} on {shortDate(condition.addedAt)}{condition.needsUpload ? " · needs a file" : ""}</p>
                   <ConditionFiles condition={condition} local={local} />
+                  {teamAskedLine(condition) && <p className="text-xs text-warn" data-testid="condition-asked">{teamAskedLine(condition)}</p>}
                   {condition.returned && condition.status === "open" && <p className="text-xs text-warn">Sent back by {condition.returned.by}: {condition.returned.reason}</p>}
                   {condition.cleared && <p className="text-xs text-good">Cleared by {condition.cleared.by} on {shortDate(condition.cleared.at)}{condition.cleared.note ? `: ${condition.cleared.note}` : ""}</p>}
                   {condition.waived && <p className="text-xs text-muted-foreground">Waived by {condition.waived.by} on {shortDate(condition.waived.at)}: {condition.waived.reason}</p>}
@@ -106,6 +112,7 @@ export function ConditionsPanel({ deal }: { deal: Deal }) {
           </Section>
         );
       })}
+      <LateAsks deal={deal} kind="condition" />
       {!adding && <button type="button" className={`btn-ghost ${small}`} data-testid="add-condition" onClick={() => setAdding(true)}>Add a condition</button>}
       <Reveal open={adding}>
         <Section title="Add a condition">
@@ -121,6 +128,10 @@ export function ConditionsPanel({ deal }: { deal: Deal }) {
               </div>
             )}
             <label className="block"><span className="label">Due (optional{draft.templateId ? "; the library sets one" : ""})</span><input className="desk-input" type="date" data-testid="condition-due" min={today || undefined} value={draft.dueOn} onChange={(event) => setDraft({ ...draft, dueOn: event.target.value })} /></label>
+            {(needs.late || needs.again) && (draft.templateId || draft.title) && (
+              <label className="block"><span className="label">{needs.late ? `${needs.late}: why is this needed now?` : `The borrower already sent ${needs.again!.name}: why again?`} (the borrower sees this)</span><input className="desk-input" data-testid="condition-reason" maxLength={1000} value={draft.reason} onChange={(event) => setDraft({ ...draft, reason: event.target.value })} />
+                {needs.late && <span className="text-[11px] text-faint">Unless you can approve late asks, it waits for a manager before the borrower sees it.</span>}</label>
+            )}
             {problem && (draft.templateId || draft.title) && <p className="text-xs text-warn">{problem}</p>}
             <div className="flex flex-wrap gap-2">
               <button type="button" className={`btn-primary ${small}`} data-testid="save-condition" disabled={Boolean(problem)} onClick={() => void add()}>Add it</button>

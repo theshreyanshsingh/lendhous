@@ -29,7 +29,7 @@ import { leaseReviewProblem, occupancyProblem } from "./occupancy";
 import { addProblem, changeProblem, DEFAULT_LIBRARY, fromTemplate, libraryOf, missingStandard, templateProblem, templatesFor, type ConditionInput } from "./conditions";
 import { chosenTerms, draftSheet, exceptionDecisionProblem, exceptionReasons, exceptionRequestProblem, issueProblem as sheetProblem, latestSheet, matrixOf, pricedApp, respondProblem, startingTerms, termSheetChecks, type Prepay } from "./term-sheets";
 import { optionAt } from "./buy-down";
-import { DEMO_TEAM, seedDeals, seedBids, seedDraws, seedLoanSales, seedLoanOffers, seedMessages, seedPhotoRequests, DEMO_SPONSORS, capitalSources, partners as seedPartners, brokers as seedBrokers, loanBuyers, BORROWER_ID, DEMO_PARTNER_ID, DEMO_BUYER_ID, DEMO_BROKER_ID, type FileCheck, type Permit, type DrawAttachment, type SellerIdMethod, type TaxCheck, type Broker, type ClosingAgent, type Closure, type Deal, type DefaultKind, type Bid, type DrawRequest, type DrawRequestLine, type DrawPhoto, type DrawCall, type FloodMap, type PortfolioProperty, type PropertyRelease, type RolloverChoice, type ShareTransfer, type LoanExtension, type LoanMessage, type Screening, type WireInstruction, type Partner, type PayoffChannel, type PayoffLetter, type PayoffRequest, type NoticeToOwner, type LienWaiver, type ConditionTemplate, type LoanCondition, type DocStatus, type CapitalSource, type LoanBuyer, type LoanOffer, type LoanSale, type LoanPayment, type LoanStatus, type TeamMember, type PaymentMethod, type PhotoRequest, type RequestPhoto, type ScopeLine, type Sponsor, type StageEntry, type PolicyKind, type InsurancePolicy, type InsuranceRenewal, type ChangeOrder, type AdvanceKind, type Bankruptcy, type ContactChannel, type ContactOutcome, type DeliveryMethod, type ForeclosureStep, type LoanModification, type NoticeKind, type Payoff } from "./mockData";
+import { DEMO_TEAM, seedDeals, seedBids, seedDraws, seedLoanSales, seedLoanOffers, seedMessages, seedPhotoRequests, DEMO_SPONSORS, capitalSources, partners as seedPartners, brokers as seedBrokers, loanBuyers, BORROWER_ID, DEMO_PARTNER_ID, DEMO_BUYER_ID, DEMO_BROKER_ID, type FileCheck, type AwayNotice, type AskedWhy, type SettlementCheck, type Permit, type DrawAttachment, type SellerIdMethod, type TaxCheck, type Broker, type ClosingAgent, type Closure, type Deal, type DefaultKind, type Bid, type DrawRequest, type DrawRequestLine, type DrawPhoto, type DrawCall, type FloodMap, type PortfolioProperty, type PropertyRelease, type RolloverChoice, type ShareTransfer, type LoanExtension, type LoanMessage, type Screening, type WireInstruction, type Partner, type PayoffChannel, type PayoffLetter, type PayoffRequest, type NoticeToOwner, type LienWaiver, type ConditionTemplate, type LoanCondition, type DocStatus, type CapitalSource, type LoanBuyer, type LoanOffer, type LoanSale, type LoanPayment, type LoanStatus, type TeamMember, type PaymentMethod, type PhotoRequest, type RequestPhoto, type ScopeLine, type Sponsor, type StageEntry, type PolicyKind, type InsurancePolicy, type InsuranceRenewal, type ChangeOrder, type AdvanceKind, type Bankruptcy, type ContactChannel, type ContactOutcome, type DeliveryMethod, type ForeclosureStep, type LoanModification, type NoticeKind, type Payoff } from "./mockData";
 import { closingShare, creditOf, currentBids, drawCallsFor, moveShare, payoffProceeds, ROLLOVER, transferProblem, transferQuote } from "./capital-moves";
 import { portfolioApp, releaseQuote, scheduleProblem } from "./portfolio";
 import { applyFloodMap, withFloodFollowUps } from "./flood-zones";
@@ -37,10 +37,14 @@ import { afterCheck, freshInspectionNeeded, type StormCheck, type StormWatch } f
 import { BASE_VERSION, currentPricing, type PricingPayload } from "./pricing-versions";
 import { TEAM_ROLE_LABEL, type TeamRole } from "./loan-team";
 import { pdfFlags } from "./pdf-flags";
+import { answerProblem, explainProblem, heldProblem, newChange, proposeProblem, settlementHold, settlementProblem, withdrawProblem } from "./term-changes";
+import { askedWhy, askProblem, askTitle, decideProblem as lateDecisionProblem, waitsForManager } from "./late-asks";
+import { moveProblem, type DelayParty } from "./closing-moves";
+import { awaitingReply, awayProblem } from "./replies";
 import { cleanParcels, TAX_STATUS, taxReminder } from "./property-taxes";
 import { addDays, balanceOf, DEMO_SERVICING_DAY, firstDueDate, ledger, maturityOf, openDefault, paymentsMade, payoffFor, recastPayment, SERVICED, servicingDate, settle } from "./servicing";
 
-export interface Book { partnerId: string; buyerId: string; brokerId: string; borrowerId: string; loanPrefix: string; deals: Deal[]; bids: Bid[]; partners: Partner[]; buyers: LoanBuyer[]; brokers: Broker[]; sales: LoanSale[]; offers: LoanOffer[]; draws: DrawRequest[]; photoRequests: PhotoRequest[]; payoffs: PayoffRequest[]; messages: LoanMessage[]; sources: CapitalSource[]; conditionLibrary: ConditionTemplate[]; /** Storms whose forecast cone has covered funded loans (lib/storms.ts). Staff only. */ storms: StormWatch[]; audit: { at: string; text: string }[]; sample?: boolean; /** A borrower's own referrals, summed up for them: friends' loans are never in their book (lib/referrals.ts). */ myReferrals?: MyReferral[]; /** The pricing its loans use, as sent to a browser. Not part of the records. */ pricing?: PricingPayload }
+export interface Book { partnerId: string; buyerId: string; brokerId: string; borrowerId: string; loanPrefix: string; deals: Deal[]; bids: Bid[]; partners: Partner[]; buyers: LoanBuyer[]; brokers: Broker[]; sales: LoanSale[]; offers: LoanOffer[]; draws: DrawRequest[]; photoRequests: PhotoRequest[]; payoffs: PayoffRequest[]; messages: LoanMessage[]; sources: CapitalSource[]; conditionLibrary: ConditionTemplate[]; /** Storms whose forecast cone has covered funded loans (lib/storms.ts). Staff only. */ storms: StormWatch[]; /** Team members away, and who covers their loans (lib/replies.ts). */ away?: AwayNotice[]; audit: { at: string; text: string }[]; sample?: boolean; /** A borrower's own referrals, summed up for them: friends' loans are never in their book (lib/referrals.ts). */ myReferrals?: MyReferral[]; /** The pricing its loans use, as sent to a browser. Not part of the records. */ pricing?: PricingPayload }
 
 export type BookAction =
   /** clientFills: a broker's client fills in their own guarantors, past deals and credit answers on an application link. */
@@ -70,7 +74,24 @@ export type BookAction =
   | { t: "decideScreening"; dealId: string; screeningId: string; decision: "cleared" | "match"; reason: string; by: string }
   | { t: "verifyWire"; dealId: string; wireId: string; phone: string; phoneSource: string; spokeWith: string; by: string }
   | { t: "updateDealNumbers"; dealId: string; changes: Partial<Application> }
-  | { t: "addDocRequest"; dealId: string; name: string; category: string }
+  /** reason: why it's asked for close to closing, or again (lib/late-asks.ts); approved is set by the server from who's asking. */
+  | { t: "addDocRequest"; dealId: string; name: string; category: string; reason?: string; approved?: boolean; by?: string }
+  /** Numbers that change the terms the borrower accepted go to them first, with a reason (lib/term-changes.ts). */
+  | { t: "proposeTermChange"; dealId: string; changeId: string; changes: Partial<Application>; reason: string; by: string }
+  | { t: "answerTermChange"; dealId: string; changeId: string; agree: boolean; signedName: string; note: string; by: string }
+  | { t: "withdrawTermChange"; dealId: string; changeId: string; by: string }
+  /** The draft settlement statement's lender lines, from the title company's link or the team, and why a difference is right. */
+  | { t: "saveSettlement"; dealId: string; figures: SettlementCheck["figures"]; by: string; via: "title" | "team" }
+  | { t: "explainSettlement"; dealId: string; reason: string; by: string }
+  /** A manager's answer to a condition or document someone asked for late. */
+  | { t: "decideLateAsk"; dealId: string; askId: string; approve: boolean; note: string; by: string }
+  /** The target closing date moving, why, and what it waits on (lib/closing-moves.ts). */
+  | { t: "moveClosingDate"; dealId: string; moveId: string; to: string; party: DelayParty; reason: string; by: string }
+  /** Someone away and who covers their loans (lib/replies.ts). The server looks both people up. */
+  | { t: "setAway"; member: TeamMember; backup: TeamMember; from: string; until: string; by: string }
+  | { t: "endAway"; memberId: string; by: string }
+  /** The client's last message needs no answer ("I'll upload them today"), so its reply clock stops. */
+  | { t: "noReplyNeeded"; dealId: string; by: string }
   | { t: "linkBorrower"; dealId: string; borrowerId: string; borrowerName: string }
   /** The winning partner says it has wired its share; staff confirm it arrived in escrow (Spec P7). */
   | { t: "partnerFundsSent"; dealId: string; sentOn: string; reference: string; by: string }
@@ -148,7 +169,7 @@ export type BookAction =
   | { t: "decideFirmScreening"; kind: "partner" | "buyer" | "broker"; firmId: string; screeningId: string; decision: "cleared" | "match"; reason: string; by: string }
   /** points: one of the term sheet's rate-and-points choices (lib/buy-down.ts); without it, the terms as sent. */
   | { t: "acceptTermSheet"; dealId: string; signedName: string; points?: number }
-  | { t: "addCondition"; dealId: string; condition: ConditionInput; by: string }
+  | { t: "addCondition"; dealId: string; condition: ConditionInput; by: string; reason?: string; approved?: boolean }
   | { t: "clearCondition"; dealId: string; conditionId: string; note: string; by: string }
   | { t: "returnCondition"; dealId: string; conditionId: string; reason: string; by: string }
   | { t: "waiveCondition"; dealId: string; conditionId: string; reason: string; by: string }
@@ -476,6 +497,14 @@ export function demoBook(): Book {
     if (d.id === "d10") deals[i] = { ...deals[i], taxes: { parcels: ["48-42-32-01-0010", "48-42-32-01-0020"], checks: [taxCheck("48-42-32-01-0010", "paid", 4_100), taxCheck("48-42-32-01-0020", "paid", 3_050)] } };
     if (d.id === "d14") deals[i] = { ...deals[i], taxes: { parcels: ["06-42-43-11-0140"], checks: [taxCheck("06-42-43-11-0140", "paid", 5_210)] } };
     if (d.id === "d13") deals[i] = { ...deals[i], taxes: { parcels: ["12-34-56-78-0130"], checks: [taxCheck("12-34-56-78-0130", "certificate_sold", 6_125.4, "Certificate 2026-4417 sold June 1 (FAKE)")], reminded: ["2025:certificate"] } };
+    // No surprises (lib/closing-moves.ts, lib/term-changes.ts, lib/late-asks.ts): closings that moved and why, a change to
+    // accepted terms waiting for the borrower, and a document asked for late, waiting for a manager.
+    if (d.id === "d1") deals[i] = { ...deals[i], closingMoves: [{ id: "mv-demo-1", from: "2026-11-06", to: "2026-11-13", party: "appraiser", reason: "The appraiser's first opening is November 5, so the report comes the week after. (FAKE)", by: "Uma Underwriter (FAKE)", at: "2026-10-27T10:00:00-07:00" }] };
+    if (d.id === "d3") deals[i] = { ...deals[i], closingMoves: [
+      { id: "mv-demo-3a", from: "2026-10-28", to: "2026-11-02", party: "title", reason: "The title commitment showed an old contractor's lien the seller is clearing. (FAKE)", by: "Uma Underwriter (FAKE)", at: "2026-10-21T11:00:00-07:00" },
+      { id: "mv-demo-3b", from: "2026-11-02", to: "2026-11-06", party: "appraiser", reason: "The appraisal review asked for one more nearby sale to compare with. (FAKE)", by: "Uma Underwriter (FAKE)", at: "2026-10-29T15:30:00-07:00" }] };
+    if (d.id === "d7") deals[i] = { ...deals[i], lateAsks: [{ id: "ask-demo-7", kind: "doc", doc: { name: "Updated bank statement", category: "Liquidity" }, reason: "The statement on file is from August; closing needs one from the last 30 days. (FAKE)", by: "Pat Processor (FAKE)", at: "2026-10-30T13:00:00-07:00", status: "pending" }] };
+    if (d.id === "d8") deals[i] = { ...deals[i], termChanges: [newChange(deals[i], "tc-demo-8", { purchasePrice: deals[i].app.purchasePrice - 10_000 }, "The seller agreed to a $10,000 price reduction after the inspection, so the loan is sized on the lower price. (FAKE)", "Olivia Owner (FAKE)", "2026-10-30T14:00:00-07:00")] };
   }
   const quoted = payoffFor(deals.find((d) => d.id === "d11")!, "2026-11-15");
   // One from a borrower's portal, due in two days, and one from a title company whose authorization still needs a look.
@@ -483,11 +512,13 @@ export function demoBook(): Book {
     { id: "payoff-1", dealId: "d11", goodThrough: "2026-11-15", requestedAt: "2026-10-22T10:00:00-07:00", by: "Avery Mock (FAKE)", status: "requested", receivedOn: "2026-10-22", channel: "portal", requester: { kind: "borrower", name: "Avery Mock (FAKE)" }, ...quoted },
     { id: "payoff-2", dealId: "d10", goodThrough: "2026-11-20", requestedAt: "2026-10-30T14:00:00-07:00", by: "Dana Escrow (FAKE)", status: "requested", receivedOn: "2026-10-30", channel: "web_form", requester: { kind: "title", name: "Dana Escrow (FAKE)", company: "Sample Title & Escrow (FAKE)", email: "closings@sample-title.test", phone: "(954) 555-0142", fileNumber: "ST-1010-B" }, check: { status: "pending", note: "Signed authorization uploaded with the request.", fileName: "borrower-authorization.pdf" }, ...payoffFor(deals.find((d) => d.id === "d10")!, "2026-11-20") },
   ];
-  return { partnerId: DEMO_PARTNER_ID, buyerId: DEMO_BUYER_ID, brokerId: DEMO_BROKER_ID, borrowerId: BORROWER_ID, loanPrefix: DEMO_PREFIX, deals, bids: [...seedBids, { id: "bid-demo-11", dealId: "d11", partnerId: DEMO_PARTNER_ID, pct: 50, lenderRate: 9.25, lenderPoints: 0.5, conditions: "", status: "accepted", type: "bid", at: "2026-06-20T14:00:00Z" }], partners: seedPartners.map((firm) => withDemoScreening(firm)), buyers: loanBuyers.map((firm) => withDemoScreening(firm)), brokers: seedBrokers, sales: seedLoanSales, offers: seedLoanOffers, draws: seedDraws, photoRequests: seedPhotoRequests, payoffs, messages: seedMessages, sources: capitalSources, conditionLibrary: DEFAULT_LIBRARY, storms: [], audit: [{ at: SEED_AT, text: "Demo data loaded (all records are FAKE)" }] };
+  // An underwriter out for a few days, with the processor covering her loans (lib/replies.ts).
+  const away: AwayNotice[] = [{ id: DEMO_TEAM[1].id, name: DEMO_TEAM[1].name, email: DEMO_TEAM[1].email, from: "2026-10-30", until: "2026-11-04", backup: DEMO_TEAM[2], by: DEMO_TEAM[1].name, at: "2026-10-29T17:00:00-07:00" }];
+  return { away, partnerId: DEMO_PARTNER_ID, buyerId: DEMO_BUYER_ID, brokerId: DEMO_BROKER_ID, borrowerId: BORROWER_ID, loanPrefix: DEMO_PREFIX, deals, bids: [...seedBids, { id: "bid-demo-11", dealId: "d11", partnerId: DEMO_PARTNER_ID, pct: 50, lenderRate: 9.25, lenderPoints: 0.5, conditions: "", status: "accepted", type: "bid", at: "2026-06-20T14:00:00Z" }], partners: seedPartners.map((firm) => withDemoScreening(firm)), buyers: loanBuyers.map((firm) => withDemoScreening(firm)), brokers: seedBrokers, sales: seedLoanSales, offers: seedLoanOffers, draws: seedDraws, photoRequests: seedPhotoRequests, payoffs, messages: seedMessages, sources: capitalSources, conditionLibrary: DEFAULT_LIBRARY, storms: [], audit: [{ at: SEED_AT, text: "Demo data loaded (all records are FAKE)" }] };
 }
 
 /** A book with no records: a new database, or an account with nothing to see yet. */
-export const emptyBook = (): Book => ({ partnerId: "", buyerId: "", brokerId: "", borrowerId: "", loanPrefix: "LH-", deals: [], bids: [], partners: [], buyers: [], brokers: [], sales: [], offers: [], draws: [], photoRequests: [], payoffs: [], messages: [], sources: [], conditionLibrary: [], storms: [], audit: [] });
+export const emptyBook = (): Book => ({ partnerId: "", buyerId: "", brokerId: "", borrowerId: "", loanPrefix: "LH-", deals: [], bids: [], partners: [], buyers: [], brokers: [], sales: [], offers: [], draws: [], photoRequests: [], payoffs: [], messages: [], sources: [], conditionLibrary: [], storms: [], away: [], audit: [] });
 
 /**
  * Every change to the book goes through here. A loan that moves to another stage has the time noted, so reports can
@@ -531,6 +562,33 @@ function takeTitle(s: Book, deal: Deal, on: string, how: "certificate_of_title" 
     offers: s.offers.map((o) => (closing.has(o.saleId) && o.status === "submitted" ? { ...o, status: "declined" } : o)),
     audit: [{ at, text }, ...s.audit].slice(0, 50) };
 }
+
+/** A loan with its underwriting numbers changed, and what follows from them: the scope of work and the rent papers. */
+function numbersChanged(deal: Deal, raw: Partial<Application>): Deal {
+  // The pricing version and the term sheet's rate and points are set by their own steps, never as a number edit.
+  const { pricingVersion: _version, termRate: _rate, termPoints: _points, repeat: _repeat, ...changes } = raw;
+  const app = { ...deal.app, ...changes };
+  const holdback = evaluate(app).holdback;
+  // A new rehab budget starts its scope of work over, because the old split no longer adds up.
+  const scope = holdback === evaluate(deal.app).holdback ? deal.scope : defaultScope(app.product, holdback);
+  // A rental found to be let by the night (or the other way) asks for what its income now rests on: payout statements or
+  // a projection in place of the lease. Anything already sent stays.
+  const income = (item: Application) => (item.product === "dscr" ? `${item.rentalType ?? "long_term"}:${item.strIncomeSource ?? ""}` : "");
+  const docs = income(app) === income(deal.app) ? deal.docs : [...deal.docs.filter((doc) => !["lease", "str-income"].includes(doc.id) || doc.status !== "requested"), ...needsList(app, deal.sponsor).filter((doc) => ["lease", "str-income"].includes(doc.id) && !deal.docs.some((have) => have.id === doc.id && have.status !== "requested"))];
+  return { ...deal, app, scope, docs };
+}
+
+/** The loan's conditions with this one added, from the library or written for the loan, with why it was asked for if it needed saying. */
+function withCondition(s: Book, deal: Deal, input: ConditionInput, by: string, today: string, asked?: AskedWhy): Pick<Deal, "conditions"> {
+  const template = input.templateId ? libraryOf(s).find((item) => item.id === input.templateId) : undefined;
+  const base: LoanCondition = template
+    ? { ...fromTemplate(template, `cond${uid()}`, by, today, now()), ...(input.dueOn ? { dueOn: input.dueOn } : {}) }
+    : { id: `cond${uid()}`, title: input.title.trim(), detail: input.detail.trim(), category: input.category, owner: input.owner, needsUpload: input.needsUpload, ...(input.dueOn ? { dueOn: input.dueOn } : {}), status: "open", addedBy: by, addedAt: now(), files: [] };
+  return { conditions: [...(deal.conditions ?? []), { ...base, ...(asked ? { asked } : {}) }] };
+}
+
+/** The loan's documents with a new one asked for. */
+const withDocRequest = (deal: Deal, doc: { name: string; category: string }, asked?: AskedWhy): Pick<Deal, "docs"> => ({ docs: [...deal.docs, { id: `req-${uid()}`, name: doc.name.trim(), category: doc.category, status: "requested" as const, ...(asked ? { asked } : {}) }] });
 
 export function reducer(s: Book, a: BookAction): Book {
   const next = apply(s, a);
@@ -577,7 +635,7 @@ function apply(s: Book, a: BookAction): Book {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
       // An approval is of a loan going to one verified wire, so there has to be one.
       const wire = activeWire(deal);
-      if (deal.status !== "closing" || deal.fundingApprovers?.includes(a.by) || !wire?.verification) return s;
+      if (deal.status !== "closing" || deal.fundingApprovers?.includes(a.by) || !wire?.verification || settlementHold(deal)) return s;
       return { ...s, deals: upd(a.dealId, (d) => ({ ...d, fundingApprovers: [...(d.fundingApprovers ?? []), a.by], fundingWireId: wire.id })), audit: log(`${deal.loanNumber}: funding approved by ${a.by}`) };
     }
     case "recordScreening": {
@@ -644,17 +702,72 @@ function apply(s: Book, a: BookAction): Book {
     }
     case "updateDealNumbers": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
-      // The pricing version and the term sheet's rate and points are set by their own steps, never as a number edit.
-      const { pricingVersion: _version, termRate: _rate, termPoints: _points, repeat: _repeat, ...changes } = a.changes;
-      const app = { ...deal.app, ...changes };
-      const holdback = evaluate(app).holdback;
-      // A new rehab budget starts its scope of work over, because the old split no longer adds up.
-      const scope = holdback === evaluate(deal.app).holdback ? deal.scope : defaultScope(app.product, holdback);
-      // A rental found to be let by the night (or the other way) asks for what its income now rests on: payout statements or
-      // a projection in place of the lease. Anything already sent stays.
-      const income = (item: Application) => (item.product === "dscr" ? `${item.rentalType ?? "long_term"}:${item.strIncomeSource ?? ""}` : "");
-      const docs = income(app) === income(deal.app) ? deal.docs : [...deal.docs.filter((doc) => !["lease", "str-income"].includes(doc.id) || doc.status !== "requested"), ...needsList(app, deal.sponsor).filter((doc) => ["lease", "str-income"].includes(doc.id) && !deal.docs.some((have) => have.id === doc.id && have.status !== "requested"))];
-      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, app, scope, docs })), audit: log(`${deal.loanNumber}: underwriting numbers updated`) };
+      // Numbers that move what the borrower accepted go to them first (proposeTermChange).
+      if (heldProblem(deal, a.changes)) return s;
+      return { ...s, deals: upd(a.dealId, (d) => numbersChanged(d, a.changes)), audit: log(`${deal.loanNumber}: underwriting numbers updated`) };
+    }
+    case "proposeTermChange": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (proposeProblem(deal, a.changes, a.reason) || deal.termChanges?.some((item) => item.id === a.changeId)) return s;
+      const change = newChange(deal, a.changeId, a.changes, a.reason, a.by, now());
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, termChanges: [...(d.termChanges ?? []), change] })), audit: log(`${deal.loanNumber}: change to the accepted terms sent to the borrower by ${a.by}`) };
+    }
+    case "answerTermChange": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (answerProblem(deal, a.changeId, a.agree, a.signedName)) return s;
+      const change = deal.termChanges!.find((item) => item.id === a.changeId)!;
+      const answer = { by: a.by, at: now(), ...(a.agree ? { signedName: a.signedName.trim() } : {}), ...(a.note.trim() ? { note: a.note.trim() } : {}) };
+      const answered = (d: Deal): Deal => ({ ...d, termChanges: d.termChanges!.map((item) => (item.id === a.changeId ? { ...item, status: a.agree ? "agreed" as const : "declined" as const, answer } : item)) });
+      return { ...s, deals: upd(a.dealId, (d) => answered(a.agree ? numbersChanged(d, change.changes) : d)), audit: log(`${deal.loanNumber}: the borrower ${a.agree ? "agreed to" : "turned down"} the change to the terms`) };
+    }
+    case "withdrawTermChange": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (withdrawProblem(deal, a.changeId)) return s;
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, termChanges: d.termChanges!.map((item) => (item.id === a.changeId ? { ...item, status: "withdrawn" as const, answer: { by: a.by, at: now() } } : item)) })), audit: log(`${deal.loanNumber}: change to the terms withdrawn by ${a.by}`) };
+    }
+    case "saveSettlement": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (settlementProblem(deal, a.figures)) return s;
+      const figures = Object.fromEntries(Object.entries(a.figures).filter(([, value]) => value !== undefined).map(([key, value]) => [key, round2(value!)]));
+      // New figures need their own explanation, if they still differ.
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, settlement: { figures, by: a.by, at: now(), via: a.via } })), audit: log(`${deal.loanNumber}: settlement statement figures entered by ${a.by}`) };
+    }
+    case "explainSettlement": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (explainProblem(deal, a.reason)) return s;
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, settlement: { ...d.settlement!, explained: { reason: a.reason.trim(), by: a.by, at: now() } } })), audit: log(`${deal.loanNumber}: settlement statement difference explained by ${a.by}`) };
+    }
+    case "moveClosingDate": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (moveProblem(deal, a.to, a.party, a.reason, serviceDay(s)) || deal.closingMoves?.some((item) => item.id === a.moveId)) return s;
+      const move = { id: a.moveId, from: deal.closingDate, to: a.to, party: a.party, reason: a.reason.trim(), by: a.by, at: now() };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, closingDate: a.to, closingMoves: [...(d.closingMoves ?? []), move] })), audit: log(`${deal.loanNumber}: target closing moved from ${move.from} to ${a.to} by ${a.by}`) };
+    }
+    case "setAway": {
+      if (awayProblem(a.member, a.backup, a.from, a.until, serviceDay(s))) return s;
+      const notice: AwayNotice = { id: a.member.id, name: a.member.name, email: a.member.email, from: a.from, until: a.until, backup: a.backup, by: a.by, at: now() };
+      return { ...s, away: [...(s.away ?? []).filter((item) => item.id !== a.member.id), notice], audit: log(`${a.member.name} away ${a.from} to ${a.until}; ${a.backup.name} covers (${a.by})`) };
+    }
+    case "endAway": {
+      const notice = s.away?.find((item) => item.id === a.memberId);
+      if (!notice) return s;
+      return { ...s, away: s.away!.filter((item) => item.id !== a.memberId), audit: log(`${notice.name} is back (${a.by})`) };
+    }
+    case "noReplyNeeded": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (!awaitingReply(s.messages, deal.id, deal.replyHandled?.at)) return s;
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, replyHandled: { at: now(), by: a.by } })), audit: log(`${deal.loanNumber}: ${a.by} marked the last message as needing no reply`) };
+    }
+    case "decideLateAsk": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (lateDecisionProblem(deal, a.askId, a.approve, a.note)) return s;
+      const ask = deal.lateAsks!.find((item) => item.id === a.askId)!;
+      const decided = (d: Deal): Deal => ({ ...d, lateAsks: d.lateAsks!.map((item) => (item.id === a.askId ? { ...item, status: a.approve ? "approved" as const : "declined" as const, decided: { by: a.by, at: now(), note: a.note.trim() } } : item)) });
+      if (!a.approve) return { ...s, deals: upd(a.dealId, decided), audit: log(`${deal.loanNumber}: late ask turned down by ${a.by}: ${askTitle(ask)}`) };
+      const today = serviceDay(s);
+      const asked: AskedWhy = askedWhy(deal, askTitle(ask), ask.reason, today, now(), a.by) ?? { reason: ask.reason, late: true, approvedBy: a.by, at: now() };
+      const added = ask.kind === "condition" && ask.condition ? withCondition(s, deal, ask.condition, ask.by, today, asked) : withDocRequest(deal, ask.doc ?? { name: askTitle(ask), category: "Other" }, asked);
+      return { ...s, deals: upd(a.dealId, (d) => decided({ ...d, ...added })), audit: log(`${deal.loanNumber}: late ask approved by ${a.by}: ${askTitle(ask)}`) };
     }
     case "reuseDocument": {
       const deal = s.deals.find((d) => d.id === a.dealId);
@@ -676,8 +789,12 @@ function apply(s: Book, a: BookAction): Book {
     }
     case "addDocRequest": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
-      const doc = { id: `req-${uid()}`, name: a.name, category: a.category, status: "requested" as const };
-      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, docs: [...d.docs, doc] })), audit: log(`${deal.loanNumber}: requested ${a.name}`) };
+      const today = serviceDay(s);
+      // Close to closing, or again after the borrower sent it, an ask needs a reason; late, it needs a manager (lib/late-asks.ts).
+      if (askProblem(deal, a.name, a.reason, today)) return s;
+      if (waitsForManager(deal, today, a.approved)) return { ...s, deals: upd(a.dealId, (d) => ({ ...d, lateAsks: [...(d.lateAsks ?? []), { id: `ask${uid()}`, kind: "doc" as const, doc: { name: a.name.trim(), category: a.category }, reason: (a.reason ?? "").trim(), by: a.by ?? "LendHous", at: now(), status: "pending" as const }] })), audit: log(`${deal.loanNumber}: ${a.name} asked for late, waiting for a manager`) };
+      const asked = askedWhy(deal, a.name, a.reason, today, now(), a.approved ? a.by : undefined);
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, ...withDocRequest(d, { name: a.name, category: a.category }, asked) })), audit: log(`${deal.loanNumber}: requested ${a.name}`) };
     }
     case "partnerFundsSent": case "partnerFundsReceived": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
@@ -984,10 +1101,13 @@ function apply(s: Book, a: BookAction): Book {
       const today = serviceDay(s);
       if (addProblem(deal, a.condition, today)) return s;
       const template = a.condition.templateId ? libraryOf(s).find((item) => item.id === a.condition.templateId) : undefined;
-      const added: LoanCondition = template
-        ? { ...fromTemplate(template, `cond${uid()}`, a.by, today, now()), ...(a.condition.dueOn ? { dueOn: a.condition.dueOn } : {}) }
-        : { id: `cond${uid()}`, title: a.condition.title.trim(), detail: a.condition.detail.trim(), category: a.condition.category, owner: a.condition.owner, needsUpload: a.condition.needsUpload, ...(a.condition.dueOn ? { dueOn: a.condition.dueOn } : {}), status: "open", addedBy: a.by, addedAt: now(), files: [] };
-      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, conditions: [...(d.conditions ?? []), added] })), audit: log(`${deal.loanNumber}: condition added: ${added.title}`) };
+      const title = template?.title ?? a.condition.title;
+      const afterClosing = (template?.category ?? a.condition.category) === "post_closing";
+      // Close to closing, or again after the borrower sent it, an ask needs a reason; late, it needs a manager (lib/late-asks.ts).
+      if (askProblem(deal, title, a.reason, today, afterClosing)) return s;
+      if (waitsForManager(deal, today, a.approved, afterClosing)) return { ...s, deals: upd(a.dealId, (d) => ({ ...d, lateAsks: [...(d.lateAsks ?? []), { id: `ask${uid()}`, kind: "condition" as const, condition: a.condition, reason: (a.reason ?? "").trim(), by: a.by, at: now(), status: "pending" as const }] })), audit: log(`${deal.loanNumber}: condition asked for late, waiting for a manager: ${title.trim()}`) };
+      const asked = askedWhy(deal, title, a.reason, today, now(), a.approved ? a.by : undefined, afterClosing);
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, ...withCondition(s, d, a.condition, a.by, today, asked) })), audit: log(`${deal.loanNumber}: condition added: ${title.trim()}`) };
     }
     case "clearCondition": case "returnCondition": case "waiveCondition": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;

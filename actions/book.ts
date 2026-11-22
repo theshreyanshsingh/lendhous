@@ -115,6 +115,34 @@ export async function assignLoan(dealId: string, role: TeamRole, userId: string 
   return perform(viewer, { t: "assignLoanTeam", dealId, role, member: member ?? null, by: viewer.name }, { trusted: true });
 }
 
+/**
+ * Marks someone on the team away, with who covers their loans meanwhile (lib/replies.ts). Anyone on the team sets their
+ * own; someone who assigns loans can set anyone's. Both people are looked up here, never sent.
+ */
+export async function setAwayNotice(input: { memberId?: string; backupId: string; from: string; until: string }): Promise<BookReply> {
+  const viewer = await requirePermission("view_pipeline");
+  if (isDemoEmail(viewer.email)) return { error: "Demo accounts keep their records in the browser." };
+  const day = /^\d{4}-\d{2}-\d{2}$/;
+  if (typeof input?.backupId !== "string" || !day.test(String(input.from)) || !day.test(String(input.until))) return { error: "Choose the days away and who covers." };
+  const memberId = input.memberId || viewer.id;
+  if (memberId !== viewer.id && !(await hasPermission(viewer, "assign_loans"))) return { error: "Your account can set only your own time away." };
+  const team = await teamCandidates();
+  const member = team.find((item) => item.id === memberId);
+  const backup = team.find((item) => item.id === input.backupId);
+  if (!member) return { error: "That person can't work loans." };
+  if (!backup) return { error: "Choose someone on the team to cover." };
+  return perform(viewer, { t: "setAway", member, backup, from: input.from, until: input.until, by: viewer.name }, { trusted: true });
+}
+
+/** Ends a notice early: they're back. */
+export async function endAwayNotice(memberId?: string): Promise<BookReply> {
+  const viewer = await requirePermission("view_pipeline");
+  if (isDemoEmail(viewer.email)) return { error: "Demo accounts keep their records in the browser." };
+  const id = memberId || viewer.id;
+  if (id !== viewer.id && !(await hasPermission(viewer, "assign_loans"))) return { error: "Your account can end only your own." };
+  return perform(viewer, { t: "endAway", memberId: id, by: viewer.name }, { trusted: true });
+}
+
 /** Screens a loan against the OFAC list now, as the person asking. */
 export async function screenLoan(dealId: string): Promise<BookReply> {
   const viewer = await requirePermission("view_pipeline");

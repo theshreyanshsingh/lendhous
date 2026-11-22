@@ -22,6 +22,10 @@ import { addDays, defaultInterestFrom, defaultRateOf, ledger, maturityOf, servic
 import { BANKRUPTCY_ENDS, COLLECTIONS, inBankruptcy, PAUSED_IN_BANKRUPTCY } from "@/lib/collections";
 import { modificationWords } from "@/lib/modifications";
 import { toSend } from "@/lib/draw-review";
+import { askTitle } from "@/lib/late-asks";
+import { moveLine, partyLabel } from "@/lib/closing-moves";
+import { settlementLines, termValue } from "@/lib/term-changes";
+import { coverEmails } from "@/lib/replies";
 
 const origin = () => (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "");
 
@@ -231,12 +235,61 @@ function actionAlerts(before: Book, after: Book, action: BookAction): Alert[] {
       if (!deal || !renewal) return [];
       return action.accept ? [{ to: "borrower", dealId: deal.id, subject: `Insurance renewal accepted: ${deal.loanNumber}`, body: `Thank you. The ${policyWord(renewal.kind)} policy is on file through ${longDate(renewal.expiresOn)}.`, event: "insurance.renewal_accepted" }] : [{ to: "borrower", dealId: deal.id, subject: `Your insurance renewal needs another look: ${deal.loanNumber}`, body: `We couldn't accept the ${policyWord(renewal.kind)} policy you sent: ${action.note.trim().replace(/\.$/, "")}. Please send a corrected one from your loan page.`, event: "insurance.renewal_returned" }];
     }
-    case "addCondition": {
+    case "addCondition": case "addDocRequest": case "decideLateAsk": {
       const deal = loan(action.dealId);
-      const added = deal?.conditions?.find((item) => !before.deals.find((old) => old.id === deal.id)?.conditions?.some((prior) => prior.id === item.id));
-      if (!deal || !added || added.owner !== "borrower") return [];
-      const body = `We need one more thing for your loan: ${added.title}.${added.detail ? ` ${added.detail}` : ""}${added.dueOn ? ` Please send it by ${longDate(added.dueOn)}.` : ""} Sign in to send it.`;
-      return [{ to: "borrower", dealId: deal.id, subject: `We need something for your loan: ${deal.loanNumber}`, body, event: "condition.added" }, { to: "broker", dealId: deal.id, subject: `We need something for your client's loan: ${deal.loanNumber}`, body, event: "condition.added" }];
+      const was = before.deals.find((old) => old.id === action.dealId);
+      if (!deal || !was) return [];
+      // A late ask that waits for a manager tells the team, not the borrower (lib/late-asks.ts).
+      const waiting = deal.lateAsks?.find((item) => item.status === "pending" && !was.lateAsks?.some((old) => old.id === item.id));
+      if (waiting) return [{ to: "team", dealId: deal.id, subject: `A late ask needs a manager: ${deal.loanNumber}`, body: `${waiting.by} asked for "${askTitle(waiting)}" close to closing: ${waiting.reason} Approve it or turn it down on the loan's Conditions tab.`, event: "condition.late_ask" }];
+      if (action.t === "decideLateAsk" && !action.approve) {
+        const ask = deal.lateAsks?.find((item) => item.id === action.askId);
+        return ask ? [{ to: "team", dealId: deal.id, subject: `Late ask turned down: ${deal.loanNumber}`, body: `${action.by} turned down "${askTitle(ask)}", asked for by ${ask.by}: ${action.note.trim()}`, event: "condition.late_ask" }] : [];
+      }
+      const why = (asked?: { reason: string; late: boolean }) => (asked?.reason ? ` ${asked.late ? "Why we're asking this close to closing" : "Why we're asking again"}: ${asked.reason}` : "");
+      const condition = deal.conditions?.find((item) => !was.conditions?.some((prior) => prior.id === item.id));
+      if (condition) {
+        if (condition.owner !== "borrower") return [];
+        const body = `We need one more thing for your loan: ${condition.title}.${condition.detail ? ` ${condition.detail}` : ""}${condition.dueOn ? ` Please send it by ${longDate(condition.dueOn)}.` : ""}${why(condition.asked)} Sign in to send it.`;
+        return [{ to: "borrower", dealId: deal.id, subject: `We need something for your loan: ${deal.loanNumber}`, body, event: "condition.added" }, { to: "broker", dealId: deal.id, subject: `We need something for your client's loan: ${deal.loanNumber}`, body, event: "condition.added" }];
+      }
+      const doc = deal.docs.find((item) => !was.docs.some((prior) => prior.id === item.id));
+      return doc ? [{ to: "borrower", dealId: deal.id, subject: `We need a document: ${deal.loanNumber}`, body: `Please upload: ${doc.name}.${why(doc.asked)}`, event: "doc.requested" }] : [];
+    }
+    case "proposeTermChange": {
+      const deal = loan(action.dealId);
+      const change = deal?.termChanges?.find((item) => item.id === action.changeId);
+      if (!deal || !change) return [];
+      const lines = change.lines.map((line) => `${line.label}: ${termValue(line.key, line.before)} → ${termValue(line.key, line.after)}`).join("\n");
+      const body = `LendHous asks to change the terms you accepted on ${deal.loanNumber}. Why: ${change.reason}\n\n${lines}\n\nNothing changes unless you agree. Sign in to agree or say no.`;
+      return [{ to: "borrower", dealId: deal.id, subject: `A change to your loan's terms: ${deal.loanNumber}`, body, event: "loan.terms_change" }, { to: "broker", dealId: deal.id, subject: `A change to your client's terms: ${deal.loanNumber}`, body: body.replace("the terms you accepted", "the terms your client accepted").replace("unless you agree. Sign in to agree or say no.", "unless your client agrees."), event: "loan.terms_change" }];
+    }
+    case "answerTermChange": {
+      const deal = loan(action.dealId);
+      if (!deal) return [];
+      const what = action.agree ? `${action.signedName.trim()} agreed to the change to the terms. The new numbers are in.` : `The borrower turned down the change to the terms${action.note.trim() ? `: ${action.note.trim()}` : "."} The numbers stay as they were.`;
+      return [{ to: "team", dealId: deal.id, subject: `Change to the terms ${action.agree ? "agreed" : "turned down"}: ${deal.loanNumber}`, body: what, event: "loan.terms_change" }, { to: "broker", dealId: deal.id, subject: `Change to your client's terms ${action.agree ? "agreed" : "turned down"}: ${deal.loanNumber}`, body: what, event: "loan.terms_change" }];
+    }
+    case "withdrawTermChange":
+      return [{ to: "borrower", dealId: action.dealId, subject: `Change to your terms withdrawn: ${number(action.dealId)}`, body: "LendHous withdrew the change it asked you to agree to. Your terms stay as you accepted them.", event: "loan.terms_change" }];
+    case "saveSettlement": {
+      const deal = loan(action.dealId);
+      const off = deal ? settlementLines(deal).filter((line) => line.off) : [];
+      if (!deal || !off.length) return [];
+      return [{ to: "team", dealId: deal.id, subject: `Settlement statement doesn't match the terms: ${deal.loanNumber}`, body: `${action.by} entered the settlement statement. These lines differ from the agreed terms: ${off.map((line) => `${line.label} ${dollars(line.stated)} (terms say ${dollars(line.expected)})`).join("; ")}. Funding waits until it's fixed or someone explains it on the Closing tab.`, event: "closing.settlement" }];
+    }
+    case "moveClosingDate": {
+      const deal = loan(action.dealId);
+      const move = deal?.closingMoves?.find((item) => item.id === action.moveId);
+      if (!deal || !move) return [];
+      const body = `The target closing for ${deal.loanNumber} (${deal.address}, ${deal.city}) moved from ${longDate(move.from)} to ${longDate(move.to)}${move.to > move.from ? `, waiting on ${partyLabel(move.party)}` : ""}: ${move.reason}`;
+      const subject = `Closing date moved to ${longDate(move.to)}: ${deal.loanNumber}`;
+      const title = deal.closing?.email ? [{ to: "email" as const, email: deal.closing.email, subject: `Closing date moved: ${deal.address}, ${deal.city}`, body: `${body}\n\nYour file: ${deal.closing.fileNumber || "number not given"}.`, event: "closing.date_moved" }] : [];
+      return [{ to: "borrower", dealId: deal.id, subject, body, event: "closing.date_moved" }, { to: "broker", dealId: deal.id, subject, body, event: "closing.date_moved" }, { to: "team", dealId: deal.id, subject, body: moveLine(move), event: "closing.date_moved" }, ...title];
+    }
+    case "setAway": {
+      // The backup hears they're covering, from the first day.
+      return [{ to: "email", email: action.backup.email, subject: `You're covering for ${action.member.name}`, body: `${action.member.name} is away from ${longDate(action.from)} to ${longDate(action.until)}, and you're covering their loans. Their loans' notices come to you too, and their work shows in your queue until they're back.`, event: "team.cover" }];
     }
     case "conditionFile": {
       const deal = loan(action.dealId);
@@ -294,8 +347,6 @@ function actionAlerts(before: Book, after: Book, action: BookAction): Alert[] {
       return [{ to: "team", subject: `Term sheet accepted: ${number(action.dealId)}`, body: `${action.signedName} accepted the term sheet.`, event: "loan.term_sheet_accepted" }];
     case "docStatus":
       return action.status === "rejected" ? [{ to: "borrower", dealId: action.dealId, subject: `A document needs another look: ${number(action.dealId)}`, body: "One of your documents wasn't accepted. Sign in to see which one and upload a new copy.", event: "doc.rejected" }] : [];
-    case "addDocRequest":
-      return [{ to: "borrower", dealId: action.dealId, subject: `We need a document: ${number(action.dealId)}`, body: `Please upload: ${action.name}.`, event: "doc.requested" }];
     case "releaseProperty": {
       const deal = after.deals.find((item) => item.id === action.dealId);
       const release = deal?.releases?.find((item) => !before.deals.find((old) => old.id === deal.id)?.releases?.some((old) => old.id === item.id));
@@ -664,7 +715,8 @@ export async function sendAlerts(before: Book, after: Book, action: BookAction) 
         // The owners hear about everything; a loan's own officer and processor hear about theirs too.
         const dealId = alert.dealId ?? ("dealId" in action ? action.dealId : undefined);
         const deal = after.deals.find((item) => item.id === dealId);
-        await notifyTeam(alert.subject, alert.body + link, alert.event, undefined, teamEmails(deal), deal ? { url: `/admin/deals/${deal.id}`, loan: deal.loanNumber } : {});
+        // Someone covering for a colleague who's away hears about that colleague's loans too (lib/replies.ts).
+        await notifyTeam(alert.subject, alert.body + link, alert.event, undefined, [...teamEmails(deal), ...coverEmails(deal, after.away, serviceDay(after))], deal ? { url: `/admin/deals/${deal.id}`, loan: deal.loanNumber } : {});
         continue;
       }
       if (alert.to === "email") {

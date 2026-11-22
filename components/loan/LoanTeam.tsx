@@ -5,6 +5,9 @@ import { TEAM_ROLE_LABEL, TEAM_ROLES, type TeamRole } from "@/lib/loan-team";
 import { DEMO_TEAM, type Deal, type TeamMember } from "@/lib/mockData";
 import { useStore } from "@/lib/store";
 import { phonePill } from "@/lib/ui-classes";
+import { awayToday } from "@/lib/replies";
+import { shortDay } from "@/lib/format";
+import { useServiceDay } from "./use-service-day";
 
 type Options = { members: TeamMember[]; canAssign: boolean; me: string };
 
@@ -13,7 +16,8 @@ type Options = { members: TeamMember[]; canAssign: boolean; me: string };
  * else can take an empty seat. A demo book uses the demo team.
  */
 export function LoanTeam({ deal }: { deal: Deal }) {
-  const { local, dispatch, applyReply, viewerName, viewer } = useStore();
+  const { s, local, dispatch, applyReply, viewerName, viewer } = useStore();
+  const today = useServiceDay();
   const [options, setOptions] = useState<Options | null>(null);
   const [busy, setBusy] = useState<TeamRole | "">("");
   useEffect(() => {
@@ -42,6 +46,7 @@ export function LoanTeam({ deal }: { deal: Deal }) {
                 {options.members.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
               </select>
             ) : <b className="font-medium" data-testid={`team-${role}-name`}>{member?.name ?? "Not assigned"}</b>}
+            {member && today && awayToday(s.away, member, today) && <span className="text-xs text-warn" data-testid={`team-${role}-away`}>away until {shortDay(awayToday(s.away, member, today)!.until)}, {awayToday(s.away, member, today)!.backup.name} covers</span>}
             {!member && options && !options.canAssign && options.me && <button type="button" className="text-xs text-link underline" data-testid={`take-${role}`} disabled={busy === role} onClick={() => void set(role, options.me)}>I&apos;ll take it</button>}
           </div>
         );
@@ -56,6 +61,8 @@ const reach = `text-link underline ${phonePill}`;
 
 /** How a borrower or broker reaches the people on their loan. */
 export function TeamContacts({ deal }: { deal: Deal }) {
+  const { s } = useStore();
+  const today = useServiceDay();
   const people = TEAM_ROLES.flatMap((role) => (deal.team?.[role] ? [{ role, member: deal.team[role]! }] : []));
   if (!people.length) return <p className="text-sm text-muted-foreground" data-testid="your-team-pending">A loan officer will be in touch shortly.</p>;
   return (
@@ -68,6 +75,21 @@ export function TeamContacts({ deal }: { deal: Deal }) {
             {member.phone && <><a className={reach} href={`tel:${dialable(member.phone)}`}>Call {member.phone}</a><a className={reach} href={`sms:${dialable(member.phone)}`}>Text</a></>}
             <a className={reach} href={`mailto:${member.email}`}>Email</a>
           </div>
+          {(() => {
+            // Someone away names who covers, so the borrower knows who to call meanwhile (lib/replies.ts).
+            const notice = today ? awayToday(s.away, member, today) : undefined;
+            if (!notice) return null;
+            const cover = notice.backup;
+            return (
+              <div className="mt-2 rounded-[2px] bg-warn/10 p-2 text-xs" data-testid="your-team-cover">
+                <p>Away until {shortDay(notice.until)}. <b className="font-medium">{cover.name}</b> is covering.</p>
+                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 max-sm:gap-2">
+                  {cover.phone && <a className={reach} href={`tel:${dialable(cover.phone)}`}>Call {cover.phone}</a>}
+                  <a className={reach} href={`mailto:${cover.email}`}>Email {cover.name.replace(/\s*\(.*?\)/g, "").split(" ")[0]}</a>
+                </div>
+              </div>
+            );
+          })()}
         </li>
       ))}
     </ul>

@@ -13,6 +13,9 @@ import Tracker from "@/components/Tracker";
 import { Badge, Section, Stat, points, productLabel, statusLabel, usd } from "@/components/ui";
 import { est, useStore } from "@/lib/store";
 import { BackLink } from "@/components/back-link";
+import { TermChanges } from "@/components/loan/TermChanges";
+import { ClosingDateHistory } from "@/components/loan/ClosingDate";
+import { shortDay } from "@/lib/format";
 
 export default function BrokerDeal() {
   const { id } = useParams<{ id: string }>();
@@ -32,6 +35,7 @@ export default function BrokerDeal() {
       </div>
       <ClientDetails deal={deal} />
       <TermSheetCard deal={deal} canSign={false} />
+      <TermChanges deal={deal} side="broker" />
       <BorrowerConditions deal={deal} canUpload />
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="min-w-0 space-y-4">
@@ -48,8 +52,9 @@ export default function BrokerDeal() {
               <Stat label="Loan" value={usd(e.noteAmount)} />
               <Stat label="Rate" value={`${e.rate.toFixed(2)}%`} />
               <Stat label="Your fee" value={usd((e.noteAmount * (deal.brokerPoints ?? 0)) / 100)} sub={`${points(deal.brokerPoints)}, paid at closing`} />
-              <Stat label="Target closing" value={deal.closingDate} />
+              <Stat label="Target closing" value={shortDay(deal.closingDate)} />
             </div>
+            <div className="mt-3"><ClosingDateHistory deal={deal} /></div>
           </Section>
           <Section title="LendHous team"><TeamContacts deal={deal} /></Section>
         </div>

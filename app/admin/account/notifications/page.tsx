@@ -2,6 +2,7 @@ import Link from "next/link";
 import { markGroupRead, markNoticesRead, saveNoticePreferences } from "@/actions/notifications";
 import { PageIntro } from "@/components/page-intro";
 import { PushToggle } from "@/components/PushToggle";
+import { AwayCard } from "@/components/AwayCard";
 import { SubmitButton } from "@/components/submit-button";
 import { requireUser } from "@/lib/auth";
 import { scopedBook } from "@/lib/book-store";
@@ -134,6 +135,7 @@ export default async function NotificationsPage({ searchParams }: { searchParams
           })}
         </div>
       </section>
+      {view === "admin" && <AwayCard />}
       <section className="glass min-w-0 p-4 sm:p-5">
         <h2 className="eyebrow">On this phone or computer</h2>
         <div className="mt-3"><PushToggle /></div>

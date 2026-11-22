@@ -2,6 +2,8 @@
 // money goes to. Wire fraud is the biggest single loss a lender like this can take, so instructions are only entered in
 // the portal, a second person confirms them by calling a number found independently, any change has to be confirmed
 // again, and a loan can't fund until that's done.
+import { expectedFigures, SETTLEMENT_OPEN, settlementLines } from "./term-changes";
+import { movesOf } from "./closing-moves";
 import type { Deal, Doc, DrawRequest, WireInstruction } from "./mockData";
 import { sellerCheckNeeded } from "./seller-checks";
 import { drawAmount, latestTitleUpdate, searchFrom } from "./title-updates";
@@ -95,6 +97,13 @@ export function titleView(deal: Deal, noteAmount: number, draws: DrawRequest[] =
       const latest = latestTitleUpdate(draw);
       return { drawId: draw.id, askedAt: draw.titleCheck!.asked!.at, amount: drawAmount(draw), since: searchFrom(deal) ?? null, answered: latest ? { clean: latest.clean, through: latest.through, found: latest.found, at: latest.at } : null };
     }),
+    // The closing date's moves, without who on the team moved it (lib/closing-moves.ts).
+    moves: movesOf(deal).map(({ by: _by, ...move }) => move),
+    // The settlement statement's lender lines against the agreed terms, so the closer can match them (lib/term-changes.ts).
+    settlement: SETTLEMENT_OPEN.includes(deal.status) || deal.settlement ? {
+      open: SETTLEMENT_OPEN.includes(deal.status), expected: expectedFigures(deal), lines: settlementLines(deal),
+      entered: deal.settlement ? { at: deal.settlement.at, via: deal.settlement.via, figures: deal.settlement.figures } : null, explained: Boolean(deal.settlement?.explained),
+    } : null,
   };
 }
 export type TitleView = ReturnType<typeof titleView>;

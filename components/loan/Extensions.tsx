@@ -7,6 +7,8 @@ import { useStore } from "@/lib/store";
 import { Badge, Section, shortDate, usd } from "@/components/ui";
 import { useServiceDay } from "./use-service-day";
 import { shortDay } from "@/lib/format";
+import { useNow } from "@/components/use-now";
+import { dueAt, floridaTime } from "@/lib/sla";
 
 const statusTone = { requested: "amber", approved: "blue", declined: "slate", executed: "green" } as const;
 const statusText = { requested: "Waiting for approval", approved: "Approved, not signed", declined: "Declined", executed: "Signed" } as const;
@@ -61,10 +63,15 @@ export function Extensions({ deal, side }: { deal: Deal; side: "team" | "borrowe
 }
 
 function BorrowerOpen({ deal, extension }: { deal: Deal; extension: LoanExtension }) {
+  const { targets } = useStore();
+  const now = useNow();
+  // When they'll hear, against the team's own target (lib/sla.ts).
+  const due = dueAt(extension.requestedAt, targets.extensionAnswer);
+  const answer = !now ? "We'll tell you when it's decided." : due > now ? `We'll answer by ${floridaTime(due)}.` : "It's taking longer than we said. Your servicing team has been reminded.";
   return (
     <div className="space-y-1 text-sm" data-testid="extension-open">
       <p className="flex flex-wrap items-center gap-2"><Badge tone={statusTone[extension.status]}>{statusText[extension.status]}</Badge>{extension.months} more month{extension.months === 1 ? "" : "s"}, asked {shortDate(extension.requestedAt)}</p>
-      <p className="text-muted-foreground">{extension.status === "approved" ? `Approved. Sign the extension agreement and pay the ${usd(extension.fee, 2)} fee, and your loan will mature on ${shortDay(maturityAfter(deal, extension))}. Your servicing team will send them.` : `The fee would be ${usd(extension.fee, 2)}. We'll tell you when it's decided.`}</p>
+      <p className="text-muted-foreground">{extension.status === "approved" ? `Approved. Sign the extension agreement and pay the ${usd(extension.fee, 2)} fee, and your loan will mature on ${shortDay(maturityAfter(deal, extension))}. Your servicing team will send them.` : `The fee would be ${usd(extension.fee, 2)}. ${answer}`}</p>
     </div>
   );
 }
