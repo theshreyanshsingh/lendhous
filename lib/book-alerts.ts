@@ -26,6 +26,9 @@ import { askTitle } from "@/lib/late-asks";
 import { moveLine, partyLabel } from "@/lib/closing-moves";
 import { settlementLines, termValue } from "@/lib/term-changes";
 import { coverEmails } from "@/lib/replies";
+import { clause, noticeDueOn, STOP_REASONS, stopRecipients } from "@/lib/stop-advance";
+import { paceWords, projectPace } from "@/lib/project-pace";
+import { LOW_SCORE } from "@/lib/surveys";
 
 const origin = () => (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "");
 
@@ -286,6 +289,39 @@ function actionAlerts(before: Book, after: Book, action: BookAction): Alert[] {
       const subject = `Closing date moved to ${longDate(move.to)}: ${deal.loanNumber}`;
       const title = deal.closing?.email ? [{ to: "email" as const, email: deal.closing.email, subject: `Closing date moved: ${deal.address}, ${deal.city}`, body: `${body}\n\nYour file: ${deal.closing.fileNumber || "number not given"}.`, event: "closing.date_moved" }] : [];
       return [{ to: "borrower", dealId: deal.id, subject, body, event: "closing.date_moved" }, { to: "broker", dealId: deal.id, subject, body, event: "closing.date_moved" }, { to: "team", dealId: deal.id, subject, body: moveLine(move), event: "closing.date_moved" }, ...title];
+    }
+    case "stopAdvances": case "resumeAdvances": {
+      const deal = loan(action.dealId);
+      if (!deal) return [];
+      const stopping = action.t === "stopAdvances";
+      const why = stopping ? STOP_REASONS[action.reason] + (action.note.trim() ? `: ${clause(action.note)}` : "") : clause(action.note);
+      const borrower = stopping
+        ? `Draws on ${deal.loanNumber} are paused from ${longDate(action.on)}. ${why}. Your loan team will be in touch about what's needed to start them again.`
+        : `Draws on ${deal.loanNumber} can go ahead again from ${longDate(action.on)}. ${why}.`;
+      const parties = stopRecipients(deal);
+      const team = stopping
+        ? `Construction advances on ${deal.loanNumber} stopped from ${longDate(action.on)} (${why}). Florida's notice goes to ${parties.length ? parties.map((party) => party.name).join(", ") : "the contractor and each lienor who served a notice to owner (none on file)"} by ${longDate(noticeDueOn(action.on))} (Fla. Stat. 713.3471). Record each one on the Servicing tab.`
+        : `Construction advances on ${deal.loanNumber} started again from ${longDate(action.on)}: ${why}.`;
+      return [
+        { to: "borrower", dealId: deal.id, subject: `${stopping ? "Draws paused" : "Draws can go ahead again"}: ${deal.loanNumber}`, body: borrower, event: "draw.advances" },
+        { to: "team", dealId: deal.id, subject: `Advances ${stopping ? "stopped" : "started again"}: ${deal.loanNumber}`, body: team, event: "draw.advances" },
+        ...holdersOf(deal).map((holder): Alert => ({ ...holder, subject: `Update on ${deal.loanNumber}`, body: `${deal.loanNumber}: construction advances ${stopping ? `stopped from ${longDate(action.on)}` : `started again from ${longDate(action.on)}`}.`, event: "investor.update" })),
+      ];
+    }
+    case "checkPace": {
+      // Each loan asked tonight: the borrower is asked for an update with photos; the team gets one list.
+      const asked = after.deals.filter((deal) => (deal.paceAsked ?? []).includes(action.asOf) && !before.deals.find((item) => item.id === deal.id)?.paceAsked?.includes(action.asOf));
+      if (!asked.length) return [];
+      const line = (deal: (typeof asked)[number]) => { const pace = projectPace(deal, after.draws, action.asOf); return `${deal.loanNumber} (${deal.borrowerName}): ${pace ? paceWords(pace) : "no recent draw"}`; };
+      return [
+        ...asked.map((deal): Alert => { const pace = projectPace(deal, after.draws, action.asOf); return { to: "borrower", dealId: deal.id, subject: `How's the work going? ${deal.loanNumber}`, body: `We haven't had a draw request on ${deal.address} in ${pace?.quietDays ?? "several"} days. Please send us a quick update: a few photos of the work on your loan page, or a message about what's holding it up. If something's in the way, the sooner we know, the more we can help: ${origin()}/admin/borrower/${deal.id}#property-photos`, event: "draw.pace" }; }),
+        { to: "team", subject: `${asked.length} stalled rehab${asked.length === 1 ? "" : "s"}`, body: `No draw asked for in weeks; the borrowers were asked for an update tonight:\n${asked.map(line).join("\n")}`, event: "draw.pace" },
+      ];
+    }
+    case "answerSurvey": {
+      if (action.score > LOW_SCORE) return [];
+      const deal = loan(action.dealId);
+      return deal ? [{ to: "team", dealId: deal.id, subject: `Low survey score from ${deal.borrowerName}: ${action.score} out of 10`, body: `${deal.borrowerName} scored ${deal.loanNumber} ${action.score} out of 10 ${action.stage === "funded" ? "after closing" : "at payoff"}${action.comment.trim() ? `: "${action.comment.trim()}"` : ", with no comment"}. A manager should call them; record what you heard on the loan's Messages tab.`, event: "survey.low" }] : [];
     }
     case "setAway": {
       // The backup hears they're covering, from the first day.

@@ -117,6 +117,17 @@ async function checkTaxes(now: Date) {
   return `${changed.length} property-tax reminders as of ${asOf}`;
 }
 
+// Stalled rehabs (lib/project-pace.ts): a loan with no draw asked for in weeks gets its borrower asked for an update with
+// photos, once a month while it stays stalled, and the team one list.
+async function checkPace(now: Date) {
+  const asOf = servicingDate(now);
+  const result = await runAction(SERVICING, { t: "checkPace", asOf }, { trusted: true });
+  if ("error" in result) return `no stalled projects to ask about as of ${asOf}`;
+  await sendAlerts(result.before, result.after, result.action);
+  const changed = result.after.deals.filter((deal) => !result.before.deals.includes(deal));
+  return `${changed.length} stalled projects asked about as of ${asOf}`;
+}
+
 const SCREENER: Viewer = { id: "system", name: "Nightly sanctions check", roleCodes: [] };
 
 // Downloads Treasury's sanctions list, then screens everyone on every open application and active loan against it. A
@@ -227,7 +238,7 @@ async function watchStorms(now: Date) {
   return result.summary;
 }
 
-export const JOBS: Record<string, Job> = { sanctions: checkSanctions, servicing: checkServicing, termSheets: checkTermSheets, insurance: checkInsurance, taxes: checkTaxes, properties: mapProperties, storms: watchStorms, sessions: purgeSessions, retention: cleanRetention, encryption: sealStoredData, statements: makeMonthlyStatements, reports: sendScheduledReports, summaries: sendSummaries, digest: sendDigest };
+export const JOBS: Record<string, Job> = { sanctions: checkSanctions, servicing: checkServicing, termSheets: checkTermSheets, insurance: checkInsurance, taxes: checkTaxes, pace: checkPace, properties: mapProperties, storms: watchStorms, sessions: purgeSessions, retention: cleanRetention, encryption: sealStoredData, statements: makeMonthlyStatements, reports: sendScheduledReports, summaries: sendSummaries, digest: sendDigest };
 
 /** NHC writes a new advisory every six hours, so the storm check runs once in each six-hour window; the rest once a day. */
 const EVERY_SIX_HOURS = new Set(["storms"]);

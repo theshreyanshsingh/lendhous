@@ -52,6 +52,8 @@ import { surveyProblem } from "./surveys";
 import { answerProblem, explainProblem, heldProblem, proposeProblem, settlementHold, settlementProblem, withdrawProblem } from "./term-changes";
 import { askProblem, decideProblem as lateDecisionProblem } from "./late-asks";
 import { moveProblem } from "./closing-moves";
+import { releaseHolds, resumeProblem, sentProblem as stopNoticeProblem, stopProblem } from "./stop-advance";
+import { followUpProblem } from "./surveys";
 import { awaitingReply } from "./replies";
 import { updateProblem, workoutProblem } from "./investor-updates";
 import { transferProblem } from "./capital-moves";
@@ -1030,7 +1032,7 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       if (blocked) return no(`${blocked}.`);
       if (action.t === "releaseDraw") { const refused = payeeProblem(dealOf(draw.dealId)!, action.payee); if (refused) return no(refused); }
       // Florida's lien law and the insurance hold the money until they're met or an owner releases it past them.
-      const holds = action.t === "releaseDraw" ? unreleasedHolds(dealOf(draw.dealId)!, draw, serviceDay(book)) : [];
+      const holds = action.t === "releaseDraw" ? releaseHolds(dealOf(draw.dealId)!, draw, serviceDay(book)) : [];
       return holds.length ? no(holds[0]) : staffOnly("approve_draw");
     }
     case "saveInsurance": case "setFloodZone": case "decideRenewal": case "saveAssociationPolicy": case "saveMitigation": case "saveSellerFlood": {
@@ -1321,6 +1323,23 @@ export function authorize(book: Book, viewer: Viewer, action: BookAction, allowe
       if (!deal) return no(GONE);
       if (!staffOnlyAllowed("manage_conditions", "issue_term_sheet", "assign_loans")) return no(NOT_ALLOWED);
       const problem = moveProblem(deal, action.to, action.party, action.reason, serviceDay(book));
+      return problem ? no(problem) : ok({ ...action, by: viewer.name });
+    }
+    case "stopAdvances": case "resumeAdvances": case "stopNoticeSent": {
+      const deal = dealOf(action.dealId);
+      if (!deal) return no(GONE);
+      const today = serviceDay(book);
+      // Stopping or starting advances is a credit decision; recording a notice sent is servicing's work too.
+      if (!staffOnlyAllowed("declare_default", "approve_draw", ...(action.t === "stopNoticeSent" ? (["service_loans"] as const) : []))) return no(NOT_ALLOWED);
+      const problem = action.t === "stopAdvances" ? stopProblem(deal, action.on, action.reason, action.note, today) : action.t === "resumeAdvances" ? resumeProblem(deal, action.on, action.note, today) : stopNoticeProblem(deal, action.key, action.sentOn, action.method, today);
+      return problem ? no(problem) : ok({ ...action, by: viewer.name });
+    }
+    case "checkPace":
+      return trusted ? ok() : no(NOT_ALLOWED);
+    case "surveyFollowUp": {
+      const deal = dealOf(action.dealId);
+      if (!staffOnlyAllowed("view_pipeline")) return no(NOT_ALLOWED);
+      const problem = followUpProblem(deal, action.stage, action.note);
       return problem ? no(problem) : ok({ ...action, by: viewer.name });
     }
     case "noReplyNeeded": {

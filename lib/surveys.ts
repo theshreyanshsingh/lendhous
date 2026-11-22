@@ -39,3 +39,18 @@ export function surveyScore(deals: Deal[], period: { from: string; to: string })
   const detractors = answers.filter((item) => item.score <= 6).length;
   return { answers: answers.length, promoters, detractors, nps: answers.length ? Math.round(((promoters - detractors) / answers.length) * 100) : null, comments: answers.filter((item) => item.comment.trim()).map((item) => ({ score: item.score, comment: item.comment, stage: item.stage, at: item.at })) };
 }
+
+/** PLACEHOLDER, the usual line: a score of 6 or less is someone unhappy, and a manager follows up (docs/feature-ideas-2026-11-22.md, rank 15). */
+export const LOW_SCORE = 6;
+/** The loan's low scores nobody has followed up yet. */
+export const needsFollowUp = (deal: Pick<Deal, "surveys">) => (deal.surveys ?? []).filter((answer) => answer.score <= LOW_SCORE && !answer.followUp);
+
+/** Why this follow-up can't be recorded, or null. */
+export function followUpProblem(deal: Deal | undefined, stage: SurveyStage, note: string) {
+  if (!deal) return "That loan no longer exists.";
+  const answer = deal.surveys?.find((item) => item.stage === stage);
+  if (!answer || answer.score > LOW_SCORE) return "There's no low score to follow up on this loan.";
+  if (answer.followUp) return "Someone has already followed it up.";
+  if (!note.trim()) return "Say what you heard and what's being done.";
+  return null;
+}

@@ -20,6 +20,9 @@ import { openModification } from "./modifications";
 import { askTitle, pendingAsks } from "./late-asks";
 import { awaitingReply, covering } from "./replies";
 import { openTermChange, settlementHold } from "./term-changes";
+import { advancing, noticeStatus, openStop } from "./stop-advance";
+import { projectPace } from "./project-pace";
+import { needsFollowUp } from "./surveys";
 
 const SERVICED_STATUSES = new Set(SERVICED);
 import { clockOf, SLA_TARGETS, type Clock, type Targets } from "./sla";
@@ -109,6 +112,15 @@ export function workQueue(book: Book, viewer: { id: string; email?: string }, no
     for (const ask of pendingAsks(deal)) add({ key: `lateask:${ask.id}`, label: `Approve or turn down a late ask: ${askTitle(ask)}`, href: tab(deal, "Conditions"), deal, since: ask.at, priority: 3 });
     const settlement = settlementHold(deal);
     if (settlement) add({ key: `settlement:${deal.id}`, label: "Settlement statement doesn't match the terms", href: tab(deal, "Closing"), deal, since: deal.settlement?.at, priority: 3 });
+    // Florida's stop-advance notice (lib/stop-advance.ts) has a legal deadline; a default with holdback left asks the question.
+    const stopNotice = noticeStatus(deal, today);
+    if (stopNotice?.missing.length) add({ key: `stopnotice:${deal.id}`, label: `Send the stop-advance notice to ${stopNotice.missing.length === 1 ? stopNotice.missing[0].name : `${stopNotice.missing.length} parties`} (Fla. Stat. 713.3471)`, href: tab(deal, "Servicing"), deal, due: stopNotice.due, priority: 1 });
+    else if (openDefault(deal) && advancing(deal) && !openStop(deal)) add({ key: `stopask:${deal.id}`, label: "In default with holdback left: decide whether to stop advances", href: tab(deal, "Servicing"), deal, since: openDefault(deal)!.effectiveOn, priority: 6 });
+    // A rehab with no draw in weeks (lib/project-pace.ts).
+    const pace = projectPace(deal, book.draws, today);
+    if (pace?.state === "stalled") add({ key: `stalled:${deal.id}`, label: `Stalled: no draw asked for in ${pace.quietDays} days`, href: tab(deal, "Servicing"), deal, since: pace.lastActivity, priority: 8 });
+    // A borrower who scored their experience 6 or less hears from a manager (lib/surveys.ts).
+    for (const answer of needsFollowUp(deal)) add({ key: `survey:${deal.id}:${answer.stage}`, label: `Follow up a survey score of ${answer.score} out of 10`, href: tab(deal, "Messages"), deal, since: answer.at, priority: 9 });
     const change = openTermChange(deal);
     if (change) add({ key: `termchange:${deal.id}`, label: "Waiting for the borrower to answer a change to their terms", href: tab(deal, "Numbers & Ratios"), deal, since: change.at, priority: 14 });
     if (lienReleaseOpen(deal)) add({ key: `release:${deal.id}`, label: "Record the mortgage release", href: tab(deal, "Servicing"), deal, priority: 8 });

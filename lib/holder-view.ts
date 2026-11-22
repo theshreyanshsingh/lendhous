@@ -2,6 +2,7 @@
 // 14): when each loan should pay off, from the borrower's stated exit or its maturity; a line a month on how it's going
 // (payments, draws against the work, insurance, storms, extensions and changes); and its capital account as a file. The
 // borrower's own words (an exit plan's note) never reach a holder. Pure, so the pages and the tests agree.
+import { PACE_LABEL, paceWords, projectPace } from "./project-pace";
 import type { Book } from "./book";
 import { evaluate } from "./engine";
 import { CONFIDENCE, EXIT_CHOICES } from "./exit-plans";
@@ -18,7 +19,7 @@ import type { StormWatch } from "./storms";
  * What a holder's copy of a loan doesn't carry, worked out by the server from the whole book: how far the work has got
  * against the money paid out, when it was last inspected and a draw last released, and a storm whose cone covers it now.
  */
-export type HolderWatch = { done?: number; paid?: number; ahead?: boolean; lastInspected?: string; lastReleased?: string; storm?: string; payoffAsked?: string };
+export type HolderWatch = { done?: number; paid?: number; ahead?: boolean; lastInspected?: string; lastReleased?: string; storm?: string; payoffAsked?: string; /** The last draw asked for, for the project's pace (lib/project-pace.ts). */ lastAsked?: string };
 
 export function holderWatch(deal: Deal, book: { draws: DrawRequest[]; storms: StormWatch[]; payoffs: PayoffRequest[] }): HolderWatch {
   const { draws, storms } = book;
@@ -29,7 +30,8 @@ export function holderWatch(deal: Deal, book: { draws: DrawRequest[]; storms: St
   const lastInspected = mine.map((draw) => draw.inspection?.at.slice(0, 10)).filter(Boolean).sort().pop();
   const lastReleased = mine.filter((draw) => draw.status === "funded").map((draw) => draw.fundedAt?.slice(0, 10)).filter(Boolean).sort().pop();
   const storm = storms.find((item) => item.status === "active" && item.nowIn.includes(deal.id))?.label;
-  return { ...(health ? { done: health.done, paid: health.paid, ahead: health.ahead } : {}), ...(lastInspected ? { lastInspected } : {}), ...(lastReleased ? { lastReleased } : {}), ...(storm ? { storm } : {}), ...(payoffAsked ? { payoffAsked } : {}) };
+  const lastAsked = mine.filter((draw) => draw.status !== "rejected").map((draw) => draw.requestedAt).sort().pop();
+  return { ...(lastAsked ? { lastAsked } : {}), ...(health ? { done: health.done, paid: health.paid, ahead: health.ahead } : {}), ...(lastInspected ? { lastInspected } : {}), ...(lastReleased ? { lastReleased } : {}), ...(storm ? { storm } : {}), ...(payoffAsked ? { payoffAsked } : {}) };
 }
 
 /**
@@ -83,6 +85,9 @@ export function monthlyLine(deal: Deal, watch: HolderWatch | undefined, today: s
       if (watch?.done !== undefined) parts.push(`the work about ${pct(watch.done)} done${watch.lastInspected ? ` at the last inspection, ${longDay(watch.lastInspected)}` : ""}`);
       lines.push({ tone: watch?.ahead ? "warn" : "note", text: `${parts.join("; ")}.${watch?.ahead ? " Money paid out is running ahead of the work." : ""}` });
     } else if (holdback > 0) lines.push({ tone: "note", text: `No rehab draws yet from the ${dollars(holdback)} holdback.` });
+    // The project's pace: stalled or behind, the way the team sees it (lib/project-pace.ts).
+    const pace = projectPace(deal, watch?.lastAsked ? [{ dealId: deal.id, requestedAt: watch.lastAsked, status: "submitted" }] : [], today);
+    if (pace && (pace.state !== "on_pace" || pace.lateFinish)) lines.push({ tone: pace.state === "stalled" ? "bad" : "warn", text: `${PACE_LABEL[pace.state]}: ${paceWords(pace)}` });
   }
   if (deal.status !== "paid_off") {
     const soon = policiesOf(deal).filter((policy) => policy.expiresOn).sort((a, b) => a.expiresOn.localeCompare(b.expiresOn))[0];

@@ -40,6 +40,9 @@ import { shortDay } from "@/lib/format";
 import { BackLink } from "@/components/back-link";
 import { TermChanges } from "@/components/loan/TermChanges";
 import { ClosingDateHistory } from "@/components/loan/ClosingDate";
+import { AdvancesPaused } from "@/components/loan/AdvanceStops";
+import { ProjectPace } from "@/components/loan/ProjectPace";
+import { DrawPlanner } from "@/components/loan/DrawPlanner";
 
 
 export default function BorrowerLoan() {
@@ -102,7 +105,10 @@ export default function BorrowerLoan() {
             {!funded && <div className="mt-3"><ClosingDateHistory deal={d} /></div>}
           </Section>
           {funded && e.holdback > 0 && <RehabProgress deal={d} />}
+          {funded && e.holdback > 0 && <ProjectPace deal={d} side="client" />}
+          {funded && <AdvancesPaused deal={d} />}
           {funded && e.holdback > 0 && <DrawPanel deal={d} />}
+          {!closed && d.status !== "paid_off" && <DrawPlanner deal={d} />}
           {funded && <BudgetControls deal={d} side="client" />}
           {funded && <ExitPlanCard deal={d} side="client" />}
           {(funded || d.status === "paid_off") && <LoanMoney deal={d} />}

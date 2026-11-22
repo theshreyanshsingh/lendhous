@@ -174,7 +174,7 @@ export interface Deal {
   investorUpdates?: { id: string; text: string; by: string; at: string }[];
   workout?: { since: string; note: string; by: string; at: string };
   /** The borrower's answer to "how likely are you to recommend us?", at closing and at payoff (lib/surveys.ts). */
-  surveys?: { stage: "funded" | "paid_off"; score: number; comment: string; at: string }[];
+  surveys?: { stage: "funded" | "paid_off"; score: number; comment: string; at: string; followUp?: { note: string; by: string; at: string } }[];
   /** Budget moved between lines after funding, and overruns found at inspections (lib/budget.ts). */
   changeOrders?: ChangeOrder[];
   overruns?: Overrun[];
@@ -214,6 +214,16 @@ export interface Deal {
   closingMoves?: ClosingMove[];
   /** The team marked the borrower's or broker's last message as needing no reply (lib/replies.ts). */
   replyHandled?: { at: string; by: string };
+  /** Each time construction advances stopped, the notices sent, and when they started again (lib/stop-advance.ts). */
+  advanceStops?: AdvanceStop[];
+  /** The days the borrower was asked for an update on a stalled project (lib/project-pace.ts). */
+  paceAsked?: string[];
+}
+/** Construction advances stopped before the work was done, and Florida's notice to the contractor and lienors (713.3471). */
+export interface AdvanceStop {
+  on: string; reason: import("./stop-advance").StopReason; note: string; by: string; at: string;
+  notices: { key: string; name: string; sentOn: string; method: import("./stop-advance").NoticeMethod; by: string; at: string }[];
+  resumed?: { on: string; note: string; by: string; at: string };
 }
 /** A member of the team away on these days, and who covers their loans meanwhile (lib/replies.ts). The id is the member's. */
 export interface AwayNotice { id: string; name: string; email: string; from: string; until: string; backup: TeamMember; by: string; at: string }

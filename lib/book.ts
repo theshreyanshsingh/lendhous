@@ -41,6 +41,9 @@ import { answerProblem, explainProblem, heldProblem, newChange, proposeProblem, 
 import { askedWhy, askProblem, askTitle, decideProblem as lateDecisionProblem, waitsForManager } from "./late-asks";
 import { moveProblem, type DelayParty } from "./closing-moves";
 import { awaitingReply, awayProblem } from "./replies";
+import { releaseHolds, resumeProblem, sentProblem as stopNoticeProblem, stopProblem, stopRecipients } from "./stop-advance";
+import { stalledToAsk } from "./project-pace";
+import { followUpProblem } from "./surveys";
 import { cleanParcels, TAX_STATUS, taxReminder } from "./property-taxes";
 import { addDays, balanceOf, DEMO_SERVICING_DAY, firstDueDate, ledger, maturityOf, openDefault, paymentsMade, payoffFor, recastPayment, SERVICED, servicingDate, settle } from "./servicing";
 
@@ -90,6 +93,14 @@ export type BookAction =
   /** Someone away and who covers their loans (lib/replies.ts). The server looks both people up. */
   | { t: "setAway"; member: TeamMember; backup: TeamMember; from: string; until: string; by: string }
   | { t: "endAway"; memberId: string; by: string }
+  /** Construction advances stopping before the work is done, Florida's notice to each party, and advances starting again (lib/stop-advance.ts). */
+  | { t: "stopAdvances"; dealId: string; on: string; reason: import("./stop-advance").StopReason; note: string; by: string }
+  | { t: "stopNoticeSent"; dealId: string; key: string; sentOn: string; method: import("./stop-advance").NoticeMethod; by: string }
+  | { t: "resumeAdvances"; dealId: string; on: string; note: string; by: string }
+  /** Tonight's stalled projects: their borrowers are asked for an update (lib/project-pace.ts). Server only. */
+  | { t: "checkPace"; asOf: string }
+  /** A manager's follow-up on a low survey score (lib/surveys.ts). */
+  | { t: "surveyFollowUp"; dealId: string; stage: "funded" | "paid_off"; note: string; by: string }
   /** The client's last message needs no answer ("I'll upload them today"), so its reply clock stops. */
   | { t: "noReplyNeeded"; dealId: string; by: string }
   | { t: "linkBorrower"; dealId: string; borrowerId: string; borrowerName: string }
@@ -505,6 +516,8 @@ export function demoBook(): Book {
       { id: "mv-demo-3b", from: "2026-11-02", to: "2026-11-06", party: "appraiser", reason: "The appraisal review asked for one more nearby sale to compare with. (FAKE)", by: "Uma Underwriter (FAKE)", at: "2026-10-29T15:30:00-07:00" }] };
     if (d.id === "d7") deals[i] = { ...deals[i], lateAsks: [{ id: "ask-demo-7", kind: "doc", doc: { name: "Updated bank statement", category: "Liquidity" }, reason: "The statement on file is from August; closing needs one from the last 30 days. (FAKE)", by: "Pat Processor (FAKE)", at: "2026-10-30T13:00:00-07:00", status: "pending" }] };
     if (d.id === "d8") deals[i] = { ...deals[i], termChanges: [newChange(deals[i], "tc-demo-8", { purchasePrice: deals[i].app.purchasePrice - 10_000 }, "The seller agreed to a $10,000 price reduction after the inspection, so the loan is sized on the lower price. (FAKE)", "Olivia Owner (FAKE)", "2026-10-30T14:00:00-07:00")] };
+    // Advances paused on a loan behind on its payments, Florida's notice still to send (lib/stop-advance.ts).
+    if (d.id === "d13") deals[i] = { ...deals[i], advanceStops: [{ on: "2026-10-29", reason: "other", note: "Payments are more than 30 days late, so advances wait until the loan is brought current (FAKE)", by: "Uma Underwriter (FAKE)", at: "2026-10-29T11:00:00-07:00", notices: [] }] };
   }
   const quoted = payoffFor(deals.find((d) => d.id === "d11")!, "2026-11-15");
   // One from a borrower's portal, due in two days, and one from a title company whose authorization still needs a look.
@@ -752,6 +765,35 @@ function apply(s: Book, a: BookAction): Book {
       const notice = s.away?.find((item) => item.id === a.memberId);
       if (!notice) return s;
       return { ...s, away: s.away!.filter((item) => item.id !== a.memberId), audit: log(`${notice.name} is back (${a.by})`) };
+    }
+    case "stopAdvances": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (stopProblem(deal, a.on, a.reason, a.note, serviceDay(s))) return s;
+      const stop = { on: a.on, reason: a.reason, note: a.note.trim(), by: a.by, at: now(), notices: [] };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, advanceStops: [...(d.advanceStops ?? []), stop] })), audit: log(`${deal.loanNumber}: construction advances stopped from ${a.on} by ${a.by}`) };
+    }
+    case "stopNoticeSent": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (stopNoticeProblem(deal, a.key, a.sentOn, a.method, serviceDay(s))) return s;
+      const person = stopRecipients(deal).find((item) => item.key === a.key)!;
+      const notice = { key: a.key, name: person.name, sentOn: a.sentOn, method: a.method, by: a.by, at: now() };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, advanceStops: d.advanceStops!.map((stop, i, all) => (i === all.length - 1 ? { ...stop, notices: [...stop.notices, notice] } : stop)) })), audit: log(`${deal.loanNumber}: stop-advance notice sent to ${person.name} (${a.by})`) };
+    }
+    case "resumeAdvances": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (resumeProblem(deal, a.on, a.note, serviceDay(s))) return s;
+      const resumed = { on: a.on, note: a.note.trim(), by: a.by, at: now() };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, advanceStops: d.advanceStops!.map((stop, i, all) => (i === all.length - 1 ? { ...stop, resumed } : stop)) })), audit: log(`${deal.loanNumber}: construction advances started again from ${a.on} by ${a.by}`) };
+    }
+    case "checkPace": {
+      const asking = new Set(stalledToAsk(s.deals, s.draws, a.asOf));
+      if (!asking.size) return s;
+      return { ...s, deals: s.deals.map((d) => (asking.has(d.id) ? { ...d, paceAsked: [...(d.paceAsked ?? []), a.asOf] } : d)) };
+    }
+    case "surveyFollowUp": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (followUpProblem(deal, a.stage, a.note)) return s;
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, surveys: d.surveys!.map((item) => (item.stage === a.stage ? { ...item, followUp: { note: a.note.trim(), by: a.by, at: now() } } : item)) })), audit: log(`${deal.loanNumber}: low survey score followed up by ${a.by}`) };
     }
     case "noReplyNeeded": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
@@ -1254,7 +1296,7 @@ function apply(s: Book, a: BookAction): Book {
       const draw = s.draws.find((d) => d.id === a.drawId)!; const deal = s.deals.find((d) => d.id === draw.dealId)!;
       // No money goes out to anyone not screened in the last few days.
       // Nor before the lien law's protections are in place, unless an owner released it past them (Fla. Stat. ch. 713).
-      if (draw.status !== "approved" || !draw.approved || ofacBlocker(deal, serviceDay(s)) || unreleasedHolds(deal, draw, serviceDay(s)).length) return s;
+      if (draw.status !== "approved" || !draw.approved || ofacBlocker(deal, serviceDay(s)) || releaseHolds(deal, draw, serviceDay(s)).length) return s;
       return { ...s,
         draws: s.draws.map((d) => (d.id === a.drawId ? { ...d, status: "funded", fundedAt: now(), ...(a.payee && a.payee !== "borrower" ? { payee: a.payee } : {}) } : d)),
         // Brought up to today first, so the payments already due keep the amount they owed before this draw.

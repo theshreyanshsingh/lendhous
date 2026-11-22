@@ -2065,6 +2065,43 @@ ok("and its settlement statement against the agreed terms, line by line", await 
 await shot(cp, "60-title-settlement.png");
 await calm.close();
 
+// Stalled projects, stopped advances, low scores and the draw planner (docs/feature-ideas-2026-11-22.md, ranks 5, 6, 8, 15).
+const stall = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+const sp = await stall.newPage();
+sp.on("pageerror", (error) => errors.push(`stalls: ${error.message}`));
+const seat = async (email) => { await stall.clearCookies(); if (sessions[email]) await stall.addCookies(sessions[email]); else await signIn(sp, email); };
+await seat(SEATS.staff);
+await sp.goto(BASE + "/admin/deals/d13?tab=Servicing");
+ok("a loan with advances stopped shows Florida's notice deadline", await seen(sp.getByTestId("stop-summary")) && (await sp.getByTestId("stop-due").innerText()).includes("due by Nov 5, 2026"));
+await sp.getByTestId("notice-record").first().click();
+ok("and the team records each notice sent", await seen(sp.getByTestId("stop-notice").getByText(/^Sent /)) && (await sp.getByTestId("stop-due").innerText()).includes("Every notice is sent"));
+await sp.getByTestId("resume-note").fill("The borrower brought the loan current.");
+await sp.getByTestId("resume-advances").click();
+ok("advances start again with what changed, and the stop stays on record", await seen(sp.getByTestId("stop-history")));
+await sp.goto(BASE + "/admin/deals/d2?tab=Servicing");
+ok("a rehab shows its pace: drawn against the term used", await seen(sp.getByTestId("project-pace")) && (await sp.getByTestId("pace-words").innerText()).includes("of the rehab budget drawn"));
+await sp.getByTestId("stop-advances").click();
+await sp.getByTestId("stop-reason").selectOption("stalled");
+await sp.getByTestId("stop-note").fill("No work on site for six weeks.");
+await sp.getByTestId("stop-confirm").click();
+ok("the team can stop advances, and the notice goes on the list", await seen(sp.getByTestId("stop-summary")) && (await sp.getByTestId("stop-notice").count()) >= 1);
+await shot(sp, "61-advances-stopped.png", false);
+await sp.goto(BASE + "/admin/deals/d13?tab=Messages");
+ok("a low survey score waits for a manager's follow-up", await seen(sp.getByTestId("survey-follow-up").filter({ hasText: "6 out of 10" })));
+await sp.getByTestId("survey-note").fill("Called; the appraisal desk now quotes a date up front.");
+await sp.getByTestId("survey-follow-up-save").click();
+ok("and keeps what was heard", await seen(sp.getByTestId("survey-followed-up")));
+await seat(SEATS.borrower);
+await sp.goto(BASE + "/admin/borrower/d2");
+ok("the borrower sees their project's pace and that draws are paused", await seen(sp.getByTestId("advances-paused").filter({ hasText: "No work on site for six weeks." })) && await seen(sp.getByTestId("project-pace")));
+await sp.goto(BASE + "/admin/borrower/d1");
+const perStage = async () => (await sp.getByTestId("draw-planner").innerText()).match(/Each stage, paid by you first\s*\$([\d,]+)/)?.[1];
+const fourDraws = await perStage();
+await sp.getByTestId("draw-count").selectOption("2");
+ok("the borrower plans their draws: fewer draws, more cash out at a time", Boolean(fourDraws) && Number((await perStage())?.replace(/,/g, "")) === 2 * Number(fourDraws.replace(/,/g, "")) && (await sp.getByTestId("draw-planner").innerText()).includes("To start"));
+await shot(sp, "61-draw-planner.png", false);
+await stall.close();
+
 // cold load of every route in a fresh browser, as the seat that owns it: catches hydration mismatches that
 // client-side navigation hides
 const routes = [["/", null], ["/calculators", null], ["/start", null], ["/resources", null], ["/admin/apply", SEATS.borrower], ["/admin/borrower", SEATS.borrower], ["/admin/borrower/d2", SEATS.borrower], ["/admin", SEATS.staff], ["/admin/deals/d1", SEATS.staff], ["/admin/reports", SEATS.staff], ["/admin/errors", SEATS.staff], ["/admin/letters", SEATS.staff], ["/admin/brokers", SEATS.staff], ["/admin/tax", SEATS.staff], ["/verify/demo", null], ["/login/forgot", null], ["/login/signup", null], ["/admin/capital", SEATS.staff], ["/admin/loan-sales", SEATS.staff], ["/admin/draws", SEATS.staff], ["/admin/servicing", SEATS.staff], ["/admin/storms", SEATS.staff], ["/admin/audit", SEATS.staff], ["/admin/account/notifications", SEATS.staff], ["/admin/borrower/d18", SEATS.borrower], ["/admin/broker", SEATS.broker], ["/admin/broker/new", SEATS.broker], ["/admin/broker/deals/d3", SEATS.broker], ["/admin/members", SEATS.staff], ["/admin/buyer", SEATS.buyer], ["/admin/buyer/loans/s-d10", SEATS.buyer], ["/admin/buyer/portfolio", SEATS.buyer], ["/admin/partner", SEATS.partner], ["/admin/partner/teasers/d3", SEATS.partner]];

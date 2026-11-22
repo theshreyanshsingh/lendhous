@@ -98,7 +98,7 @@ describe("a loan modification", () => {
     const told = alertsFor(b, after, action).find((alert) => alert.to === "borrower")!;
     expect(told).toMatchObject({ event: "modification.signed" });
     expect(told.body).toMatch(/Your next payment is \$[\d,]+\.\d\d, due November 1, 2026/);
-    expect(workQueue(after, { id: "" }, new Date("2026-10-31T15:00:00Z")).team.filter((item) => item.deal?.id === "d13" && /past due|promise|modification|notice/i.test(item.label))).toEqual([]);
+    expect(workQueue(after, { id: "" }, new Date("2026-10-31T15:00:00Z")).team.filter((item) => item.deal?.id === "d13" && !item.key.startsWith("stopnotice") && /past due|promise|modification|notice/i.test(item.label))).toEqual([]);
   });
 
   it("can waive the late fees instead, and leaves payments owed that it didn't add", () => {

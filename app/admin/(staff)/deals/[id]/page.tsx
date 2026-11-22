@@ -68,6 +68,9 @@ import { demoApproves, LateAsks } from "@/components/loan/LateAsks";
 import { termLines, termsHeld } from "@/lib/term-changes";
 import { askNeeds, askProblem, teamAskedLine } from "@/lib/late-asks";
 import { slips, timesWord } from "@/lib/closing-moves";
+import { AdvanceStops } from "@/components/loan/AdvanceStops";
+import { ProjectPace } from "@/components/loan/ProjectPace";
+import { SurveyFollowUp } from "@/components/loan/SurveyFollowUp";
 
 // Closing starts once the term sheet is accepted, and stays as the record of how the money went out.
 const CLOSING_TAB = ["term_sheet_accepted", "conditions", "clear_to_close", "closing", "funded", "servicing_current", "servicing_delinquent", "matured", "default", "paid_off"];
@@ -338,12 +341,15 @@ export default function DealWorkspace() {
       {tab === "Servicing" && d.status === "reo" && <div className="space-y-4"><ForeclosurePanel deal={d} /><ReoOccupancyCard deal={d} /><CollectionsPanel deal={d} /></div>}
       {tab === "Servicing" && SERVICED.includes(d.status) && d.properties?.length ? <ReleaseProperty deal={d} /> : null}
       {tab === "Servicing" && SERVICED.includes(d.status) && <BudgetControls deal={d} side="team" />}
+      {tab === "Servicing" && <ProjectPace deal={d} side="team" />}
+      {tab === "Servicing" && <AdvanceStops deal={d} />}
       {tab === "Servicing" && (SERVICED.includes(d.status) || d.status === "paid_off" || d.status === "reo") && <InvestorUpdates deal={d} />}
       {tab === "Servicing" && SERVICED.includes(d.status) && <InsurancePanel deal={d} />}
       {tab === "Servicing" && SERVICED.includes(d.status) && <PropertyTaxes deal={d} />}
       {tab === "Servicing" && SERVICED.includes(d.status) && <ExitPlanCard deal={d} side="team" />}
       {tab === "Servicing" && (SERVICED.includes(d.status) || d.status === "paid_off" || d.status === "reo") && <TeamLoanStatements deal={d} />}
 
+      {tab === "Messages" && <SurveyFollowUp deal={d} />}
       {tab === "Messages" && (
         <div className="grid gap-4 lg:grid-cols-2">
           <LoanMessages dealId={d.id} side="team" hint="Nothing yet. The borrower and their broker see this thread." />

@@ -16,7 +16,7 @@ import { clockOf, floridaTime } from "@/lib/sla";
 import type { Deal, DrawPayee, DrawRequest } from "@/lib/mockData";
 import { PAYEES, payeeWords } from "@/lib/draw-payee";
 import { attachmentSummary } from "@/lib/draw-attachments";
-import { unreleasedHolds } from "@/lib/lien-law";
+import { releaseHolds } from "@/lib/stop-advance";
 import { ofacBlocker } from "@/lib/ofac";
 import { useStore } from "@/lib/store";
 import { useServiceDay } from "@/components/loan/use-service-day";
@@ -75,7 +75,7 @@ function DrawCard({ draw, deal }: { draw: DrawRequest; deal: Deal }) {
   // No money goes out to people not screened against the sanctions list in the last few days.
   const sanctions = draw.status === "approved" && today ? ofacBlocker(deal, today) : null;
   // Nor before Florida's lien law and the insurance are satisfied, unless an owner released it past them.
-  const holds = draw.status === "approved" && today ? unreleasedHolds(deal, draw, today) : [];
+  const holds = draw.status === "approved" && today ? releaseHolds(deal, draw, today) : [];
   // On a phone a draw is its summary and its buttons; the lines, photos and lien waivers open on a tap. One waiting on
   // the inspection's numbers starts open, since they're typed in its lines.
   const [details, setDetails] = useState(draw.status === "inspecting" || (draw.path === "desk" && draw.status === "submitted"));
