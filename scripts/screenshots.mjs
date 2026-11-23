@@ -141,6 +141,11 @@ ok("an empty calculator input shows an error instead of a number", (await page.g
 // The loan quote: the deal first and its indicative terms straight away, with no contact details and nothing kept;
 // saving the terms asks who's asking and sends the request, with its ARV, comps and photo.
 await page.goto(BASE + "/start");
+// QA retest, 2026-11-23: an empty try names every missing field and outlines each, not only the first.
+await page.getByTestId("quote-see-terms").click();
+const emptyProblems = await page.getByTestId("quote-problems").locator("li").allInnerTexts().catch(() => []);
+const outlined = await page.getByTestId("quote-form").evaluate((form) => form.querySelectorAll("input:invalid, select:invalid").length);
+ok(`an empty quote lists every missing field (${emptyProblems.length}) and outlines them (${outlined})`, emptyProblems.length >= 9 && emptyProblems.some((line) => line.includes("citizenship")) && emptyProblems.some((line) => line.includes("ZIP")) && emptyProblems.some((line) => line.includes("date")) && outlined >= 8 && !emptyProblems.join(" ").match(/invalid|expected/i));
 await page.getByTestId("quote-citizen").selectOption("us");
 await page.getByTestId("quote-credit").selectOption("720-759");
 await page.getByTestId("quote-experience").selectOption("3-4");

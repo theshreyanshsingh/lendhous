@@ -1169,6 +1169,23 @@ body:has(.site) {
   font-size: 12.5px;
 }
 
+.site .form-error-list {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  list-style: disc;
+}
+
+.site .form-error-list li {
+  margin: 2px 0;
+  color: #a8382b;
+}
+
+/* After a try to see or save the terms, every required field still empty is outlined until it's filled. */
+.site .quote-form.tried :is(input, select, textarea):invalid {
+  border-color: #a8382b;
+  box-shadow: inset 0 0 0 1px #a8382b;
+}
+
 .site .sent-panel {
   grid-column: 1 / -1;
   width: 100%;

@@ -13,6 +13,7 @@ const DEFAULTS: Omit<PlatformSettings, "updatedAt"> = {
   lenderPhone: "",
   contactEmail: "",
   nmlsId: "",
+  licenseText: "",
   slaTargets: null,
   paymentInstructions: "",
   referralBonusCents: 0,

@@ -338,6 +338,8 @@ model PlatformSettings {
   // its Contact and Disclosures pages (lib/site-contact.ts). Blank shows nothing.
   contactEmail                  String   @default("")
   nmlsId                        String   @default("")
+  // What the Disclosures page says about LendHous's licenses, in the attorney's words (shown with the NMLS ID, if any).
+  licenseText                   String   @default("")
   // How long things may wait, in hours, by kind (lib/sla.ts). Unset uses the PLACEHOLDER targets there.
   slaTargets                    Json?
   // How borrowers pay: LendHous's own receiving instructions, shown on funded loans and statements. Blank says to call.

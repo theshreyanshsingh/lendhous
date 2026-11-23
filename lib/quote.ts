@@ -96,6 +96,30 @@ export function quoteProblem(raw: unknown): { quote: Quote } | { error: string }
   return parsed.success ? { quote: parsed.data } : { error: problemWords(parsed.error.issues[0]) };
 }
 
+/** Everything a quote fails on, each said once, in the order the form asks: for the visitor to fix in one go. */
+export function quoteProblems(raw: unknown): string[] {
+  const parsed = quoteSchema.safeParse(raw);
+  return parsed.success ? [] : [...new Set([...parsed.error.issues.map(problemWords), ...laterChecks(raw)])];
+}
+
+/** Everything the deal alone fails on, the same way. */
+export function dealProblems(raw: unknown): string[] {
+  const parsed = dealSchema.safeParse(raw);
+  return parsed.success ? [] : [...new Set([...parsed.error.issues.map(problemWords), ...laterChecks(raw)])];
+}
+
+// The checks that need the whole deal (the ARV on a rehab loan, the rent on a rental) only run once every field parses,
+// so on a first try with blanks they're asked here too, from what was typed.
+function laterChecks(raw: unknown): string[] {
+  if (!raw || typeof raw !== "object") return [];
+  const deal = raw as { loanType?: unknown };
+  if (typeof deal.loanType !== "string" || !(deal.loanType in LOAN_TYPES)) return [];
+  const found: string[] = [];
+  const context = { addIssue: (issue: { message?: string }) => { if (issue.message) found.push(issue.message); } } as unknown as z.RefinementCtx;
+  dealChecks(raw as Parameters<typeof dealChecks>[0], context);
+  return found;
+}
+
 /** What the deal alone fails on, before the visitor's terms can be shown. */
 export function dealProblem(raw: unknown): { deal: QuoteDeal } | { error: string } {
   const parsed = dealSchema.safeParse(raw);

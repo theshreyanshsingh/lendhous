@@ -1,9 +1,9 @@
 import { getSettings } from "@/lib/settings";
 
 /** LendHous's public contact details and NMLS ID, as an owner set them in Settings. Blank ones aren't shown. */
-export type SiteContact = { phone: string; email: string; address: string; nmlsId: string };
+export type SiteContact = { phone: string; email: string; address: string; nmlsId: string; license: string };
 
-export const NO_CONTACT: SiteContact = { phone: "", email: "", address: "", nmlsId: "" };
+export const NO_CONTACT: SiteContact = { phone: "", email: "", address: "", nmlsId: "", license: "" };
 
 /**
  * The details the public site shows in its footer and on its Contact and Disclosures pages. A page never fails for want
@@ -18,12 +18,13 @@ export async function siteContact(): Promise<SiteContact> {
   }
 }
 
-export function contactFrom(settings: { lenderPhone?: string | null; contactEmail?: string | null; lenderAddress?: string | null; nmlsId?: string | null }): SiteContact {
+export function contactFrom(settings: { lenderPhone?: string | null; contactEmail?: string | null; lenderAddress?: string | null; nmlsId?: string | null; licenseText?: string | null }): SiteContact {
   return {
     phone: (settings.lenderPhone ?? "").trim(),
     email: (settings.contactEmail ?? "").trim(),
     address: (settings.lenderAddress ?? "").trim(),
     nmlsId: (settings.nmlsId ?? "").replace(/\D/g, ""),
+    license: (settings.licenseText ?? "").trim(),
   };
 }
 

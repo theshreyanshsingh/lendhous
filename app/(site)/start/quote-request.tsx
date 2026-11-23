@@ -10,7 +10,7 @@ import type { PricingConfig } from "@/lib/pricing-config";
 import { quoteBuyDowns } from "@/lib/buy-down";
 import { ratePercent } from "@/lib/format";
 import { evaluate } from "@/lib/engine";
-import { cashToCloseParts, CITIZENSHIP_LABEL, CREDIT_LABEL, dealProblem, EXITS, EXPERIENCE_LABEL, indicativeTerms, LOAN_TYPES, PRICED, PROPERTY_TYPES, PURPOSES, quoteApplication, quoteProblem, quoteSummary, type LoanType, type Quote, type QuoteDeal } from "@/lib/quote";
+import { cashToCloseParts, CITIZENSHIP_LABEL, CREDIT_LABEL, dealProblem, dealProblems, EXITS, EXPERIENCE_LABEL, indicativeTerms, LOAN_TYPES, PRICED, PROPERTY_TYPES, PURPOSES, quoteApplication, quoteProblem, quoteProblems, quoteSummary, type LoanType, type Quote, type QuoteDeal } from "@/lib/quote";
 import { embedChannel, type QuoteStep } from "@/lib/quote-funnel";
 import { closingTaxes } from "@/lib/florida-taxes";
 
@@ -49,6 +49,10 @@ export function QuoteRequest({ pricing, signupOpen = false, referral, embed }: {
   const channel = embed ? embedChannel(embed.site) : "site";
   const [draft, setDraft] = useState<Draft>(blank);
   const [error, setError] = useState("");
+  // Every problem with the form at once, after a try to see or save the terms; it also marks the empty required fields.
+  const [problems, setProblems] = useState<string[]>([]);
+  const [tried, setTried] = useState(false);
+  const fail = (all: string[]) => { setTried(true); setProblems(all); setError(all[0] ?? "Check the details marked with *."); };
   const [shown, setShown] = useState<QuoteDeal | null>(null);
   const [sending, setSending] = useState<false | "quote" | string>(false);
   const [sent, setSent] = useState<Quote | null>(null);
@@ -75,8 +79,9 @@ export function QuoteRequest({ pricing, signupOpen = false, referral, embed }: {
 
   function seeTerms() {
     setError("");
+    setProblems([]);
     const checked = dealProblem(toDeal(draft));
-    if ("error" in checked) return setError(checked.error);
+    if ("error" in checked) return fail(dealProblems(toDeal(draft)));
     count("started");
     count("shown");
     setShown(checked.deal);
@@ -86,9 +91,10 @@ export function QuoteRequest({ pricing, signupOpen = false, referral, embed }: {
   async function submit(event: FormEvent) {
     event.preventDefault();
     setError("");
+    setProblems([]);
     if (!shown) return seeTerms();
     const checked = quoteProblem(toQuote(draft));
-    if ("error" in checked) return setError(checked.error);
+    if ("error" in checked) return fail(quoteProblems(toQuote(draft)));
     setSending("quote");
     const reply: { sent: boolean; error: string; photoKey?: string } = await sendQuote(checked.quote, honeypot, referral?.code, channel).catch(() => ({ sent: false, error: "We couldn't send this just now. Please try again in a few minutes." }));
     if (!reply.sent) { setSending(false); return setError(reply.error); }
@@ -121,7 +127,7 @@ export function QuoteRequest({ pricing, signupOpen = false, referral, embed }: {
   );
 
   return (
-    <form className="quote-form" onSubmit={submit} data-testid="quote-form" noValidate>
+    <form className={`quote-form${tried ? " tried" : ""}`} onSubmit={submit} data-testid="quote-form" noValidate>
       {referral && <p className="panel quote-small" data-testid="quote-referral">Referred by <b>{referral.name}</b>{referral.kind === "borrower" ? ", a LendHous borrower." : ". They'll be kept up to date on this request."}</p>}
 
       {/* The kind of loan comes first: it decides what the rest of the form asks. */}
@@ -192,7 +198,7 @@ export function QuoteRequest({ pricing, signupOpen = false, referral, embed }: {
       {/* On a phone this rides at the foot of the screen through every step, under the thumb. */}
       {!shown && (
         <div className="quote-go">
-          {error && <Arrive className="form-error"><span role="alert" data-testid="quote-error">{error}</span></Arrive>}
+          {error && <Arrive className="form-error"><FormProblems error={error} problems={problems} /></Arrive>}
           <p className="quote-small">No name, email or phone needed to see your terms. Nothing is sent until you save them.</p>
           <button className="button quote-submit" type="button" data-testid="quote-see-terms" onClick={seeTerms}>See my terms →</button>
         </div>
@@ -239,7 +245,7 @@ export function QuoteRequest({ pricing, signupOpen = false, referral, embed }: {
           <p className="quote-small">This isn&apos;t an application and doesn&apos;t pull credit. Don&apos;t enter a Social Security number or account details here.</p>
           {/* Once the terms show, saving them rides at the foot of a phone's screen, with any problem just above it. */}
           <div className="quote-go">
-            {error && <Arrive className="form-error"><span role="alert" data-testid="quote-error">{error}</span></Arrive>}
+            {error && <Arrive className="form-error"><FormProblems error={error} problems={problems} /></Arrive>}
             <button className="button quote-submit" type="submit" data-testid="quote-submit" disabled={Boolean(sending)}>{sending === "quote" ? "Saving…" : sending ? sending : "Save my terms →"}</button>
           </div>
         </>
@@ -346,5 +352,16 @@ function QuoteSent({ quote, pricing, photos, signupOpen, embed }: { quote: Quote
         </div>
       </div>
     </Arrive>
+  );
+}
+
+/** The form's problem: one said plainly, or several as a list, so a visitor can fix them all in one go. */
+function FormProblems({ error, problems }: { error: string; problems: string[] }) {
+  if (problems.length < 2) return <span role="alert" data-testid="quote-error">{error}</span>;
+  return (
+    <div role="alert" data-testid="quote-error">
+      <p>{problems.length} things to fill in, marked in red:</p>
+      <ul className="form-error-list" data-testid="quote-problems">{problems.map((problem) => <li key={problem}>{problem}</li>)}</ul>
+    </div>
   );
 }

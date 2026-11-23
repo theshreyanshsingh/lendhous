@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
 import { canonicalUrl } from "@/lib/canonical-url";
-import { dealProblem, quoteProblem } from "@/lib/quote";
+import { dealProblem, dealProblems, quoteProblem, quoteProblems } from "@/lib/quote";
 import { contactFrom, nmlsLookup, telHref } from "@/lib/site-contact";
 import { middleware } from "@/middleware";
 
@@ -72,6 +72,24 @@ describe("the quote form's messages", () => {
     const quote = quoteProblem({ submitter: "borrower", borrower: { firstName: "", lastName: "", email: "", phone: "" }, ...empty });
     expect("error" in quote && quote.error).not.toMatch(/invalid|expected|received|option/i);
   });
+  it("lists every missing field on an empty form, once each and in the form's order", () => {
+    const empty = { citizenship: "", creditBand: "", experience: "", address: { street: "", city: "", state: "", zip: "", county: "" }, propertyType: "sfr", loanType: "fix_flip", purpose: "purchase", purchasePrice: 0, rehab: 0, fundingDate: "", comps: [], exit: "sell", notes: "" };
+    const all = dealProblems(empty);
+    expect(all).toEqual([
+      "Choose the borrower's citizenship.", "Choose the borrower's credit score range.", "Choose how many projects the borrower has done.",
+      "Add the property's street address.", "Add the property's city.", "Add the property's state as two letters.", "Add the property's 5-digit ZIP.",
+      "Add the purchase price or current value.", "Pick the date you'd like to fund.", "Add the after-repair value (ARV).",
+    ]);
+    // A rental asks for its rent on the first try too.
+    expect(dealProblems({ ...empty, loanType: "dscr" })).toContain("Add the monthly rent.");
+    const quote = quoteProblems({ submitter: "borrower", borrower: { firstName: "", lastName: "", email: "", phone: "" }, ...empty });
+    expect(quote).toContain("Add the borrower's first name.");
+    expect(quote).toContain("Add an email address we can reach.");
+    expect(new Set(quote).size).toBe(quote.length);
+    const good = { ...empty, citizenship: "us", creditBand: "720-759", experience: "3-4", address: { street: "12 Palm Way", city: "Miami", state: "FL", zip: "33101", county: "" }, purchasePrice: 300000, fundingDate: "2026-12-15" };
+    expect(dealProblems(good)).toEqual(["Add the after-repair value (ARV)."]);
+    expect(dealProblems({ ...good, loanType: "bridge" })).toEqual([]);
+  });
   it("has plain words for every field the form can get wrong", () => {
     const fields: [string, unknown][] = [["creditBand", "x"], ["experience", "x"], ["propertyType", "x"], ["loanType", "x"], ["purpose", "x"], ["exit", "x"], ["notes", "x".repeat(2000)], ["comps", [{ address: "", price: 0, soldOn: "" }]], ["beds", -1], ["rehab", -5]];
     const good = { citizenship: "us", creditBand: "720-759", experience: "3-4", address: { street: "12 Palm Way", city: "Miami", state: "FL", zip: "33101", county: "Miami-Dade" }, propertyType: "sfr", loanType: "bridge", purpose: "purchase", purchasePrice: 300000, rehab: 0, fundingDate: "2026-12-15", comps: [], exit: "sell", notes: "" };
@@ -85,10 +103,11 @@ describe("the quote form's messages", () => {
 
 describe("LendHous's public contact details", () => {
   it("shows only what an owner set, and an NMLS ID's digits", () => {
-    expect(contactFrom({ lenderPhone: " (305) 555-0100 ", contactEmail: "hello@lendhous.com", lenderAddress: "1 Main St\nMiami, FL 33101", nmlsId: "NMLS #12 345" })).toEqual({ phone: "(305) 555-0100", email: "hello@lendhous.com", address: "1 Main St\nMiami, FL 33101", nmlsId: "12345" });
+    expect(contactFrom({ lenderPhone: " (305) 555-0100 ", contactEmail: "hello@lendhous.com", lenderAddress: "1 Main St\nMiami, FL 33101", nmlsId: "NMLS #12 345" })).toEqual({ phone: "(305) 555-0100", email: "hello@lendhous.com", address: "1 Main St\nMiami, FL 33101", nmlsId: "12345", license: "" });
     // A settings record saved before these fields existed.
-    expect(contactFrom({})).toEqual({ phone: "", email: "", address: "", nmlsId: "" });
-    expect(contactFrom({ contactEmail: null, nmlsId: null })).toEqual({ phone: "", email: "", address: "", nmlsId: "" });
+    expect(contactFrom({})).toEqual({ phone: "", email: "", address: "", nmlsId: "", license: "" });
+    expect(contactFrom({ contactEmail: null, nmlsId: null, licenseText: null })).toEqual({ phone: "", email: "", address: "", nmlsId: "", license: "" });
+    expect(contactFrom({ licenseText: "  Florida license XYZ.  " }).license).toBe("Florida license XYZ.");
   });
   it("links a phone and an NMLS ID", () => {
     expect(telHref("(305) 555-0100")).toBe("tel:3055550100");

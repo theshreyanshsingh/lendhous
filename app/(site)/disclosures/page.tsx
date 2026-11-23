@@ -26,9 +26,9 @@ export default async function Disclosures() {
           <p>The calculators are for illustration. Their inputs are assumptions you choose, not advertised rates or loan terms, and their results leave out costs unless a field includes them. They don&apos;t decide eligibility or promise a return: loan documents, appraisals and underwriting decide the actual numbers.</p>
 
           <h2>Licensing</h2>
-          {contact.nmlsId
-            ? <p data-testid="disclosures-nmls">LendHous LLC&apos;s NMLS ID is {contact.nmlsId}. You can look it up on <a href={nmlsLookup(contact.nmlsId)} rel="noopener noreferrer" target="_blank">NMLS Consumer Access</a>.</p>
-            : <p data-testid="disclosures-licensing">LendHous LLC makes business-purpose loans on investment property across Florida.</p>}
+          {contact.nmlsId && <p data-testid="disclosures-nmls">LendHous LLC&apos;s NMLS ID is {contact.nmlsId}. You can look it up on <a href={nmlsLookup(contact.nmlsId)} rel="noopener noreferrer" target="_blank">NMLS Consumer Access</a>.</p>}
+          {contact.license && <p data-testid="disclosures-license" style={{ whiteSpace: "pre-line" }}>{contact.license}</p>}
+          {!contact.nmlsId && !contact.license && <p data-testid="disclosures-licensing">LendHous LLC makes business-purpose loans on investment property across Florida.</p>}
 
           <h2>Your information</h2>
           <p>How LendHous collects, uses, shares and protects what you give it is in the <Link href="/privacy">privacy policy</Link>. Using this site is covered by the <Link href="/terms">terms of use</Link>.</p>

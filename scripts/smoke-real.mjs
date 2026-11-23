@@ -1221,6 +1221,7 @@ try {
   await owner.getByTestId("setting-phone").fill("(954) 555-0100");
   await owner.getByTestId("setting-contact-email").fill("Hello@LendHous.test");
   await owner.getByTestId("setting-nmls").fill("NMLS 1234567");
+  await owner.getByTestId("setting-license-text").fill("SMOKE licensing statement from the attorney.");
   await owner.getByRole("button", { name: "Save settings" }).click();
   await owner.waitForURL("**notice=settings_saved*");
   // The website shows them as soon as they're saved, to anyone.
@@ -1228,7 +1229,7 @@ try {
   await siteVisitor.goto(BASE + "/contact", { waitUntil: "networkidle" });
   ok("the Contact page shows LendHous's phone, email and address from Settings", (await siteVisitor.getByTestId("contact-phone").innerText()) === "(954) 555-0100" && (await siteVisitor.getByTestId("contact-email").innerText()) === "hello@lendhous.test" && (await siteVisitor.getByTestId("contact-address").innerText()).includes("100 Smoke Test Way"));
   await siteVisitor.goto(BASE + "/disclosures", { waitUntil: "networkidle" });
-  ok("the footer and the Disclosures page show the NMLS ID once it's saved", (await siteVisitor.getByTestId("footer-nmls").innerText()) === "NMLS ID 1234567" && (await siteVisitor.getByTestId("disclosures-nmls").innerText()).includes("1234567") && (await siteVisitor.getByTestId("footer-phone").innerText()) === "(954) 555-0100");
+  ok("the footer and the Disclosures page show the NMLS ID once it's saved", (await siteVisitor.getByTestId("footer-nmls").innerText()) === "NMLS ID 1234567" && (await siteVisitor.getByTestId("disclosures-nmls").innerText()).includes("1234567") && (await siteVisitor.getByTestId("disclosures-license").innerText()) === "SMOKE licensing statement from the attorney." && (await siteVisitor.getByTestId("footer-phone").innerText()) === "(954) 555-0100");
   await siteVisitor.context().close();
   await go(owner, leadDeal);
   await owner.getByTestId("close-application").click();
