@@ -21,6 +21,7 @@ export function SiteMobileMenu() {
         <Link href="/calculators">Calculators</Link>
         <Link href="/rates">Rates and leverage</Link>
         <Link href="/rewards">Borrower rewards</Link>
+        <Link href="/contact">Contact</Link>
         <Link href="/login" data-testid="mobile-portal-login">Portal login</Link>
       </div>
     </>

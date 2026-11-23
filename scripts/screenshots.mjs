@@ -87,10 +87,25 @@ await page.goto(BASE + "/admin");
 ok("a signed-out visitor is sent to sign-in", page.url().includes("/login?next=%2Fadmin"));
 
 // The public site: every page opens without an account, and Portal login leads to sign-in
-const publicRoutes = ["/", "/programs", "/rates", "/rewards", "/book", "/florida", "/florida/broward", "/programs/fix-flip", "/programs/dscr", "/programs/bridge", "/programs/construction", "/programs/portfolio", "/about", "/resources", "/resources/first-investment", "/resources/leverage", "/resources/dscr-explained", "/resources/draws", "/resources/interest-only", "/calculators", "/start", "/disclosures"];
+const publicRoutes = ["/", "/programs", "/rates", "/rewards", "/book", "/florida", "/florida/broward", "/programs/fix-flip", "/programs/dscr", "/programs/bridge", "/programs/construction", "/programs/portfolio", "/about", "/resources", "/resources/first-investment", "/resources/leverage", "/resources/dscr-explained", "/resources/draws", "/resources/interest-only", "/calculators", "/start", "/contact", "/disclosures", "/privacy", "/terms"];
 const statuses = await Promise.all(publicRoutes.map(async (r) => [r, (await fetch(BASE + r, { redirect: "manual" })).status]));
 const broken = statuses.filter(([, status]) => status !== 200);
 ok(`all ${publicRoutes.length} public pages open without an account${broken.length ? ` (${broken.join("; ")})` : ""}`, broken.length === 0);
+{
+  // The QA retest of 2026-11-23: legal pages, no internal notes, contact, and plain words on an empty quote.
+  const text = async (route) => (await (await fetch(BASE + route)).text()).replace(/<[^>]+>/g, " ");
+  const disclosures = await text("/disclosures");
+  ok("the Disclosures page has no internal notes", !/company-supplied|must be supplied|not enabled in this version|public lending launch/i.test(disclosures) && disclosures.includes("Business-purpose loans only") && disclosures.includes("Licensing"));
+  const privacy = await text("/privacy");
+  ok("the privacy policy is public and says what's collected and shared", privacy.includes("What we collect") && privacy.includes("Who we share it with") && /don.{1,6}t sell your personal information/.test(privacy));
+  ok("the terms of use are public", (await text("/terms")).includes("Nothing here is a commitment to lend"));
+  const home = await text("/");
+  const pages = await Promise.all(["/", "/about", "/rates", "/privacy"].map(async (route) => (await fetch(BASE + route)).text()));
+  ok("every page's footer links Privacy, Terms, Disclosures and Contact", pages.every((html) => ["/privacy", "/terms", "/disclosures", "/contact"].every((href) => html.includes(`href="${href}"`))));
+  ok("the homepage footnotes read as disclosures, not notes", !home.includes("supplied by LendHous") && home.includes("Program maximums"));
+  const plain = await fetch(BASE + "/", { headers: { "cf-visitor": '{"scheme":"http"}' }, redirect: "manual" });
+  ok("a local server with an http address never redirects, so the https rule can't loop here", plain.status === 200);
+}
 ok("an unknown program page is a 404", (await fetch(BASE + "/programs/nope")).status === 404);
 
 await page.goto(BASE + "/");

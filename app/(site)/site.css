@@ -1091,7 +1091,7 @@ body:has(.site) {
 
 .site .footer-nav {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 28px;
   padding-bottom: 30px;
 }
@@ -1112,6 +1112,26 @@ body:has(.site) {
 }
 
 .site .footer-nav a:hover {
+  color: var(--ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.site .footer-address {
+  padding: 4px 0;
+  color: var(--label);
+  font-size: 12.5px;
+  font-style: normal;
+  white-space: pre-line;
+}
+
+.site .footer-legal {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+
+.site .footer-legal a:hover {
   color: var(--ink);
   text-decoration: underline;
   text-underline-offset: 3px;
@@ -1554,4 +1574,25 @@ body:has(.site) {
 /* A standalone text link ("View loan programs", "+ Add a comp") is a full thumb's height on a phone. */
 @media (max-width: 700px) {
   .site .text-link { min-height: 44px; }
+}
+
+/* The Contact page: the ways to reach the team, then LendHous's own details from Settings. */
+.site .contact-ways { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; min-width: 0; }
+.site .contact-way { position: relative; display: grid; align-content: start; gap: 8px; min-height: 150px; padding: 24px 24px 48px; border: 1px solid var(--rule); background: #fff; color: var(--body); transition: border-color .2s, background-color .2s; }
+.site .contact-way b { color: var(--ink); font-family: var(--serif); font-size: 20px; font-weight: 400; }
+.site .contact-way span { font-size: 13.5px; line-height: 1.55; }
+.site .contact-way svg { position: absolute; left: 24px; bottom: 20px; color: var(--ink); transition: transform .2s; }
+.site .contact-way:hover { border-color: var(--sage); background: var(--wash); }
+.site .contact-way:hover svg { transform: translateX(4px); }
+.site .contact-way:focus-visible { outline: 2px solid var(--sage); outline-offset: 2px; }
+.site .contact-details { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px 18px; margin: 16px 0 20px; font-size: 14px; }
+.site .contact-details dt { color: var(--label); font-size: 11px; letter-spacing: 1.2px; text-transform: uppercase; padding-top: 3px; }
+.site .contact-details dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
+.site .contact-details address { font-style: normal; white-space: pre-line; }
+@media (max-width: 1100px) {
+  .site .footer-nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 700px) {
+  .site .contact-ways { grid-template-columns: 1fr; }
+  .site .contact-way { min-height: 0; }
 }

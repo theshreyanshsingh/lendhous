@@ -334,6 +334,10 @@ model PlatformSettings {
   // The lender's mailing address and phone, printed on notices that need them (Reg B adverse action notices).
   lenderAddress                 String   @default("")
   lenderPhone                   String   @default("")
+  // The public site's contact email and LendHous's NMLS ID, shown with the address and phone in the site's footer and on
+  // its Contact and Disclosures pages (lib/site-contact.ts). Blank shows nothing.
+  contactEmail                  String   @default("")
+  nmlsId                        String   @default("")
   // How long things may wait, in hours, by kind (lib/sla.ts). Unset uses the PLACEHOLDER targets there.
   slaTargets                    Json?
   // How borrowers pay: LendHous's own receiving instructions, shown on funded loans and statements. Blank says to call.

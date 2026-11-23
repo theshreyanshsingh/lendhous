@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { SiteMobileMenu } from "@/components/site-mobile-menu";
 import { PROGRAMS } from "@/lib/site-content";
+import { NO_CONTACT, telHref, type SiteContact } from "@/lib/site-contact";
 
 /** The public site's header. Portal login leads to the sign-in page, which opens the signed-in panel under /admin. */
 export function SiteHeader() {
@@ -23,7 +24,8 @@ export function SiteHeader() {
   );
 }
 
-export function SiteFooter() {
+/** The site's footer. `contact` is what an owner set in Settings (lib/site-contact.ts); blank details aren't shown. */
+export function SiteFooter({ contact = NO_CONTACT }: { contact?: SiteContact }) {
   return (
     <footer>
       <div className="footer-top">
@@ -52,11 +54,22 @@ export function SiteFooter() {
           <Link href="/payoff">Request a payoff letter</Link>
           <Link href="/login">Portal login</Link>
         </div>
+        <div data-testid="footer-contact">
+          <h3>CONTACT</h3>
+          {contact.phone && <a href={telHref(contact.phone)} data-testid="footer-phone">{contact.phone}</a>}
+          {contact.email && <a href={`mailto:${contact.email}`} data-testid="footer-email">{contact.email}</a>}
+          {contact.address && <address className="footer-address" data-testid="footer-address">{contact.address}</address>}
+          <Link href="/contact">Contact us</Link>
+        </div>
       </nav>
       <div className="footer-links">
-        <span>© {new Date().getFullYear()} LendHous LLC</span>
-        <Link href="/disclosures">Disclosures &amp; privacy</Link>
-        <Link href="/login">Client &amp; team portals</Link>
+        <span>© {new Date().getFullYear()} LendHous LLC{contact.nmlsId && <> · <span data-testid="footer-nmls">NMLS ID {contact.nmlsId}</span></>}</span>
+        <nav className="footer-legal" aria-label="Legal">
+          <Link href="/privacy">Privacy</Link>
+          <Link href="/terms">Terms of use</Link>
+          <Link href="/disclosures">Disclosures &amp; licensing</Link>
+          <Link href="/login">Client &amp; team portals</Link>
+        </nav>
       </div>
       <p className="fine">Business-purpose investment property financing. All financing is subject to underwriting, eligibility, property review, and final approval. Program availability and terms vary. This website is not a commitment to lend.</p>
     </footer>

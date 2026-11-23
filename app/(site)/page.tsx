@@ -123,8 +123,8 @@ export default function Landing() {
       </section>
 
       <section className="footnotes">
-        <p>¹ Maximum leverage figures supplied by LendHous. Availability depends on the program, borrower, property, and underwriting; maximums may not apply together.</p>
-        <p>² Collective funding experience supplied by LendHous; does not represent funding solely originated by LendHous LLC.</p>
+        <p>¹ Program maximums. Not every borrower, property or program qualifies, and both maximums may not apply to the same loan. Every loan is subject to underwriting. See our <Link href="/disclosures">disclosures</Link>.</p>
+        <p>² The combined funding experience of the LendHous team. It isn&apos;t loan volume originated by LendHous LLC alone.</p>
       </section>
     </main>
   );

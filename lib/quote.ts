@@ -102,15 +102,27 @@ export function dealProblem(raw: unknown): { deal: QuoteDeal } | { error: string
   return parsed.success ? { deal: parsed.data } : { error: problemWords(parsed.error.issues[0]) };
 }
 
-function problemWords(issue: z.ZodIssue) {
-  const where = issue.path.join(".");
-  const said: Record<string, string> = {
-    "borrower.firstName": "Add the borrower's first name.", "borrower.lastName": "Add the borrower's last name.", "borrower.email": "Add an email address we can reach.",
-    "broker.email": "Add your email address.", "broker.phone": "Add a phone number we can reach you on.", "broker.name": "Add your name.",
-    "address.street": "Add the property's street address.", "address.city": "Add the property's city.", "address.state": "Add the property's state as two letters.", "address.zip": "Add the property's 5-digit ZIP.",
-    purchasePrice: "Add the purchase price or current value.", fundingDate: "Pick the date you'd like to fund.",
-  };
-  return said[where] ?? issue.message ?? "Check the highlighted details.";
+// What each field's problem is called on the form. Every field the visitor can leave blank or get wrong is here, so a
+// visitor never sees the checker's own wording (an empty form once showed "Invalid option: expected one of …").
+const FIELD_PROBLEMS: Record<string, string> = {
+  "borrower.firstName": "Add the borrower's first name.", "borrower.lastName": "Add the borrower's last name.", "borrower.email": "Add an email address we can reach.", "borrower.phone": "Add a phone number we can reach you on.",
+  "broker.email": "Add your email address.", "broker.phone": "Add a phone number we can reach you on.", "broker.name": "Add your name.", "broker.company": "Shorten the company name.", broker: "Add your broker details.",
+  "address.street": "Add the property's street address.", "address.city": "Add the property's city.", "address.state": "Add the property's state as two letters.", "address.zip": "Add the property's 5-digit ZIP.", "address.county": "Shorten the county name.", address: "Add the property's address.",
+  submitter: "Choose whether you're the borrower or a broker.",
+  citizenship: "Choose the borrower's citizenship.", creditBand: "Choose the borrower's credit score range.", experience: "Choose how many projects the borrower has done.",
+  propertyType: "Choose the property type.", loanType: "Choose a loan type.", purpose: "Choose whether it's a purchase or a refinance.",
+  purchasePrice: "Add the purchase price or current value.", rehab: "Check the rehab budget.", arv: "Check the after-repair value (ARV).", requestedAmount: "Check the loan amount you're asking for.",
+  monthlyRent: "Check the monthly rent.", rentalType: "Choose long-term or short-term rental.", strAnnualIncome: "Check the yearly income from short-term stays.", strIncomeSource: "Choose where the short-term income figure comes from.",
+  buyDownPoints: "Choose the rate again.", beds: "Check the number of bedrooms.", baths: "Check the number of bathrooms.", sqft: "Check the square footage.",
+  fundingDate: "Pick the date you'd like to fund.", comps: "Check the comparable sales: each needs an address, a price and the month it sold.", exit: "Choose how you plan to repay the loan.", notes: "Shorten the notes to 1,500 characters.",
+};
+
+/** One problem, said for a person. A check written for this form says its own words; any other uses the field's line. */
+export function problemWords(issue: z.ZodIssue) {
+  const path = issue.path.map(String);
+  const where = path.join(".");
+  if (issue.code === "custom" && issue.message) return issue.message;
+  return FIELD_PROBLEMS[where] ?? FIELD_PROBLEMS[path.slice(0, 2).join(".")] ?? FIELD_PROBLEMS[path[0] ?? ""] ?? "Check the details marked with *.";
 }
 
 /** The quote as the engine sees it, or null for a loan type it doesn't price. */

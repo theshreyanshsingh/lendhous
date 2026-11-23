@@ -25,6 +25,9 @@ export async function saveSettings(formData: FormData) {
     retentionYears: clamp(formData.get("retentionYears"), 1, 30, before.retentionYears),
     lenderAddress: String(formData.get("lenderAddress") ?? before.lenderAddress).trim().slice(0, 300),
     lenderPhone: String(formData.get("lenderPhone") ?? before.lenderPhone).trim().slice(0, 40),
+    // Shown on the public site, so only a plain address and an NMLS ID's digits are kept.
+    contactEmail: (() => { const email = String(formData.get("contactEmail") ?? before.contactEmail).trim().toLowerCase().slice(0, 200); return /^[^\s@<>"]+@[^\s@<>"]+\.[a-z]{2,}$/.test(email) ? email : ""; })(),
+    nmlsId: String(formData.get("nmlsId") ?? before.nmlsId).replace(/\D/g, "").slice(0, 12),
     paymentInstructions: String(formData.get("paymentInstructions") ?? before.paymentInstructions).trim().slice(0, 1500),
     // Whole dollars, up to $5,000; blank or 0 turns the referral program off.
     // Only an https link is kept: it's put in front of borrowers.
@@ -44,7 +47,9 @@ export async function saveSettings(formData: FormData) {
   };
   await prisma.platformSettings.upsert({ where: { id: "default" }, create: { id: "default", ...data }, update: data });
   resetSettingsCache();
-  await audit({ actorId: actor.id, action: "settings.updated", entityType: "PlatformSettings", entityId: "default", before: { offerSampleData: before.offerSampleData, allowSignup: before.allowSignup, staffIdleMinutes: before.staffIdleMinutes, retentionYears: before.retentionYears, lenderAddress: before.lenderAddress, lenderPhone: before.lenderPhone, slaTargets: before.slaTargets, paymentInstructions: before.paymentInstructions, referralBonusCents: before.referralBonusCents, reviewUrl: before.reviewUrl, allowCallBooking: before.allowCallBooking, lateFeesToInvestors: before.lateFeesToInvestors, nfipAuthorizedThrough: before.nfipAuthorizedThrough, drawFeeInspectionCents: before.drawFeeInspectionCents, drawFeeDeskCents: before.drawFeeDeskCents, titleCheckDraws: before.titleCheckDraws, titleCheckMinDrawCents: before.titleCheckMinDrawCents, permitHoldDraws: before.permitHoldDraws }, after: data });
+  await audit({ actorId: actor.id, action: "settings.updated", entityType: "PlatformSettings", entityId: "default", before: { offerSampleData: before.offerSampleData, allowSignup: before.allowSignup, staffIdleMinutes: before.staffIdleMinutes, retentionYears: before.retentionYears, lenderAddress: before.lenderAddress, lenderPhone: before.lenderPhone, contactEmail: before.contactEmail, nmlsId: before.nmlsId, slaTargets: before.slaTargets, paymentInstructions: before.paymentInstructions, referralBonusCents: before.referralBonusCents, reviewUrl: before.reviewUrl, allowCallBooking: before.allowCallBooking, lateFeesToInvestors: before.lateFeesToInvestors, nfipAuthorizedThrough: before.nfipAuthorizedThrough, drawFeeInspectionCents: before.drawFeeInspectionCents, drawFeeDeskCents: before.drawFeeDeskCents, titleCheckDraws: before.titleCheckDraws, titleCheckMinDrawCents: before.titleCheckMinDrawCents, permitHoldDraws: before.permitHoldDraws }, after: data });
   revalidatePath("/admin", "layout");
+  // The public site shows the contact details and NMLS ID.
+  revalidatePath("/", "layout");
   redirect("/admin/settings?notice=settings_saved");
 }

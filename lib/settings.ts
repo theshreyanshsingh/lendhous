@@ -11,6 +11,8 @@ const DEFAULTS: Omit<PlatformSettings, "updatedAt"> = {
   dualApprovalDistributionCents: 25_000_000,
   lenderAddress: "",
   lenderPhone: "",
+  contactEmail: "",
+  nmlsId: "",
   slaTargets: null,
   paymentInstructions: "",
   referralBonusCents: 0,
