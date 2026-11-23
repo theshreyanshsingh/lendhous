@@ -4,6 +4,7 @@ import { Section } from "@/components/ui";
 import { AGENT_LABEL, agentProblem, agentsMissing, shouldAskAgents, type AgentInput, type AgentRole } from "@/lib/borrower-docs";
 import type { Deal } from "@/lib/mockData";
 import { useStore } from "@/lib/store";
+import { AgentLinkButton } from "./InsuranceLinkPanel";
 
 const ROLES: AgentRole[] = ["title", "insurance"];
 const blank = (): AgentInput => ({ name: "", company: "", email: "", phone: "" });
@@ -53,6 +54,7 @@ export function YourAgents({ deal }: { deal: Deal }) {
                     <p>{[saved.name, saved.company].filter(Boolean).join(", ")}</p>
                     <p className="text-xs text-muted-foreground">{[saved.email, saved.phone].filter(Boolean).join(" · ")}</p>
                     <button type="button" className="mt-1 min-h-9 text-xs text-link underline underline-offset-2" onClick={() => setEditing(role)}>Change</button>
+                    {role === "insurance" && <AgentLinkButton deal={deal} />}
                   </div>
                 ) : editing !== role ? (
                   // Nothing on file: one button, not four empty boxes.

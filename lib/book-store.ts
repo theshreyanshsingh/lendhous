@@ -14,7 +14,7 @@ import { BASE_VERSION } from "@/lib/pricing-versions";
 import { applyRules, rulesFrom } from "@/lib/settings-rules";
 import { getSettings } from "@/lib/settings";
 
-const LISTS = ["deals", "bids", "partners", "buyers", "brokers", "sales", "offers", "draws", "payoffs", "messages", "sources", "photoRequests", "conditionLibrary", "storms", "away"] as const;
+const LISTS = ["deals", "bids", "partners", "buyers", "brokers", "sales", "offers", "draws", "payoffs", "messages", "sources", "photoRequests", "conditionLibrary", "storms", "away", "savedReplies", "pipelineViews"] as const;
 const AUDIT_ID = "activity:feed";
 const VERSION_ID = "main";
 /** Tries at a change that clashes with another process, and at reading the book when the database drops a read. */

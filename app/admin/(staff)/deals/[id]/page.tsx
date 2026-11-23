@@ -30,6 +30,8 @@ import { TermSheetBuilder } from "@/components/loan/TermSheetBuilder";
 import { ConditionsPanel } from "@/components/loan/ConditionsPanel";
 import { LienProtection } from "@/components/loan/LienProtection";
 import { InsurancePanel } from "@/components/loan/InsurancePanel";
+import { InsuranceLinkPanel } from "@/components/loan/InsuranceLinkPanel";
+import { AppraisalPanel } from "@/components/loan/Appraisal";
 import { BudgetControls } from "@/components/loan/BudgetControls";
 import { InvestorUpdates } from "@/components/loan/InvestorUpdates";
 import { RiskChecks } from "@/components/loan/RiskChecks";
@@ -334,9 +336,9 @@ export default function DealWorkspace() {
       )}
 
       {tab === "Term sheet" && <TermSheetBuilder deal={d} />}
-      {tab === "Conditions" && <ConditionsPanel deal={d} />}
+      {tab === "Conditions" && <div className="space-y-4"><AppraisalPanel deal={d} /><ConditionsPanel deal={d} /></div>}
       {tab === "Credit review" && <div className="space-y-4"><ApplicationRecord deal={d} /><ApplicationOnFile deal={d} /><OfacPanel deal={d} /><Sb264Panel deal={d} /><CreditReview deal={d} /></div>}
-      {tab === "Closing" && <div className="space-y-4"><ClosingPanel deal={d} /><SettlementCheck deal={d} />{INSURED.includes(d.status) && <InsurancePanel deal={d} />}{(d.app.product === "fix_flip" || d.app.product === "ground_up" || d.lienFile) && <LienProtection deal={d} />}{d.scope?.length ? <PermitsPanel deal={d} /> : null}<OfacPanel deal={d} /></div>}
+      {tab === "Closing" && <div className="space-y-4"><ClosingPanel deal={d} /><SettlementCheck deal={d} />{INSURED.includes(d.status) && <InsurancePanel deal={d} />}{INSURED.includes(d.status) && <InsuranceLinkPanel deal={d} />}{(d.app.product === "fix_flip" || d.app.product === "ground_up" || d.lienFile) && <LienProtection deal={d} />}{d.scope?.length ? <PermitsPanel deal={d} /> : null}<OfacPanel deal={d} /></div>}
       {tab === "Servicing" && (SERVICED.includes(d.status) || d.status === "paid_off") && <LoanLedger deal={d} />}
       {tab === "Servicing" && d.status === "reo" && <div className="space-y-4"><ForeclosurePanel deal={d} /><ReoOccupancyCard deal={d} /><CollectionsPanel deal={d} /></div>}
       {tab === "Servicing" && SERVICED.includes(d.status) && d.properties?.length ? <ReleaseProperty deal={d} /> : null}
@@ -345,6 +347,7 @@ export default function DealWorkspace() {
       {tab === "Servicing" && <AdvanceStops deal={d} />}
       {tab === "Servicing" && (SERVICED.includes(d.status) || d.status === "paid_off" || d.status === "reo") && <InvestorUpdates deal={d} />}
       {tab === "Servicing" && SERVICED.includes(d.status) && <InsurancePanel deal={d} />}
+      {tab === "Servicing" && SERVICED.includes(d.status) && <InsuranceLinkPanel deal={d} />}
       {tab === "Servicing" && SERVICED.includes(d.status) && <PropertyTaxes deal={d} />}
       {tab === "Servicing" && SERVICED.includes(d.status) && <ExitPlanCard deal={d} side="team" />}
       {tab === "Servicing" && (SERVICED.includes(d.status) || d.status === "paid_off" || d.status === "reo") && <TeamLoanStatements deal={d} />}

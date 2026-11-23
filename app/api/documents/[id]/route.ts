@@ -32,6 +32,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     const book = (await readBook()).book;
     const filedOn = book.deals.filter((deal) => deal.id !== document.ownerId && deal.docs.some((doc) => doc.documentId === document.id)).map((deal) => deal.id);
     if (![document.ownerId, ...filedOn].some((dealId) => canOpenFile(book, user, dealId, allowed))) return refused();
+    // A team note's file is the team's; a message's file is for the people on the thread, not the loan's partners or buyers.
+    if (document.documentType === "note_file" && view !== "admin") return refused();
+    if (document.documentType === "message_file" && (view === "partner" || view === "buyer")) return refused();
     if (view === "partner" || view === "buyer") holderFirm = (view === "partner" ? book.partners : book.buyers).find((firm) => firm.id === firmOf(user))?.name ?? "";
   }
   const shown = new URL(request.url).searchParams.get("view");

@@ -2102,9 +2102,91 @@ ok("the borrower plans their draws: fewer draws, more cash out at a time", Boole
 await shot(sp, "61-draw-planner.png", false);
 await stall.close();
 
+// The appraisal tracker, the insurance agent's link, saved replies, files on messages and saved pipeline views
+// (docs/feature-ideas-2026-11-22.md, ranks 7, 9 and 13).
+const tools = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+const tp = await tools.newPage();
+tp.on("pageerror", (error) => errors.push(`tools: ${error.message}`));
+const toolSeat = async (email) => { await tools.clearCookies(); if (sessions[email]) await tools.addCookies(sessions[email]); else await signIn(tp, email); };
+await toolSeat(SEATS.staff);
+await tp.goto(BASE + "/admin/deals/d8?tab=Conditions");
+ok("before anyone pays for an appraisal, the team sees the loan checks out", await seen(tp.getByTestId("appraisal-checks")) && (await tp.getByTestId("appraisal-checks").innerText()).includes("accepted the term sheet") && (await tp.getByTestId("appraisal-keep").innerText()).includes("stays at"));
+await tp.getByTestId("appraisal-firm").fill("Sample Appraisal Group (FAKE)");
+await tp.getByTestId("appraisal-fee").fill("650");
+await tp.getByTestId("order-appraisal").click();
+ok("and orders it, with the day the report is expected", await seen(tp.getByTestId("appraisal-steps")) && (await tp.getByTestId("appraisal-report").innerText()).includes("expected by"));
+await tp.getByTestId("appraisal-dates").click();
+await tp.getByTestId("appraisal-visit").fill("2026-11-03");
+await tp.getByTestId("save-appraisal-dates").click();
+ok("the appraiser's visit goes on the loan", await seen(tp.getByTestId("appraisal-steps").getByText("The appraiser's visit is set for Nov 3, 2026.")));
+await tp.goto(BASE + "/admin/deals/d8?tab=Closing");
+ok("a binder from the insurance agent's link shows what doesn't check out", await seen(tp.getByTestId("insurance-renewal")) && (await tp.getByTestId("renewal-checks").innerText()).includes("missing the loan number") && await seen(tp.getByTestId("insurance-link-preview")));
+await tp.goto(BASE + "/admin/deals/d3?tab=Messages");
+await tp.getByTestId("saved-reply").selectOption("reply-demo-closing");
+ok("a saved reply writes itself out for the loan", (await tp.getByTestId("message-text").inputValue()).startsWith("Hi Jordan, we're on track to close LH-DEMO-1003"));
+await tp.getByTestId("message-file").setInputFiles({ name: "Closing checklist.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 fake") });
+ok("a file can go with a message", await seen(tp.getByTestId("attached-file").filter({ hasText: "Closing checklist.pdf" })));
+await tp.getByTestId("send-message").click();
+ok("and arrives with it", await seen(tp.getByTestId("loan-messages").getByTestId("message-files").filter({ hasText: "Closing checklist.pdf" })));
+await tp.getByTestId("message-text").fill("Hi {first name}, your wire instructions only ever come by phone.");
+await tp.getByTestId("save-as-reply").click();
+await tp.getByTestId("reply-title").fill("Wire warning");
+await tp.getByTestId("save-reply").click();
+ok("and what's typed can be saved as a reply for the team", (await tp.getByTestId("saved-reply").locator("option").allInnerTexts()).includes("Wire warning"));
+await tp.goto(BASE + "/admin/deals/d3?tab=Conditions");
+ok("a report under plan shows what the loan can be at those values", await seen(tp.getByTestId("appraisal-outcome")) && (await tp.getByTestId("appraisal-outcome").innerText()).includes("came in under"));
+await tp.goto(BASE + "/admin");
+await tp.getByTestId("pipeline-stage").selectOption("conditions");
+await tp.getByTestId("save-pipeline-view").click();
+await tp.getByTestId("pipeline-view-name").fill("In conditions");
+await tp.getByTestId("confirm-pipeline-view").click();
+ok("a pipeline view can be saved", await seen(tp.locator("[data-testid='pipeline-view'][aria-pressed='true']").filter({ hasText: "In conditions" })));
+await tp.getByTestId("pipeline-stage").selectOption("all");
+await tp.getByTestId("pipeline-view").filter({ hasText: "In conditions" }).click();
+ok("and one tap puts its filters back", (await tp.getByTestId("pipeline-stage").inputValue()) === "conditions");
+await toolSeat(SEATS.borrower);
+await tp.goto(BASE + "/admin/borrower/d4");
+if (await seen(tp.getByTestId("agents-prompt"))) await tp.getByTestId("agents-prompt-later").click();
+ok("before it's ordered, the borrower sees when an appraisal can be reused and what value keeps the loan", await seen(tp.getByTestId("reuse-policy")) && (await tp.getByTestId("appraisal-keep").innerText()).includes("Your loan stays at"));
+await tp.goto(BASE + "/admin/borrower/d3");
+// d3 has no agents on file yet, so the borrower is asked for them first: not now.
+if (await seen(tp.getByTestId("agents-prompt"))) await tp.getByTestId("agents-prompt-later").click();
+ok("the borrower follows the appraisal step by step", await seen(tp.getByTestId("appraisal-tracker")) && (await tp.getByTestId("appraisal-report").innerText()).includes("came in Oct 29, 2026") && await seen(tp.getByTestId("appraisal-move")));
+await tp.getByTestId("ask-value-review").click();
+await tp.getByTestId("review-reason").fill("Two renovated sales on the same block are missing.");
+await tp.getByTestId("sale-address").first().fill("40 Sample Biscayne Way");
+await tp.getByTestId("sale-price").first().fill("2310000");
+await tp.getByTestId("sale-on").first().fill("2026-09-15");
+await tp.getByTestId("send-value-review").click();
+ok("and can ask for a second look at a low value, with sales", await seen(tp.getByTestId("value-review").filter({ hasText: "40 Sample Biscayne Way" })));
+await tp.getByTestId("appraisal-tracker").scrollIntoViewIfNeeded();
+await shot(tp, "62-appraisal.png", false);
+await tp.goto(BASE + "/admin/borrower/d8");
+ok("the borrower can send their insurance agent the secure page", await seen(tp.getByTestId("agent-link-card")));
+await tp.goto(BASE + "/insurance/demo");
+ok("the agent's page shows the clause to use and the cover the loan needs", await seen(tp.getByTestId("insurance-clause-text")) && (await tp.getByTestId("insurance-need-flood").innerText()).includes("Needed"));
+await tp.getByTestId("agent-carrier").fill("Sample Coastal Insurance");
+await tp.getByTestId("agent-policy").fill("HO-2026-0201");
+await tp.getByTestId("agent-coverage").fill("300000");
+await tp.getByTestId("agent-effective").fill("2026-11-10");
+await tp.getByTestId("agent-expires").fill("2027-11-10");
+await tp.getByTestId("agent-wind-no").check();
+await tp.getByTestId("agent-insured").fill("Sample Flips LLC (FAKE)");
+await tp.getByTestId("agent-clause").fill("LendHous ISAOA");
+ok("and checks the policy as the agent types", await seen(tp.getByTestId("agent-checks")) && (await tp.getByTestId("agent-check-fail").allInnerTexts()).join(" ").includes("ATIMA") && (await tp.getByTestId("agent-check-fail").allInnerTexts()).join(" ").includes("Leaves out wind"));
+await tp.getByTestId("agent-clause").fill(await tp.getByTestId("insurance-clause-text").innerText());
+await tp.getByTestId("agent-wind-yes").check();
+ok("a policy that's right passes every check", (await tp.getByTestId("agent-check-fail").count()) === 0 && (await tp.getByTestId("agent-check-ok").count()) >= 5);
+await tp.getByTestId("agent-file").setInputFiles({ name: "Binder.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 fake") });
+await tp.getByTestId("agent-send").click();
+ok("and the agent sees what they sent and where the cover stands", await seen(tp.getByTestId("agent-sent")) && await seen(tp.getByTestId("agent-sent-item")) && (await tp.getByTestId("insurance-need-property").innerText()).includes("Sent"));
+ok("then the form moves on to the next policy needed", (await tp.getByTestId("agent-kind").inputValue()) === "flood" && (await tp.getByTestId("agent-file").inputValue()) === "");
+await shot(tp, "62-insurance-agent.png");
+await tools.close();
+
 // cold load of every route in a fresh browser, as the seat that owns it: catches hydration mismatches that
 // client-side navigation hides
-const routes = [["/", null], ["/calculators", null], ["/start", null], ["/resources", null], ["/admin/apply", SEATS.borrower], ["/admin/borrower", SEATS.borrower], ["/admin/borrower/d2", SEATS.borrower], ["/admin", SEATS.staff], ["/admin/deals/d1", SEATS.staff], ["/admin/reports", SEATS.staff], ["/admin/errors", SEATS.staff], ["/admin/letters", SEATS.staff], ["/admin/brokers", SEATS.staff], ["/admin/tax", SEATS.staff], ["/verify/demo", null], ["/login/forgot", null], ["/login/signup", null], ["/admin/capital", SEATS.staff], ["/admin/loan-sales", SEATS.staff], ["/admin/draws", SEATS.staff], ["/admin/servicing", SEATS.staff], ["/admin/storms", SEATS.staff], ["/admin/audit", SEATS.staff], ["/admin/account/notifications", SEATS.staff], ["/admin/borrower/d18", SEATS.borrower], ["/admin/broker", SEATS.broker], ["/admin/broker/new", SEATS.broker], ["/admin/broker/deals/d3", SEATS.broker], ["/admin/members", SEATS.staff], ["/admin/buyer", SEATS.buyer], ["/admin/buyer/loans/s-d10", SEATS.buyer], ["/admin/buyer/portfolio", SEATS.buyer], ["/admin/partner", SEATS.partner], ["/admin/partner/teasers/d3", SEATS.partner]];
+const routes = [["/", null], ["/calculators", null], ["/start", null], ["/resources", null], ["/admin/apply", SEATS.borrower], ["/admin/borrower", SEATS.borrower], ["/admin/borrower/d2", SEATS.borrower], ["/admin", SEATS.staff], ["/admin/deals/d1", SEATS.staff], ["/admin/reports", SEATS.staff], ["/admin/errors", SEATS.staff], ["/admin/letters", SEATS.staff], ["/admin/brokers", SEATS.staff], ["/admin/tax", SEATS.staff], ["/verify/demo", null], ["/insurance/demo", null], ["/login/forgot", null], ["/login/signup", null], ["/admin/capital", SEATS.staff], ["/admin/loan-sales", SEATS.staff], ["/admin/draws", SEATS.staff], ["/admin/servicing", SEATS.staff], ["/admin/storms", SEATS.staff], ["/admin/audit", SEATS.staff], ["/admin/account/notifications", SEATS.staff], ["/admin/borrower/d18", SEATS.borrower], ["/admin/broker", SEATS.broker], ["/admin/broker/new", SEATS.broker], ["/admin/broker/deals/d3", SEATS.broker], ["/admin/members", SEATS.staff], ["/admin/buyer", SEATS.buyer], ["/admin/buyer/loans/s-d10", SEATS.buyer], ["/admin/buyer/portfolio", SEATS.buyer], ["/admin/partner", SEATS.partner], ["/admin/partner/teasers/d3", SEATS.partner]];
 for (const [r, seat] of routes) {
   const c = await browser.newContext(); if (seat) await c.addCookies(sessions[seat]); const p = await c.newPage(); const errs = [];
   p.on("pageerror", (e) => errs.push(e.message)); p.on("console", (msg) => { if (msg.type() === "error") errs.push(msg.text()); });

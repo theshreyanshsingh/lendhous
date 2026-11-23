@@ -7,7 +7,7 @@ import { daysInStage, STUCK_DAYS } from "@/lib/reports";
 import { initialsOf, isMine } from "@/lib/loan-team";
 import { closureReason, isClosedApplication, PRE_FUNDING } from "@/lib/loan-exits";
 import { daysBetween, SERVICED } from "@/lib/servicing";
-import type { Deal } from "@/lib/mockData";
+import type { Deal, LoanStatus } from "@/lib/mockData";
 import { downloadCsv } from "@/lib/csv";
 import { useStore, est } from "@/lib/store";
 import { pipelineStages } from "@/lib/mockData";
@@ -15,6 +15,8 @@ import { PageIntro } from "@/components/page-intro";
 import { WorkQueue } from "@/components/WorkQueue";
 import { PipelineBoard } from "@/components/PipelineBoard";
 import { Badge, GradeBadge, ColorDot, usd, pct, k, productLabel, statusLabel, capTone } from "@/components/ui";
+import { Reveal } from "@/components/motion";
+import { sameFilters, viewProblem, type PipelineFilters, type PipelineView } from "@/lib/staff-tools";
 
 const TEAM_VIEW = "lendhous-pipeline-team";
 const LAYOUT = "lendhous-pipeline-layout";
@@ -30,6 +32,35 @@ function dueText(due: string, today: string) {
   return { text: left < 0 ? `${-left} day${left === -1 ? "" : "s"} late` : left === 0 ? "due today" : `${left} day${left === 1 ? "" : "s"} left`, urgent: left <= 2 };
 }
 
+/** A person's saved pipeline views (lib/staff-tools.ts): one tap sets every filter; the one matching now is marked. */
+function SavedViews({ filters, onApply }: { filters: PipelineFilters; onApply: (view: PipelineView) => void }) {
+  const { s, dispatch, viewer } = useStore();
+  const mine = (s.pipelineViews ?? []).filter((item) => item.ownerId === viewer.id);
+  const active = mine.find((item) => sameFilters(item.filters, filters));
+  const [naming, setNaming] = useState(false);
+  const [name, setName] = useState("");
+  const draft = { viewId: `view${Date.now().toString(36)}`, name, ownerId: viewer.id };
+  const refused = viewProblem(s.pipelineViews ?? [], draft);
+  return (
+    <div className="border-b border-border px-3 py-2" data-testid="pipeline-views">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="text-xs text-muted-foreground">My views</span>
+        {mine.map((item) => <button key={item.id} type="button" aria-pressed={item === active} data-testid="pipeline-view" className={`${item === active ? "btn-primary" : "btn-ghost"} h-9! px-3! text-xs!`} onClick={() => onApply(item)}>{item.name}</button>)}
+        {!active && !naming && <button type="button" className="min-h-9 px-1 text-xs text-link underline underline-offset-2" data-testid="save-pipeline-view" onClick={() => { setName(""); setNaming(true); }}>+ Save these filters</button>}
+        {active && <button type="button" className="min-h-9 px-1 text-xs text-link underline underline-offset-2" data-testid="delete-pipeline-view" onClick={() => void dispatch({ t: "deletePipelineView", viewId: active.id, ownerId: viewer.id })}>Delete &ldquo;{active.name}&rdquo;</button>}
+      </div>
+      <Reveal open={naming && !active}>
+        <div className="mt-2 flex flex-wrap items-end gap-2">
+          <label className="block min-w-0 flex-1 basis-48 sm:max-w-xs"><span className="label">Name the view</span><input className="desk-input" data-testid="pipeline-view-name" maxLength={60} placeholder="My DSCR loans in conditions" value={name} onChange={(event) => setName(event.target.value)} /></label>
+          <button type="button" className="btn-primary h-10! px-3! text-xs!" data-testid="confirm-pipeline-view" disabled={Boolean(refused)} onClick={async () => { if (await dispatch({ t: "savePipelineView", ...draft, filters })) setNaming(false); }}>Save view</button>
+          <button type="button" className="btn-ghost h-10! px-3! text-xs!" onClick={() => setNaming(false)}>Cancel</button>
+        </div>
+        {refused && name && <p className="mt-1 text-xs text-warn">{refused}</p>}
+      </Reveal>
+    </div>
+  );
+}
+
 export default function Pipeline() {
   const { s, newLeads, viewer } = useStore();
   const attention = attentionItems(s, newLeads);
@@ -37,7 +68,9 @@ export default function Pipeline() {
   const [today, setToday] = useState("");
   useEffect(() => { setToday(serviceDay(s)); }, [s]);
   const inStage = (deal: (typeof s.deals)[number]) => (today ? daysInStage(deal, today) : deal.daysInStage);
-  const [product, setProduct] = useState("all"); const [q, setQ] = useState(""); const [view, setView] = useState<View>("pipeline");
+  const [product, setProduct] = useState<PipelineFilters["product"]>("all"); const [q, setQ] = useState(""); const [view, setView] = useState<View>("pipeline");
+  // One stage, whatever the list above says; "Any stage" keeps to the list.
+  const [stage, setStage] = useState<"all" | LoanStatus>("all");
   // Whose loans: everyone's, or the last choice made in this browser; Needs attention can send you to the unassigned ones.
   const [team, setTeam] = useState<"all" | "mine" | "unassigned">("all");
   useEffect(() => {
@@ -55,7 +88,9 @@ export default function Pipeline() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   useEffect(() => { try { if (localStorage.getItem(LAYOUT) === "board") setLayout("board"); } catch {} }, []);
   const chooseLayout = (next: typeof layout) => { setLayout(next); try { localStorage.setItem(LAYOUT, next); } catch {} };
-  const rows = useMemo(() => s.deals.map((d) => ({ d, e: est(d.app) })).filter(({ d }) => inView(d, view) && (product === "all" || d.app.product === product) && (q === "" || (d.borrowerName + d.address + d.loanNumber).toLowerCase().includes(q.toLowerCase())) && (team === "all" || (team === "mine" ? isMine(d, viewer) : !d.team?.officer))), [s.deals, product, q, view, team, viewer]);
+  const filters: PipelineFilters = { q, product, team, view, stage, layout };
+  const applyView = (saved: PipelineView) => { setQ(saved.filters.q); setProduct(saved.filters.product); chooseTeam(saved.filters.team); setView(saved.filters.view); setStage(saved.filters.stage); chooseLayout(saved.filters.layout); };
+  const rows = useMemo(() => s.deals.map((d) => ({ d, e: est(d.app) })).filter(({ d }) => (stage === "all" ? inView(d, view) : d.status === stage) && (product === "all" || d.app.product === product) && (q === "" || (d.borrowerName + d.address + d.loanNumber).toLowerCase().includes(q.toLowerCase())) && (team === "all" || (team === "mine" ? isMine(d, viewer) : !d.team?.officer))), [s.deals, product, q, view, stage, team, viewer]);
   const pre = s.deals.filter((d) => !["servicing_current", "servicing_delinquent", "paid_off", "funded", "matured", "default", "declined", "withdrawn"].includes(d.status));
   const counts = pipelineStages.slice(0, 9).map((st) => ({ ...st, n: s.deals.filter((d) => d.status === st.code).length, amt: s.deals.filter((d) => d.status === st.code).reduce((a, d) => a + est(d.app).noteAmount, 0) }));
   const headline = "min-w-0 glass px-3 py-2";
@@ -88,11 +123,13 @@ export default function Pipeline() {
       </div>
       <div className="glass overflow-hidden">
         <button type="button" className="flex w-full items-center justify-between border-b border-border px-3 py-3 text-sm sm:hidden" aria-expanded={filtersOpen} data-testid="filters-toggle" onClick={() => setFiltersOpen(!filtersOpen)}><span className="font-medium">Search and filters</span><span className="text-xs text-muted-foreground">{rows.length} loan{rows.length === 1 ? "" : "s"} · {filtersOpen ? "Hide" : "Show"}</span></button>
+        <div className={filtersOpen ? "" : "max-sm:hidden"}><SavedViews filters={filters} onApply={applyView} /></div>
         <div className={`flex-wrap gap-2 border-b border-border p-3 ${filtersOpen ? "flex" : "hidden sm:flex"}`}>
           <input className="desk-input w-full sm:w-56" type="search" aria-label="Search the pipeline" placeholder="Search borrower, address, loan #" value={q} onChange={(e) => setQ(e.target.value)} />
-          <select className="desk-input w-full sm:w-auto" aria-label="Which product" value={product} onChange={(e) => setProduct(e.target.value)}><option value="all">All products</option>{Object.entries(productLabel).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+          <select className="desk-input w-full sm:w-auto" aria-label="Which product" value={product} onChange={(e) => setProduct(e.target.value as PipelineFilters["product"])}><option value="all">All products</option>{Object.entries(productLabel).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
           <select className="desk-input w-full sm:w-auto" data-testid="pipeline-team" aria-label="Whose loans" value={team} onChange={(e) => chooseTeam(e.target.value as typeof team)}><option value="all">Everyone&apos;s loans</option><option value="mine">My loans</option><option value="unassigned">No loan officer</option></select>
           <select className="desk-input w-full sm:w-auto" data-testid="pipeline-ended" aria-label="Which loans" value={view} onChange={(e) => setView(e.target.value as View)}>{(Object.keys(VIEWS) as View[]).map((key) => <option key={key} value={key}>{VIEWS[key]} ({s.deals.filter((d) => inView(d, key)).length})</option>)}</select>
+          <select className="desk-input w-full sm:w-auto" data-testid="pipeline-stage" aria-label="Which stage" value={stage} onChange={(e) => setStage(e.target.value as typeof stage)}><option value="all">Any stage</option>{pipelineStages.map((item) => <option key={item.code} value={item.code}>{item.label} ({s.deals.filter((d) => d.status === item.code).length})</option>)}</select>
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground sm:ml-auto"><span className="flex items-center gap-1"><ColorDot color="green" /> within limit</span><span className="flex items-center gap-1"><ColorDot color="yellow" /> within 2.5 pts</span><span className="flex items-center gap-1"><ColorDot color="red" /> over limit</span></div>
           <div className="flex w-full gap-1 sm:w-auto" role="group" aria-label="Show as">
             {(["list", "board"] as const).map((option) => <button key={option} type="button" aria-pressed={layout === option} data-testid={`layout-${option}`} className={`${layout === option ? "btn-primary" : "btn-ghost"} h-10! flex-1 px-3! text-xs! sm:flex-none`} onClick={() => chooseLayout(option)}>{option === "list" ? "List" : "Board"}</button>)}

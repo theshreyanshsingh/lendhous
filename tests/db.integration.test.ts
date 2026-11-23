@@ -684,6 +684,56 @@ describe("the title company's link", () => {
   });
 });
 
+describe("the insurance agent's link", () => {
+  it("takes a policy with its checks and file, lands it for the team with the binder, and stops when turned off", async () => {
+    const store = await import("@/lib/book-store");
+    const { demoBook } = await import("@/lib/book");
+    const { sealJson } = await import("@/lib/crypto");
+    const links = await import("@/lib/insurance-links");
+    const { clauseFor } = await import("@/lib/insurance-agent");
+    const route = await import("@/app/api/insurance-links/[token]/route");
+    const staff = { id: "staff-i", name: "Ivy Insurance", roleCodes: ["ADMIN_OWNER" as const] };
+    const done = await store.runAction(staff, { t: "submitApp", app: demoBook().deals.find((deal) => deal.id === "d8")!.app, address: "600 Policy Way", city: "Hollywood", zip: "33020", entityName: "Agent Test LLC", exitStrategy: "Sell", client: { name: "Ari Agenttest" } }, { trusted: true });
+    if ("error" in done) throw new Error(done.error);
+    const created = done.after.deals[0];
+    const dealId = created.id;
+    await prisma.bookRecord.update({ where: { id: `deals:${dealId}` }, data: { data: sealJson({ ...created, status: "conditions", closingDate: "2027-01-15" }, store.rowContext(`deals:${dealId}`)) } });
+    const expiresAt = new Date(Date.now() + 30 * 86_400_000).toISOString();
+    const opened = await store.runAction(staff, { t: "openInsuranceLink", dealId, sentTo: "Dana Agent", email: "dana@agent.test", sentBy: "Ivy at LendHous", expiresAt }, { trusted: true });
+    if ("error" in opened) throw new Error(opened.error);
+    const token = new URL(await links.createInsuranceLink(dealId, expiresAt), "http://x").pathname.split("/").pop()!;
+    expect((await prisma.insuranceLink.findUniqueOrThrow({ where: { dealId } })).tokenHash).not.toContain(token);
+    const link = await links.openInsuranceLink(token);
+    expect(link).toMatchObject({ state: "open", view: { insured: "Agent Test LLC", loanNumber: created.loanNumber } });
+    expect(JSON.stringify(link!.view)).not.toMatch(/Ari Agenttest|sponsor|creditReview/);
+
+    const send = (fields: Record<string, string>, file = true) => {
+      const form = new FormData();
+      for (const [key, value] of Object.entries({ kind: "hazard", carrier: "Sample Coastal", policy: "HO-9", effectiveOn: "2027-01-15", expiresOn: "2028-01-15", coverage: "400000", windIncluded: "yes", namedInsured: "Agent Test, L.L.C.", clause: clauseFor(created.loanNumber), ...fields })) form.set(key, value);
+      if (file) form.set("file", new File([Buffer.from("%PDF-1.4 binder")], "binder.pdf", { type: "application/pdf" }));
+      return route.POST(new Request(`http://x/api/insurance-links/${token}`, { method: "POST", body: form }), { params: Promise.resolve({ token }) });
+    };
+    expect((await send({}, false)).status).toBe(400);
+    expect((await send({ clause: "" })).status).toBe(400);
+    const sent = await send({});
+    expect(sent.status).toBe(200);
+    const body = (await sent.json()) as { view: { sent: { status: string; checks: { ok: boolean }[] }[]; needs: { key: string; state: string }[] } };
+    expect(body.view.sent[0]).toMatchObject({ status: "submitted" });
+    expect(body.view.sent[0].checks.every((item) => item.ok)).toBe(true);
+    expect(body.view.needs.find((need) => need.key === "property")?.state).toBe("sent");
+    const stored = (await store.readBook()).book.deals.find((deal) => deal.id === dealId)!;
+    const renewal = stored.insurance!.renewals![0];
+    expect(renewal).toMatchObject({ via: "agent", by: "Dana Agent (insurance agent)", coverage: 400_000, windIncluded: true });
+    expect(stored.docs.find((doc) => doc.id === "insurance")).toMatchObject({ status: "uploaded", documentId: renewal.documentId });
+    expect(await prisma.document.findUniqueOrThrow({ where: { id: renewal.documentId! } })).toMatchObject({ ownerId: dealId, documentType: "insurance_agent" });
+
+    await store.runAction(staff, { t: "turnOffInsuranceLink", dealId }, { trusted: true });
+    await links.deleteInsuranceLink(dealId);
+    expect(await links.openInsuranceLink(token)).toBeNull();
+    expect((await send({})).status).toBe(404);
+  });
+});
+
 describe("the borrower application link", () => {
   it("prefills from a quote, saves as the borrower goes, and signing starts the loan with private details sealed", async () => {
     const { createApplicationLink, openApplicationLink, signedApplication } = await import("@/lib/application-links");

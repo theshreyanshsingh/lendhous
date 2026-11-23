@@ -39,7 +39,10 @@ export function attentionItems(s: Book, newLeads: number): AttentionItem[] {
   const heldFirms = [...s.partners, ...s.buyers].filter(firmHeld).length;
   const heldBrokers = s.brokers.filter(firmHeld).length;
   const lapsed = s.deals.filter((deal) => insuranceLapsed(deal, today));
-  const renewals = s.deals.filter((deal) => openRenewals(deal).length);
+  // Renewals the borrower sent, and policies from their insurance agent's link (lib/insurance-agent.ts), counted apart.
+  const ofKind = (deal: (typeof s.deals)[number], agent: boolean) => openRenewals(deal).filter((item) => (item.via === "agent") === agent);
+  const renewals = s.deals.filter((deal) => ofKind(deal, false).length);
+  const fromAgents = s.deals.filter((deal) => ofKind(deal, true).length);
   const wires = s.deals.filter((deal) => activeWire(deal) && !wireVerified(deal) && PRE_FUNDING.includes(deal.status));
   const exceptions = s.deals.filter((deal) => deal.pricingException?.status === "pending");
   const notices = s.deals.filter((deal) => noticeOwed(deal));
@@ -66,7 +69,8 @@ export function attentionItems(s: Book, newLeads: number): AttentionItem[] {
     { key: "draws", label: "Draws in progress", count: counts.draws, href: "/admin/draws" },
     { key: "conditions", label: "Conditions sent in to review", count: conditionCount, href: firstDeal(submitted.map((deal) => deal.id)) },
     { key: "documents", label: "Documents to review", count: docs, href: firstDeal(toReview.map((deal) => deal.id)) },
-    { key: "renewals", label: "Insurance renewals to check", count: renewals.reduce((sum, deal) => sum + openRenewals(deal).length, 0), href: firstDeal(renewals.map((deal) => deal.id)) },
+    { key: "renewals", label: "Insurance renewals to check", count: renewals.reduce((sum, deal) => sum + ofKind(deal, false).length, 0), href: firstDeal(renewals.map((deal) => deal.id)) },
+    { key: "agent-policies", label: "Policies from insurance agents to check", count: fromAgents.reduce((sum, deal) => sum + ofKind(deal, true).length, 0), href: firstDeal(fromAgents.map((deal) => deal.id)) },
     { key: "applications", label: "New applications", count: newApps.length, href: firstDeal(newApps.map((deal) => deal.id)) },
     { key: "unassigned", label: "Applications with no loan officer", count: s.deals.filter(needsOfficer).length, href: "/admin?team=unassigned" },
     { key: "leads", label: "Quote requests to answer", count: counts.leads, href: "/admin/leads" },

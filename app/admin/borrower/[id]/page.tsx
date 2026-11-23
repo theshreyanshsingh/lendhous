@@ -43,6 +43,7 @@ import { ClosingDateHistory } from "@/components/loan/ClosingDate";
 import { AdvancesPaused } from "@/components/loan/AdvanceStops";
 import { ProjectPace } from "@/components/loan/ProjectPace";
 import { DrawPlanner } from "@/components/loan/DrawPlanner";
+import { AppraisalTracker } from "@/components/loan/Appraisal";
 
 
 export default function BorrowerLoan() {
@@ -85,6 +86,7 @@ export default function BorrowerLoan() {
       <div id="term-sheet"><TermSheetCard deal={d} canSign /></div>
       <div id="term-changes"><TermChanges deal={d} side="borrower" /></div>
       <div id="conditions"><BorrowerConditions deal={d} canUpload /></div>
+      <div id="appraisal"><AppraisalTracker deal={d} /></div>
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="min-w-0 space-y-4">
         <BorrowerDocuments deal={d} settled={funded || d.status === "paid_off"} />

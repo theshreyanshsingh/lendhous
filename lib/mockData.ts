@@ -137,6 +137,10 @@ export interface Deal {
   /** Who's closing the loan: the title company or closing attorney. */
   closing?: ClosingAgent;
   titleLink?: TitleLink;
+  /** The borrower's insurance agent's link (lib/insurance-agent.ts): the same shape as the title company's. */
+  insuranceLink?: TitleLink;
+  /** The appraisal from order to report, and a second look at a low value (lib/appraisals.ts). */
+  appraisal?: import("./appraisals").AppraisalFile;
   /** Wire instructions for funding, oldest first. Only the newest is live; a change replaces it and has to be verified again. */
   wires?: WireInstruction[];
   /** The verified wire the funding approvals were given on. A new wire clears them. */
@@ -578,6 +582,10 @@ export interface InsuranceRenewal {
   id: string; kind: PolicyKind; carrier: string; policy: string; expiresOn: string;
   fileName: string; documentId?: string; by: string; at: string;
   status: "submitted" | "accepted" | "returned";
+  /** Sent by the borrower's insurance agent through their link (lib/insurance-agent.ts), with what the policy says and how it checked. */
+  via?: "agent";
+  effectiveOn?: string; coverage?: number; windIncluded?: boolean; program?: "nfip" | "private";
+  checks?: import("./insurance-agent").PolicyCheck[];
   decided?: { by: string; at: string; note: string };
 }
 export interface InsuranceFile {
@@ -737,7 +745,11 @@ export interface PayoffRequest {
   letters?: PayoffLetter[];
   refused?: { by: string; at: string; reason: string };
 }
-export interface LoanMessage { id: string; dealId: string; from: string; side: "team" | "borrower" | "broker" | "internal"; text: string; at: string }
+export interface LoanMessage {
+  id: string; dealId: string; from: string; side: "team" | "borrower" | "broker" | "internal"; text: string; at: string;
+  /** A file sent with it. A demo browser keeps the name only; on a real account it's an encrypted Document. */
+  files?: { name: string; documentId?: string }[];
+}
 export interface Broker {
   id: string; name: string;
   /** Where the firm stands (lib/brokers.ts). Only an approved one can send deals; one on file from before the program has none. */

@@ -44,10 +44,14 @@ import { awaitingReply, awayProblem } from "./replies";
 import { releaseHolds, resumeProblem, sentProblem as stopNoticeProblem, stopProblem, stopRecipients } from "./stop-advance";
 import { stalledToAsk } from "./project-pace";
 import { followUpProblem } from "./surveys";
+import { answerProblem as valueAnswerProblem, datesProblem, deliveredProblem, needsArv, orderProblem, reviewProblem, type CompSale } from "./appraisals";
+import type { AgentPolicyInput, PolicyCheck } from "./insurance-agent";
+import { DEMO_REPLIES, replyProblem, viewProblem, type PipelineFilters, type PipelineView, type SavedReply } from "./staff-tools";
+import { agentChecks, agentView } from "./insurance-agent";
 import { cleanParcels, TAX_STATUS, taxReminder } from "./property-taxes";
 import { addDays, balanceOf, DEMO_SERVICING_DAY, firstDueDate, ledger, maturityOf, openDefault, paymentsMade, payoffFor, recastPayment, SERVICED, servicingDate, settle } from "./servicing";
 
-export interface Book { partnerId: string; buyerId: string; brokerId: string; borrowerId: string; loanPrefix: string; deals: Deal[]; bids: Bid[]; partners: Partner[]; buyers: LoanBuyer[]; brokers: Broker[]; sales: LoanSale[]; offers: LoanOffer[]; draws: DrawRequest[]; photoRequests: PhotoRequest[]; payoffs: PayoffRequest[]; messages: LoanMessage[]; sources: CapitalSource[]; conditionLibrary: ConditionTemplate[]; /** Storms whose forecast cone has covered funded loans (lib/storms.ts). Staff only. */ storms: StormWatch[]; /** Team members away, and who covers their loans (lib/replies.ts). */ away?: AwayNotice[]; audit: { at: string; text: string }[]; sample?: boolean; /** A borrower's own referrals, summed up for them: friends' loans are never in their book (lib/referrals.ts). */ myReferrals?: MyReferral[]; /** The pricing its loans use, as sent to a browser. Not part of the records. */ pricing?: PricingPayload }
+export interface Book { partnerId: string; buyerId: string; brokerId: string; borrowerId: string; loanPrefix: string; deals: Deal[]; bids: Bid[]; partners: Partner[]; buyers: LoanBuyer[]; brokers: Broker[]; sales: LoanSale[]; offers: LoanOffer[]; draws: DrawRequest[]; photoRequests: PhotoRequest[]; payoffs: PayoffRequest[]; messages: LoanMessage[]; sources: CapitalSource[]; conditionLibrary: ConditionTemplate[]; /** Storms whose forecast cone has covered funded loans (lib/storms.ts). Staff only. */ storms: StormWatch[]; /** Team members away, and who covers their loans (lib/replies.ts). */ away?: AwayNotice[]; /** The team's saved replies and each person's saved pipeline views (lib/staff-tools.ts). Staff only. */ savedReplies?: SavedReply[]; pipelineViews?: PipelineView[]; audit: { at: string; text: string }[]; sample?: boolean; /** A borrower's own referrals, summed up for them: friends' loans are never in their book (lib/referrals.ts). */ myReferrals?: MyReferral[]; /** The pricing its loans use, as sent to a browser. Not part of the records. */ pricing?: PricingPayload }
 
 export type BookAction =
   /** clientFills: a broker's client fills in their own guarantors, past deals and credit answers on an application link. */
@@ -101,6 +105,21 @@ export type BookAction =
   | { t: "checkPace"; asOf: string }
   /** A manager's follow-up on a low survey score (lib/surveys.ts). */
   | { t: "surveyFollowUp"; dealId: string; stage: "funded" | "paid_off"; note: string; by: string }
+  /** The appraisal (lib/appraisals.ts): ordered once the loan checks out, its visit and expected day, the report, and a second look. */
+  | { t: "orderAppraisal"; dealId: string; on: string; firm: string; fee: number; dueOn: string; by: string }
+  | { t: "appraisalDates"; dealId: string; inspectionOn?: string; dueOn?: string; reason: string; by: string }
+  | { t: "appraisalDelivered"; dealId: string; on: string; asIs: number; arv?: number; by: string }
+  | { t: "askValueReview"; dealId: string; reason: string; sales: CompSale[]; by: string }
+  | { t: "answerValueReview"; dealId: string; asIs: number; arv?: number; note: string; by: string }
+  /** The insurance agent's link (lib/insurance-agent.ts), made or turned off by the server, and a policy the agent sent through it. */
+  | { t: "openInsuranceLink"; dealId: string; sentTo: string; email: string; sentBy: string; expiresAt: string }
+  | { t: "turnOffInsuranceLink"; dealId: string }
+  | { t: "agentPolicy"; dealId: string; renewalId: string; policy: AgentPolicyInput; checks: PolicyCheck[]; fileName: string; documentId?: string; by: string }
+  /** Staff speed-ups (lib/staff-tools.ts): the team's saved replies, and a person's own saved pipeline views. */
+  | { t: "saveReply"; replyId: string; title: string; text: string; by: string }
+  | { t: "deleteReply"; replyId: string }
+  | { t: "savePipelineView"; viewId: string; name: string; filters: PipelineFilters; ownerId: string }
+  | { t: "deletePipelineView"; viewId: string; ownerId: string }
   /** The client's last message needs no answer ("I'll upload them today"), so its reply clock stops. */
   | { t: "noReplyNeeded"; dealId: string; by: string }
   | { t: "linkBorrower"; dealId: string; borrowerId: string; borrowerName: string }
@@ -314,7 +333,8 @@ export type BookAction =
   | { t: "saleProceeds"; dealId: string; amount: number; on: string; reference: string; by: string }
   | { t: "listReo"; dealId: string; on: string; price: number; value?: number; by: string }
   | { t: "sellReo"; dealId: string; on: string; price: number; closingCosts: number; reference: string; by: string }
-  | { t: "sendMessage"; dealId: string; from: string; side: LoanMessage["side"]; text: string }
+  /** files: only the upload route adds them, once each file is stored; a demo browser keeps the name only. */
+  | { t: "sendMessage"; dealId: string; from: string; side: LoanMessage["side"]; text: string; files?: { name: string; documentId?: string }[] }
   | { t: "uploadDoc"; dealId: string; docId: string; fileName: string; documentId?: string }
   | { t: "docStatus"; dealId: string; docId: string; status: DocStatus; note?: string }
   | { t: "addOwnDoc"; dealId: string; docId: string; name: string; by: string }
@@ -518,6 +538,19 @@ export function demoBook(): Book {
     if (d.id === "d8") deals[i] = { ...deals[i], termChanges: [newChange(deals[i], "tc-demo-8", { purchasePrice: deals[i].app.purchasePrice - 10_000 }, "The seller agreed to a $10,000 price reduction after the inspection, so the loan is sized on the lower price. (FAKE)", "Olivia Owner (FAKE)", "2026-10-30T14:00:00-07:00")] };
     // Advances paused on a loan behind on its payments, Florida's notice still to send (lib/stop-advance.ts).
     if (d.id === "d13") deals[i] = { ...deals[i], advanceStops: [{ on: "2026-10-29", reason: "other", note: "Payments are more than 30 days late, so advances wait until the loan is brought current (FAKE)", by: "Uma Underwriter (FAKE)", at: "2026-10-29T11:00:00-07:00", notices: [] }] };
+    // Appraisals (lib/appraisals.ts): a Miami rehab's report in under plan, with no second look asked yet; a bridge loan's
+    // that came in low, was questioned and was raised; and one that came in at the price.
+    const ordered = (on: string, dueOn: string, fee: number) => ({ on, firm: "Sample Appraisal Group (FAKE)", fee, dueOn, by: "Pat Processor (FAKE)", at: `${on}T14:00:00Z` });
+    if (d.id === "d3") deals[i] = { ...deals[i], appraisal: { ordered: ordered("2026-10-19", "2026-10-30", 750), inspectionOn: "2026-10-22", moves: [{ from: "2026-10-28", to: "2026-10-30", reason: "The appraiser asked for one more nearby sale to compare with. (FAKE)", by: "Pat Processor (FAKE)", at: "2026-10-26T15:00:00Z" }], delivered: { on: "2026-10-29", asIs: 1_150_000, arv: 2_050_000, by: "Uma Underwriter (FAKE)", at: "2026-10-29T18:00:00Z" } } };
+    if (d.id === "d7") deals[i] = { ...deals[i], appraisal: { ordered: ordered("2026-10-01", "2026-10-12", 600), inspectionOn: "2026-10-06", delivered: { on: "2026-10-12", asIs: 470_000, by: "Uma Underwriter (FAKE)", at: "2026-10-12T17:00:00Z" }, review: { reason: "Two sales on the same street in September were higher and the report left them out. (FAKE)", sales: [{ address: "18 Sample Bay Dr (FAKE)", price: 492_000, soldOn: "2026-09-12", note: "Same model, same street" }, { address: "31 Sample Bay Dr (FAKE)", price: 486_500, soldOn: "2026-09-26", note: "" }], by: "Taylor Fakename (FAKE)", at: "2026-10-13T16:00:00Z", answer: { asIs: 480_000, note: "The appraiser added both Bay Drive sales and raised the value to the price. (FAKE)", by: "Uma Underwriter (FAKE)", at: "2026-10-19T15:00:00Z" } } } };
+    if (d.id === "d15") deals[i] = { ...deals[i], appraisal: { ordered: ordered("2026-10-09", "2026-10-20", 600), inspectionOn: "2026-10-13", delivered: { on: "2026-10-19", asIs: 400_000, by: "Uma Underwriter (FAKE)", at: "2026-10-19T17:00:00Z" } } };
+    // The borrower's insurance agent sent a binder through their link that doesn't check out yet (lib/insurance-agent.ts).
+    if (d.id === "d8") {
+      const input = { kind: "hazard" as const, carrier: "Sample Coastal Insurance (FAKE)", policy: "HO-2026-0188 (FAKE)", effectiveOn: "2026-11-10", expiresOn: "2027-11-10", coverage: 250_000, windIncluded: false, namedInsured: deals[i].entityName, clause: "LendHous ISAOA/ATIMA" };
+      const checks = agentChecks(agentView(deals[i]), input, DEMO_SERVICING_DAY);
+      const renewal: InsuranceRenewal = { id: "ren-demo-8", kind: "hazard", carrier: input.carrier, policy: input.policy, expiresOn: input.expiresOn, fileName: "Binder HO-2026-0188 (FAKE).pdf", by: "Dana Agent (FAKE) (insurance agent)", at: "2026-10-30T15:00:00Z", status: "submitted", via: "agent", effectiveOn: input.effectiveOn, coverage: input.coverage, windIncluded: false, checks };
+      deals[i] = { ...deals[i], insurance: { ...insuranceFileOf(deals[i]), renewals: [renewal] }, agents: { ...deals[i].agents, insurance: { name: "Dana Agent (FAKE)", company: "Sample Coastal Insurance (FAKE)", email: "dana.agent@sample-coastal.test", phone: "(954) 555-0177", by: "Jordan Demo (FAKE)", at: "2026-10-27T15:00:00Z" } } };
+    }
   }
   const quoted = payoffFor(deals.find((d) => d.id === "d11")!, "2026-11-15");
   // One from a borrower's portal, due in two days, and one from a title company whose authorization still needs a look.
@@ -527,11 +560,11 @@ export function demoBook(): Book {
   ];
   // An underwriter out for a few days, with the processor covering her loans (lib/replies.ts).
   const away: AwayNotice[] = [{ id: DEMO_TEAM[1].id, name: DEMO_TEAM[1].name, email: DEMO_TEAM[1].email, from: "2026-10-30", until: "2026-11-04", backup: DEMO_TEAM[2], by: DEMO_TEAM[1].name, at: "2026-10-29T17:00:00-07:00" }];
-  return { away, partnerId: DEMO_PARTNER_ID, buyerId: DEMO_BUYER_ID, brokerId: DEMO_BROKER_ID, borrowerId: BORROWER_ID, loanPrefix: DEMO_PREFIX, deals, bids: [...seedBids, { id: "bid-demo-11", dealId: "d11", partnerId: DEMO_PARTNER_ID, pct: 50, lenderRate: 9.25, lenderPoints: 0.5, conditions: "", status: "accepted", type: "bid", at: "2026-06-20T14:00:00Z" }], partners: seedPartners.map((firm) => withDemoScreening(firm)), buyers: loanBuyers.map((firm) => withDemoScreening(firm)), brokers: seedBrokers, sales: seedLoanSales, offers: seedLoanOffers, draws: seedDraws, photoRequests: seedPhotoRequests, payoffs, messages: seedMessages, sources: capitalSources, conditionLibrary: DEFAULT_LIBRARY, storms: [], audit: [{ at: SEED_AT, text: "Demo data loaded (all records are FAKE)" }] };
+  return { away, savedReplies: DEMO_REPLIES, pipelineViews: [], partnerId: DEMO_PARTNER_ID, buyerId: DEMO_BUYER_ID, brokerId: DEMO_BROKER_ID, borrowerId: BORROWER_ID, loanPrefix: DEMO_PREFIX, deals, bids: [...seedBids, { id: "bid-demo-11", dealId: "d11", partnerId: DEMO_PARTNER_ID, pct: 50, lenderRate: 9.25, lenderPoints: 0.5, conditions: "", status: "accepted", type: "bid", at: "2026-06-20T14:00:00Z" }], partners: seedPartners.map((firm) => withDemoScreening(firm)), buyers: loanBuyers.map((firm) => withDemoScreening(firm)), brokers: seedBrokers, sales: seedLoanSales, offers: seedLoanOffers, draws: seedDraws, photoRequests: seedPhotoRequests, payoffs, messages: seedMessages, sources: capitalSources, conditionLibrary: DEFAULT_LIBRARY, storms: [], audit: [{ at: SEED_AT, text: "Demo data loaded (all records are FAKE)" }] };
 }
 
 /** A book with no records: a new database, or an account with nothing to see yet. */
-export const emptyBook = (): Book => ({ partnerId: "", buyerId: "", brokerId: "", borrowerId: "", loanPrefix: "LH-", deals: [], bids: [], partners: [], buyers: [], brokers: [], sales: [], offers: [], draws: [], photoRequests: [], payoffs: [], messages: [], sources: [], conditionLibrary: [], storms: [], away: [], audit: [] });
+export const emptyBook = (): Book => ({ partnerId: "", buyerId: "", brokerId: "", borrowerId: "", loanPrefix: "LH-", deals: [], bids: [], partners: [], buyers: [], brokers: [], sales: [], offers: [], draws: [], photoRequests: [], payoffs: [], messages: [], sources: [], conditionLibrary: [], storms: [], away: [], savedReplies: [], pipelineViews: [], audit: [] });
 
 /**
  * Every change to the book goes through here. A loan that moves to another stage has the time noted, so reports can
@@ -795,6 +828,80 @@ function apply(s: Book, a: BookAction): Book {
       if (followUpProblem(deal, a.stage, a.note)) return s;
       return { ...s, deals: upd(a.dealId, (d) => ({ ...d, surveys: d.surveys!.map((item) => (item.stage === a.stage ? { ...item, followUp: { note: a.note.trim(), by: a.by, at: now() } } : item)) })), audit: log(`${deal.loanNumber}: low survey score followed up by ${a.by}`) };
     }
+    case "orderAppraisal": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (orderProblem(deal, a, serviceDay(s))) return s;
+      const appraisal = { ordered: { on: a.on, firm: a.firm.trim(), fee: Math.round(a.fee * 100) / 100, dueOn: a.dueOn, by: a.by, at: now() } };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, appraisal })), audit: log(`${deal.loanNumber}: appraisal ordered from ${appraisal.ordered.firm}, due ${a.dueOn}`) };
+    }
+    case "appraisalDates": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (datesProblem(deal, a)) return s;
+      const file = deal.appraisal!;
+      const moved = a.dueOn !== undefined && a.dueOn !== file.ordered.dueOn;
+      const appraisal = { ...file, ...(a.inspectionOn !== undefined ? { inspectionOn: a.inspectionOn } : {}), ordered: { ...file.ordered, dueOn: a.dueOn ?? file.ordered.dueOn }, ...(moved ? { moves: [...(file.moves ?? []), { from: file.ordered.dueOn, to: a.dueOn!, reason: a.reason.trim(), by: a.by, at: now() }] } : {}) };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, appraisal })), audit: log(`${deal.loanNumber}: appraisal${a.inspectionOn !== undefined ? ` visit ${a.inspectionOn}` : ""}${moved ? ` now due ${a.dueOn}` : ""}`) };
+    }
+    case "appraisalDelivered": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (deliveredProblem(deal, a, serviceDay(s))) return s;
+      const delivered = { on: a.on, asIs: Math.round(a.asIs), ...(needsArv(deal) && a.arv !== undefined ? { arv: Math.round(a.arv) } : {}), by: a.by, at: now() };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, appraisal: { ...d.appraisal!, delivered } })), audit: log(`${deal.loanNumber}: appraisal in at ${delivered.asIs} as is${delivered.arv ? `, ${delivered.arv} after the work` : ""}`) };
+    }
+    case "askValueReview": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (reviewProblem(deal, a, serviceDay(s))) return s;
+      const review = { reason: a.reason.trim(), sales: a.sales.map((sale) => ({ address: sale.address.trim(), price: Math.round(sale.price), soldOn: sale.soldOn, note: sale.note.trim() })), by: a.by, at: now() };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, appraisal: { ...d.appraisal!, review } })), audit: log(`${deal.loanNumber}: second look at the appraisal asked for, ${review.sales.length} sale${review.sales.length === 1 ? "" : "s"}`) };
+    }
+    case "answerValueReview": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (valueAnswerProblem(deal, a)) return s;
+      const answer = { asIs: Math.round(a.asIs), ...(needsArv(deal) && a.arv !== undefined ? { arv: Math.round(a.arv) } : {}), note: a.note.trim(), by: a.by, at: now() };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, appraisal: { ...d.appraisal!, review: { ...d.appraisal!.review!, answer } } })), audit: log(`${deal.loanNumber}: second look answered, ${answer.asIs} as is${answer.arv ? `, ${answer.arv} after the work` : ""}`) };
+    }
+    case "openInsuranceLink": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const insuranceLink = { sentTo: a.sentTo, email: a.email, sentBy: a.sentBy, sentAt: now(), expiresAt: a.expiresAt, status: "open" as const };
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, insuranceLink })), audit: log(`${deal.loanNumber}: insurance agent's link sent to ${a.sentTo}`) };
+    }
+    case "turnOffInsuranceLink": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      if (!deal.insuranceLink || deal.insuranceLink.status === "off") return s;
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...d, insuranceLink: { ...d.insuranceLink!, status: "off" } })), audit: log(`${deal.loanNumber}: insurance agent's link turned off`) };
+    }
+    case "agentPolicy": {
+      const deal = s.deals.find((d) => d.id === a.dealId)!;
+      const p = a.policy;
+      const building = p.kind === "hazard" || p.kind === "builders_risk";
+      const renewal: InsuranceRenewal = { id: a.renewalId, kind: p.kind, carrier: p.carrier.trim(), policy: p.policy.trim(), expiresOn: p.expiresOn, fileName: a.fileName, ...(a.documentId ? { documentId: a.documentId } : {}), by: a.by, at: now(), status: "submitted", via: "agent", effectiveOn: p.effectiveOn, ...(p.coverage !== undefined ? { coverage: Math.round(p.coverage) } : {}), ...(building ? { windIncluded: Boolean(p.windIncluded) } : {}), ...(p.kind === "flood" && p.program ? { program: p.program } : {}), checks: a.checks };
+      return {
+        ...s,
+        deals: upd(a.dealId, (d) => {
+          const file = insuranceFileOf(d);
+          // A newer copy of the same policy from the agent takes the place of one not yet looked at.
+          const renewals = (file.renewals ?? []).map((item) => (item.via === "agent" && item.kind === p.kind && item.status === "submitted" ? { ...item, status: "returned" as const, decided: { by: a.by, at: now(), note: "Replaced by a newer copy from the agent." } } : item));
+          // Before funding, the binder on the checklist is in too, for the team to accept with the policy.
+          const docs = building && !SERVICED.includes(d.status) ? d.docs.map((doc) => (doc.id === "insurance" && (doc.status === "requested" || doc.status === "rejected") ? { ...doc, status: "uploaded" as const, fileName: a.fileName, documentId: a.documentId, uploadedAt: now() } : doc)) : d.docs;
+          return { ...withInsurance(d, { ...file, renewals: [...renewals, renewal] }), docs };
+        }),
+        audit: log(`${deal.loanNumber}: ${policyWord(p.kind)} policy sent by the insurance agent, to ${p.expiresOn}`),
+      };
+    }
+    case "saveReply": {
+      const replies = s.savedReplies ?? [];
+      if (replyProblem(replies, a)) return s;
+      const reply: SavedReply = { id: a.replyId, title: a.title.trim(), text: a.text.trim(), by: a.by, at: now() };
+      return { ...s, savedReplies: replies.some((item) => item.id === a.replyId) ? replies.map((item) => (item.id === a.replyId ? reply : item)) : [...replies, reply] };
+    }
+    case "deleteReply": return { ...s, savedReplies: (s.savedReplies ?? []).filter((item) => item.id !== a.replyId) };
+    case "savePipelineView": {
+      const views = s.pipelineViews ?? [];
+      if (viewProblem(views, a)) return s;
+      const view: PipelineView = { id: a.viewId, name: a.name.trim(), ownerId: a.ownerId, filters: a.filters, at: now() };
+      return { ...s, pipelineViews: views.some((item) => item.id === a.viewId) ? views.map((item) => (item.id === a.viewId && item.ownerId === a.ownerId ? view : item)) : [...views, view] };
+    }
+    case "deletePipelineView": return { ...s, pipelineViews: (s.pipelineViews ?? []).filter((item) => !(item.id === a.viewId && item.ownerId === a.ownerId)) };
     case "noReplyNeeded": {
       const deal = s.deals.find((d) => d.id === a.dealId)!;
       if (!awaitingReply(s.messages, deal.id, deal.replyHandled?.at)) return s;
@@ -1412,9 +1519,11 @@ function apply(s: Book, a: BookAction): Book {
       if (!renewal || renewal.status !== "submitted" || (!a.accept && !a.note.trim())) return s;
       const decided = { ...renewal, status: a.accept ? ("accepted" as const) : ("returned" as const), decided: { by: a.by, at: now(), note: a.note.trim() } };
       const renewals = (file.renewals ?? []).map((item) => (item.id === a.renewalId ? decided : item));
-      const policy: InsurancePolicy = { kind: renewal.kind, carrier: renewal.carrier, policy: renewal.policy, expiresOn: renewal.expiresOn, mortgagee: a.mortgagee, ...(a.coverage !== undefined ? { coverage: Math.round(a.coverage) } : {}), ...(a.windIncluded !== undefined && renewal.kind !== "windstorm" && renewal.kind !== "flood" ? { windIncluded: a.windIncluded } : {}), fileName: renewal.fileName, ...(renewal.documentId ? { documentId: renewal.documentId } : {}), by: a.by, at: now() };
+      const policy: InsurancePolicy = { kind: renewal.kind, carrier: renewal.carrier, policy: renewal.policy, expiresOn: renewal.expiresOn, mortgagee: a.mortgagee, ...(a.coverage !== undefined ? { coverage: Math.round(a.coverage) } : renewal.coverage !== undefined ? { coverage: renewal.coverage } : {}), ...(a.windIncluded !== undefined && renewal.kind !== "windstorm" && renewal.kind !== "flood" ? { windIncluded: a.windIncluded } : {}), ...(renewal.kind === "flood" && renewal.program ? { program: renewal.program } : {}), fileName: renewal.fileName, ...(renewal.documentId ? { documentId: renewal.documentId } : {}), by: a.by, at: now() };
       const next = a.accept ? putPolicy({ ...file, renewals }, policy) : { ...file, renewals };
-      return { ...s, deals: upd(a.dealId, (d) => withInsurance(d, next)), audit: log(`${deal.loanNumber}: ${policyWord(renewal.kind)} renewal ${a.accept ? `accepted, on file to ${renewal.expiresOn}` : "sent back"}`) };
+      // The agent's binder on the checklist goes the same way as the policy (lib/insurance-agent.ts).
+      const binder = (doc: Deal["docs"][number]) => (renewal.documentId && doc.id === "insurance" && doc.documentId === renewal.documentId && (doc.status === "uploaded" || doc.status === "in_review") ? { ...doc, status: a.accept ? ("accepted" as const) : ("rejected" as const), teamNote: a.accept ? undefined : a.note.trim(), acceptedOn: a.accept ? serviceDay(s) : undefined } : doc);
+      return { ...s, deals: upd(a.dealId, (d) => ({ ...withInsurance(d, next), docs: d.docs.map(binder) })), audit: log(`${deal.loanNumber}: ${policyWord(renewal.kind)} renewal ${a.accept ? `accepted, on file to ${renewal.expiresOn}` : "sent back"}`) };
     }
     case "lienWaiverReceived": case "affidavitReceived": {
       const draw = s.draws.find((d) => d.id === a.drawId);
@@ -1783,8 +1892,9 @@ function apply(s: Book, a: BookAction): Book {
     }
     case "sendMessage": {
       const text = a.text.trim();
-      if (!text) return s;
-      return { ...s, messages: [...s.messages, { id: `msg${uid()}`, dealId: a.dealId, from: a.from, side: a.side, text, at: now() }] };
+      const files = (a.files ?? []).filter((file) => file.name.trim()).slice(0, 5).map((file) => ({ name: file.name.trim().slice(0, 200), ...(file.documentId ? { documentId: file.documentId } : {}) }));
+      if (!text && !files.length) return s;
+      return { ...s, messages: [...s.messages, { id: `msg${uid()}`, dealId: a.dealId, from: a.from, side: a.side, text, at: now(), ...(files.length ? { files } : {}) }] };
     }
     case "uploadDoc": return { ...s, deals: upd(a.dealId, (d) => ({ ...d, docs: d.docs.map((x) => (x.id === a.docId ? { ...x, status: "uploaded", fileName: a.fileName, documentId: a.documentId, uploadedAt: now() } : x)) })), audit: log(`Document uploaded: ${a.fileName}`) };
     case "docStatus": return { ...s, deals: upd(a.dealId, (d) => ({ ...d, docs: d.docs.map((x) => (x.id === a.docId ? { ...x, status: a.status, teamNote: a.status === "rejected" ? a.note?.trim() || undefined : undefined, acceptedOn: a.status === "accepted" ? serviceDay(s) : undefined, carriedFrom: undefined, ...(x.carriedFrom && a.status === "requested" ? { fileName: undefined, documentId: undefined } : {}) } : x)) })), audit: log(`Document ${a.docId} → ${a.status}`) };

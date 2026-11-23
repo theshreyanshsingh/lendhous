@@ -18,7 +18,7 @@ import { currentBids, ROLLOVER, rolloverOf } from "@/lib/capital-moves";
 import { afterCheck, exposureLines } from "@/lib/storms";
 import { dueOf, fromThirdParty, letterChanges, receivedOf, requesterLine, staleLetter } from "@/lib/payoffs";
 import { prisma } from "@/lib/prisma";
-import { addDays, defaultInterestFrom, defaultRateOf, ledger, maturityOf, servicingTermsOf } from "@/lib/servicing";
+import { addDays, defaultInterestFrom, defaultRateOf, ledger, maturityOf, SERVICED, servicingTermsOf } from "@/lib/servicing";
 import { BANKRUPTCY_ENDS, COLLECTIONS, inBankruptcy, PAUSED_IN_BANKRUPTCY } from "@/lib/collections";
 import { modificationWords } from "@/lib/modifications";
 import { toSend } from "@/lib/draw-review";
@@ -29,6 +29,8 @@ import { coverEmails } from "@/lib/replies";
 import { clause, noticeDueOn, STOP_REASONS, stopRecipients } from "@/lib/stop-advance";
 import { paceWords, projectPace } from "@/lib/project-pace";
 import { LOW_SCORE } from "@/lib/surveys";
+import { answerDueOn, belowPlan, currentValues, loanAt } from "@/lib/appraisals";
+import { failedChecks } from "@/lib/insurance-agent";
 
 const origin = () => (process.env.NEXT_PUBLIC_APP_URL || "").replace(/\/$/, "");
 
@@ -322,6 +324,51 @@ function actionAlerts(before: Book, after: Book, action: BookAction): Alert[] {
       if (action.score > LOW_SCORE) return [];
       const deal = loan(action.dealId);
       return deal ? [{ to: "team", dealId: deal.id, subject: `Low survey score from ${deal.borrowerName}: ${action.score} out of 10`, body: `${deal.borrowerName} scored ${deal.loanNumber} ${action.score} out of 10 ${action.stage === "funded" ? "after closing" : "at payoff"}${action.comment.trim() ? `: "${action.comment.trim()}"` : ", with no comment"}. A manager should call them; record what you heard on the loan's Messages tab.`, event: "survey.low" }] : [];
+    }
+    // The appraisal, as it moves (lib/appraisals.ts): the borrower and their broker hear each step; the team hears a second look asked.
+    case "orderAppraisal": case "appraisalDates": case "appraisalDelivered": case "answerValueReview": {
+      const deal = loan(action.dealId);
+      const file = deal?.appraisal;
+      if (!deal || !file) return [];
+      const page = `${origin()}/admin/borrower/${deal.id}#appraisal`;
+      const values = (v: { asIs: number; arv?: number }) => `${dollars(v.asIs)} as it is${v.arv !== undefined ? ` and ${dollars(v.arv)} after the work` : ""}`;
+      let subject = "", body = "";
+      if (action.t === "orderAppraisal") { subject = `Appraisal ordered: ${deal.loanNumber}`; body = `We've ordered the appraisal for ${deal.address} from ${file.ordered.firm}. The appraiser will call you to set a time to see the property, and we expect the report by ${longDate(file.ordered.dueOn)}. Follow it on your loan page: ${page}`; }
+      if (action.t === "appraisalDates") {
+        const was = before.deals.find((item) => item.id === deal.id)?.appraisal;
+        const moved = was && was.ordered.dueOn !== file.ordered.dueOn;
+        const visit = action.inspectionOn !== undefined && was?.inspectionOn !== action.inspectionOn;
+        if (!moved && !visit) return [];
+        subject = moved ? `Appraisal now expected ${longDate(file.ordered.dueOn)}: ${deal.loanNumber}` : `Appraiser's visit set: ${deal.loanNumber}`;
+        body = [visit ? `The appraiser's visit to ${deal.address} is set for ${longDate(action.inspectionOn!)}.` : "", moved ? `The report is now expected by ${longDate(file.ordered.dueOn)}, not ${longDate(was!.ordered.dueOn)}: ${action.reason.trim()}` : "", `Follow it on your loan page: ${page}`].filter(Boolean).join(" ");
+      }
+      if (action.t === "appraisalDelivered") {
+        const low = belowPlan(deal);
+        const at = loanAt(deal, file.delivered!);
+        subject = `Your appraisal is in: ${deal.loanNumber}`;
+        const now = evaluate(deal.app).noteAmount;
+        const same = at.eligible && at.noteAmount >= now - 0.5;
+        body = `The appraisal of ${deal.address} came in at ${values(file.delivered!)}. ${low ? `${same ? `That's under what the loan was sized on, but your loan stays at ${dollars(now)}.` : `That's under what the loan was sized on, so at these values the loan can be up to ${dollars(at.noteAmount)} (it's ${dollars(now)} now).`} If you think the value is wrong, you can ask for a second look with up to five recent sales on your loan page: ${page}` : `It supports your loan as planned.`} A copy of the report is on its way to you.`;
+      }
+      if (action.t === "answerValueReview") { subject = `The second look at your appraisal is back: ${deal.loanNumber}`; body = `The appraiser looked again and the value is now ${values(currentValues(file)!)}. ${action.note.trim()} See it on your loan page: ${page}`; }
+      return [{ to: "borrower", dealId: deal.id, subject, body, event: "appraisal.update" }, { to: "broker", dealId: deal.id, subject, body: body.replace(page, `${origin()}/admin/broker`), event: "appraisal.update" }];
+    }
+    case "askValueReview": {
+      const deal = loan(action.dealId);
+      const review = deal?.appraisal?.review;
+      if (!deal || !review) return [];
+      return [{ to: "team", dealId: deal.id, subject: `Second look at an appraisal asked for: ${deal.loanNumber}`, body: `${review.by} thinks the appraisal of ${deal.address} is low: ${review.reason}\n\nSales they'd compare with:\n${review.sales.map((sale) => `- ${sale.address}, ${dollars(sale.price)} on ${longDate(sale.soldOn)}${sale.note ? ` (${sale.note})` : ""}`).join("\n")}\n\nSend them to the appraiser and record the answer on the loan's Conditions tab by ${longDate(answerDueOn(review.at.slice(0, 10)))}.`, event: "appraisal.review" }];
+    }
+    // A policy from the borrower's insurance agent's link (lib/insurance-agent.ts).
+    case "agentPolicy": {
+      const deal = loan(action.dealId);
+      if (!deal) return [];
+      const failed = failedChecks(action.checks);
+      const kind = policyWord(action.policy.kind);
+      return [
+        { to: "team", dealId: deal.id, subject: `Insurance agent sent the ${kind} policy: ${deal.loanNumber}`, body: `${action.by} sent the ${kind} policy for ${deal.address} (${action.policy.carrier}, ends ${longDate(action.policy.expiresOn)}).${failed.length ? `\n\nIt doesn't check out yet:\n${failed.map((check) => `- ${check.text}`).join("\n")}` : " Everything they entered checks out."}\n\nOpen the file and accept it or send it back on the loan's ${SERVICED.includes(deal.status) ? "Servicing" : "Closing"} tab.`, event: "insurance.agent" },
+        { to: "borrower", dealId: deal.id, subject: `Your insurance agent sent the ${kind} policy: ${deal.loanNumber}`, body: `Your insurance agent sent the ${kind} policy for ${deal.address}. We'll check it and tell you if anything needs changing.`, event: "insurance.agent" },
+      ];
     }
     case "setAway": {
       // The backup hears they're covering, from the first day.

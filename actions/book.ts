@@ -5,7 +5,7 @@ import { createHash, randomUUID } from "crypto";
 import { revalidatePath, revalidateTag } from "next/cache";
 import { after } from "next/server";
 import { audit } from "@/lib/audit";
-import { canUploadFile, docOf, scopeBook, type Viewer } from "@/lib/book-access";
+import { canUploadFile, docOf, firmOf, scopeBook, type Viewer } from "@/lib/book-access";
 import { parseAction } from "@/lib/book-actions";
 import { sendAlerts } from "@/lib/book-alerts";
 import { permissionCheck, readBook, runAction } from "@/lib/book-store";
@@ -22,7 +22,7 @@ import { deliverPayoffLetter } from "@/lib/payoff-delivery";
 import { fileProblem } from "@/lib/conditions";
 import { isFinalDraw, partiesFor } from "@/lib/lien-law";
 import { moveLeadPhotos, storePropertyPhoto } from "@/lib/property-photos";
-import { viewFor } from "@/lib/permissions";
+import { viewFor, type Permission } from "@/lib/permissions";
 import { screenDeal } from "@/lib/sanctions-store";
 import { screenFirm, type FirmKind } from "@/lib/firm-screening";
 import { renewalProblem } from "@/lib/insurance";
@@ -184,6 +184,35 @@ async function recordPdfCheck(viewer: Viewer, dealId: string, bytes: Buffer, fil
   }
 }
 
+/**
+ * A file with a message on a loan's thread, from the team, the borrower or their broker, or with a team note (staff
+ * only). Stored encrypted like every loan file; a note's file opens only for staff (app/api/documents/[id]).
+ */
+async function messageFile(viewer: Viewer, book: Book, allowed: (permission: Permission) => boolean, dealId: string, file: File, form: FormData): Promise<BookReply & { documentId?: string }> {
+  const deal = book.deals.find((item) => item.id === dealId);
+  if (!deal) return { error: "That loan no longer exists." };
+  const view = viewFor(viewer.roleCodes);
+  const internal = form.get("side") === "internal";
+  const staff = view === "admin" && allowed("view_pipeline");
+  const own = (view === "borrower" && deal.borrowerId === viewer.id) || (view === "broker" && deal.brokerId === firmOf(viewer));
+  if (!staff && !(own && !internal)) return { error: "Your account can't send files on this loan." };
+  if (VIDEO_TYPES.has(file.name.split(".").pop()?.toLowerCase() ?? "")) return { error: "A video goes with a draw request." };
+  const bytes = Buffer.from(await file.arrayBuffer());
+  const problem = uploadProblem(file.name, file.size, bytes);
+  if (problem) return { error: problem };
+  const id = randomUUID();
+  const ext = extensionOf(file.name)!;
+  const key = `loans/${safeBasename(dealId)}/${id}.${ext}`;
+  const name = attachmentName(file.name);
+  const documentType = internal ? "note_file" : "message_file";
+  const fileKeyId = await putBytes(key, bytes);
+  await prisma.document.create({ data: { id, ownerType: "LOAN", ownerId: dealId, documentType, originalName: encryptField(name, documentNameContext(id)), storageKey: key, fileKeyId, mime: mimeFor(ext, file.type), size: bytes.length, sha256: createHash("sha256").update(bytes).digest("hex"), uploadedById: viewer.id } });
+  await audit({ actorId: viewer.id, action: "document.uploaded", entityType: "Document", entityId: id, after: { dealId, documentType, size: bytes.length } });
+  if (ext === "pdf") await recordPdfCheck(viewer, dealId, bytes, { documentId: id, fileName: name, label: internal ? "Team note" : "Message" });
+  const text = String(form.get("text") || "").slice(0, 4000);
+  return { ...(await perform(viewer, { t: "sendMessage", dealId, from: viewer.name, side: internal ? "internal" : view === "broker" ? "broker" : view === "borrower" ? "borrower" : "team", text, files: [{ name, documentId: id }] }, { trusted: true })), documentId: id };
+}
+
 export async function uploadLoanFile(form: FormData): Promise<BookReply & { documentId?: string }> {
   const viewer = await requireUser();
   if (!(await consumeRateLimit(`upload:${viewer.id}`, 60, 60 * 60 * 1000))) return { error: "Too many uploads. Wait a while and try again." };
@@ -193,6 +222,8 @@ export async function uploadLoanFile(form: FormData): Promise<BookReply & { docu
   if (!(file instanceof File)) return { error: "Choose a file." };
   const { book } = await readBook();
   const allowed = await permissionCheck(viewer);
+  // A file sent with a message: whoever can write on the loan's thread can attach one (lib/staff-tools.ts).
+  if (form.get("messageFile") === "1") return messageFile(viewer, book, allowed, dealId, file, form);
   if (!canUploadFile(book, viewer, dealId, allowed)) return { error: "Your account can't upload to this loan." };
   const doc = docId ? docOf(book, dealId, docId) : undefined;
   if (docId && !doc) return { error: "That document is no longer on this loan." };

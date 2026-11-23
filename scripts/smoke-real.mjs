@@ -451,6 +451,24 @@ try {
   await borrower.getByTestId("notice-preferences").getByRole("button", { name: "Save" }).click();
   await poll(async () => (await prisma.user.findUnique({ where: { email: `borrower@${DOMAIN}` } }))?.noticeTopics?.messages === "now");
 
+  // A file with a message, and one with a team note (lib/staff-tools.ts): the borrower opens the first, never the second.
+  await under.getByTestId("message-text").fill("The draw schedule, attached");
+  await under.getByTestId("message-file").setInputFiles({ name: "draw-schedule.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 schedule") });
+  await under.getByTestId("send-message").click();
+  const messageLink = under.getByTestId("loan-messages").getByRole("link", { name: "draw-schedule.pdf" });
+  ok("a file goes with a message on a real loan", await seen(messageLink));
+  await under.getByTestId("note-text").fill("Credit memo attached");
+  await under.getByTestId("note-file").setInputFiles({ name: "credit-memo.pdf", mimeType: "application/pdf", buffer: Buffer.from("%PDF-1.4 memo") });
+  await under.getByTestId("send-note").click();
+  const noteLink = under.getByTestId("team-notes").getByRole("link", { name: "credit-memo.pdf" });
+  ok("and with a team note", await seen(noteLink));
+  const messageHref = await messageLink.first().getAttribute("href");
+  const noteHref = await noteLink.first().getAttribute("href");
+  await go(borrower, `/admin/borrower/${dealId}`);
+  ok("the borrower sees the message's file", await seen(borrower.getByTestId("loan-messages").getByRole("link", { name: "draw-schedule.pdf" })));
+  ok("and opens it, but never the team note's file", (await borrower.request.get(BASE + messageHref)).status() === 200 && (await borrower.request.get(BASE + noteHref)).status() === 404 && !(await received(borrower)).includes("credit-memo.pdf"));
+  ok("the team opens the note's file", (await under.request.get(BASE + noteHref)).status() === 200);
+
   await go(under, dealHref);
   for (const label of ["Start initial review", "Send to underwriting"]) {
     await under.getByTestId("advance-loan").filter({ hasText: label }).click();
@@ -645,6 +663,21 @@ try {
   const titleLink = await under.getByTestId("title-link-url").inputValue();
   ok("staff send the title company its secure link", titleLink.includes("/closing/") && (await prisma.notification.count({ where: { toEmail: `title@${DOMAIN}`, eventCode: "closing.link" } })) === 1);
   ok("and wait for title to enter the wire, instead of typing it", await seen(under.getByTestId("wire-waiting-title")));
+  // The borrower's insurance agent gets a secure page of their own (lib/insurance-agent.ts).
+  await under.getByTestId("open-insurance-link").click();
+  await under.getByTestId("insurance-link-name").fill("Ines Agent");
+  await under.getByTestId("insurance-link-email").fill(`agent@${DOMAIN}`);
+  await under.getByTestId("send-insurance-link").click();
+  await seen(under.getByTestId("insurance-link-url"));
+  const insuranceLink = await under.getByTestId("insurance-link-url").inputValue();
+  ok("staff send the insurance agent their secure page", insuranceLink.includes("/insurance/") && (await prisma.notification.count({ where: { toEmail: `agent@${DOMAIN}`, eventCode: "insurance.agent_link" } })) === 1);
+  const agentContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const agentPage = await agentContext.newPage();
+  agentPage.on("pageerror", (error) => errors.push(`agent: ${error.message}`));
+  await agentPage.goto(BASE + new URL(insuranceLink).pathname);
+  const agentHtml = await agentPage.content();
+  ok("the agent sees the clause and the cover needed, and nothing personal", (await agentPage.getByTestId("insurance-clause-text").innerText()).includes("LH-1001") && await seen(agentPage.getByTestId("insurance-needs")) && !agentHtml.includes("reviewed 5521") && !agentHtml.includes("Team only remark"));
+  await agentContext.close();
   // The closing date keeps a record of each move, and the borrower and the title company hear why (lib/closing-moves.ts).
   await under.getByTestId("move-closing").click();
   await under.getByTestId("move-closing-to").fill(new Date(Date.now() + 50 * 86_400_000).toISOString().slice(0, 10));

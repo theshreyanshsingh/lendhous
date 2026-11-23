@@ -514,6 +514,15 @@ model ClosingLink {
   createdAt DateTime @default(now())
 }
 
+// The borrower's insurance agent's link (lib/insurance-agent.ts): one per loan, like the title company's. Only the token's hash is kept.
+model InsuranceLink {
+  id        String   @id @default(uuid()) @map("_id")
+  dealId    String   @unique
+  tokenHash String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
+
 // A link to a payoff letter, emailed with it (Fla. Stat. 701.04). Only the token's hash is kept. One row per letter sent,
 // all opening the request's newest letter, so whoever still has an old email sees that it was corrected.
 model PayoffLink {

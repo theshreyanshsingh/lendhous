@@ -133,7 +133,7 @@ export function InsurancePanel({ deal }: { deal: Deal }) {
 
         {openRenewals(deal).length > 0 && (
           <div className="space-y-2 border-t border-border pt-3">
-            <p className="font-medium">Renewals to check</p>
+            <p className="font-medium">{openRenewals(deal).every((item) => item.via === "agent") ? "From the insurance agent, to check" : "Renewals to check"}</p>
             {openRenewals(deal).map((renewal) => <RenewalReview key={renewal.id} deal={deal} renewal={renewal} />)}
           </div>
         )}
@@ -156,11 +156,16 @@ export function InsurancePanel({ deal }: { deal: Deal }) {
   );
 }
 
-/** A renewal the borrower sent: the team checks the policy, then accepts it onto the file or sends it back with why. */
+/**
+ * A renewal the borrower sent, or a policy from their agent's link with how it checked (lib/insurance-agent.ts): the team
+ * opens the file, then accepts it onto the file or sends it back with why.
+ */
 function RenewalReview({ deal, renewal }: { deal: Deal; renewal: InsuranceRenewal }) {
   const { dispatch, viewerName } = useStore();
   const [mortgagee, setMortgagee] = useState(false);
-  const [wind, setWind] = useState(policiesOf(deal).find((item) => item.kind === renewal.kind)?.windIncluded ?? false);
+  const [wind, setWind] = useState(renewal.windIncluded ?? policiesOf(deal).find((item) => item.kind === renewal.kind)?.windIncluded ?? false);
+  const failed = (renewal.checks ?? []).filter((check) => !check.ok);
+  const details = [renewal.effectiveOn ? `starts ${shortDay(renewal.effectiveOn)}` : "", renewal.coverage !== undefined ? `$${renewal.coverage.toLocaleString("en-US")} coverage` : "", insuresBuilding(renewal.kind) ? (renewal.windIncluded ? "wind included" : "wind excluded") : "", renewal.program ? (renewal.program === "nfip" ? "NFIP" : "private flood") : ""].filter(Boolean);
   const [returning, setReturning] = useState(false);
   const [note, setNote] = useState("");
   const decide = (accept: boolean) => dispatch({ t: "decideRenewal", dealId: deal.id, renewalId: renewal.id, accept, mortgagee, ...(insuresBuilding(renewal.kind) ? { windIncluded: wind } : {}), note, by: viewerName });
@@ -168,6 +173,8 @@ function RenewalReview({ deal, renewal }: { deal: Deal; renewal: InsuranceRenewa
     <div className="space-y-2 rounded-[2px] border border-border p-3 text-xs" data-testid="insurance-renewal">
       <p><span className="font-medium">{POLICY_KINDS[renewal.kind]}</span> · {renewal.carrier}{renewal.policy ? ` · policy ${renewal.policy}` : ""} · ends {shortDay(renewal.expiresOn)}</p>
       <p className="text-muted-foreground">Sent by {renewal.by} {shortDay(renewal.at.slice(0, 10))} · {renewal.documentId ? <a className="text-link underline underline-offset-2" href={`/api/documents/${renewal.documentId}`} target="_blank" rel="noreferrer">{renewal.fileName}</a> : renewal.fileName}</p>
+      {renewal.via === "agent" && details.length > 0 && <p className="text-muted-foreground">{details.join(" · ")}</p>}
+      {renewal.via === "agent" && (failed.length ? <ul className="space-y-0.5" data-testid="renewal-checks">{failed.map((check) => <li key={check.text} className={check.soft ? "text-warn" : "text-bad"}>{check.text}</li>)}</ul> : <p className="text-good" data-testid="renewal-checks">Everything the agent entered checks out. Open the file to confirm it.</p>)}
       {insuresBuilding(renewal.kind) && <label className="flex items-start gap-2"><input type="checkbox" className="mt-0.5" data-testid="renewal-wind" checked={wind} onChange={(event) => setWind(event.target.checked)} /><span>It covers windstorm too.</span></label>}
       <label className="flex items-start gap-2"><input type="checkbox" className="mt-0.5" data-testid="renewal-mortgagee" checked={mortgagee} onChange={(event) => setMortgagee(event.target.checked)} /><span>I checked it names LendHous as mortgagee and loss payee.</span></label>
       {!returning ? (

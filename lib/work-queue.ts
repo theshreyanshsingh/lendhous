@@ -23,6 +23,7 @@ import { openTermChange, settlementHold } from "./term-changes";
 import { advancing, noticeStatus, openStop } from "./stop-advance";
 import { projectPace } from "./project-pace";
 import { needsFollowUp } from "./surveys";
+import { answerDueOn } from "./appraisals";
 
 const SERVICED_STATUSES = new Set(SERVICED);
 import { clockOf, SLA_TARGETS, type Clock, type Targets } from "./sla";
@@ -103,7 +104,9 @@ export function workQueue(book: Book, viewer: { id: string; email?: string }, no
     const season = today.slice(5, 7) >= "02" && today.slice(5, 7) <= "05";
     if (taxes && (taxes !== "no_parcel" || season)) add({ key: `taxes:${deal.id}`, label: taxTask(deal, today)!, href: tab(deal, "Servicing"), deal, priority: taxes === "certificate" ? 4 : taxes === "delinquent" ? 5 : 7 });
     const renewals = openRenewals(deal);
-    if (renewals.length) add({ key: `renewal:${deal.id}`, label: `Check ${renewals.length === 1 ? "an insurance renewal" : `${renewals.length} insurance renewals`}`, href: tab(deal, "Servicing"), deal, since: oldest(renewals.map((item) => item.at)), priority: 12 });
+    // Renewals from the borrower, and policies from their insurance agent's link (lib/insurance-agent.ts), before funding too.
+    const fromAgent = renewals.filter((item) => item.via === "agent").length;
+    if (renewals.length) add({ key: `renewal:${deal.id}`, label: fromAgent === renewals.length ? `Check ${fromAgent === 1 ? "a policy" : `${fromAgent} policies`} from the insurance agent` : `Check ${renewals.length === 1 ? "an insurance renewal" : `${renewals.length} insurance renewals`}`, href: tab(deal, SERVICED_STATUSES.has(deal.status) ? "Servicing" : "Closing"), deal, since: oldest(renewals.map((item) => item.at)), priority: fromAgent && !SERVICED_STATUSES.has(deal.status) ? 6 : 12 });
     if (deal.status === "matured" && !bankruptcy) add({ key: `matured:${deal.id}`, label: "Past maturity", href: tab(deal, "Servicing"), deal, priority: 6 });
     else if (!bankruptcy && needsExitAnswer(deal)) add({ key: `exit:${deal.id}`, label: "Call about the exit plan: no answer yet", href: tab(deal, "Servicing"), deal, priority: 6 });
     const extension = openExtension(deal);
@@ -119,6 +122,10 @@ export function workQueue(book: Book, viewer: { id: string; email?: string }, no
     // A rehab with no draw in weeks (lib/project-pace.ts).
     const pace = projectPace(deal, book.draws, today);
     if (pace?.state === "stalled") add({ key: `stalled:${deal.id}`, label: `Stalled: no draw asked for in ${pace.quietDays} days`, href: tab(deal, "Servicing"), deal, since: pace.lastActivity, priority: 8 });
+    // The appraisal (lib/appraisals.ts): a report past its expected day, and a second look the borrower is waiting on.
+    const appraisal = deal.appraisal;
+    if (appraisal && !appraisal.delivered && appraisal.ordered.dueOn < today && PRE_FUNDING.includes(deal.status)) add({ key: `appraisal:${deal.id}`, label: `Appraisal report late from ${appraisal.ordered.firm}`, href: tab(deal, "Conditions"), deal, since: appraisal.ordered.dueOn, priority: 7 });
+    if (appraisal?.review && !appraisal.review.answer) add({ key: `valuereview:${deal.id}`, label: `Answer a second look at the appraisal, promised by ${new Date(`${answerDueOn(appraisal.review.at.slice(0, 10))}T12:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" })}`, href: tab(deal, "Conditions"), deal, since: appraisal.review.at, priority: 4 });
     // A borrower who scored their experience 6 or less hears from a manager (lib/surveys.ts).
     for (const answer of needsFollowUp(deal)) add({ key: `survey:${deal.id}:${answer.stage}`, label: `Follow up a survey score of ${answer.score} out of 10`, href: tab(deal, "Messages"), deal, since: answer.at, priority: 9 });
     const change = openTermChange(deal);

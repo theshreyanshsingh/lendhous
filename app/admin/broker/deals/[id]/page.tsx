@@ -14,6 +14,7 @@ import { Badge, Section, Stat, points, productLabel, statusLabel, usd } from "@/
 import { est, useStore } from "@/lib/store";
 import { BackLink } from "@/components/back-link";
 import { TermChanges } from "@/components/loan/TermChanges";
+import { AppraisalTracker } from "@/components/loan/Appraisal";
 import { ClosingDateHistory } from "@/components/loan/ClosingDate";
 import { shortDay } from "@/lib/format";
 
@@ -37,6 +38,7 @@ export default function BrokerDeal() {
       <TermSheetCard deal={deal} canSign={false} />
       <TermChanges deal={deal} side="broker" />
       <BorrowerConditions deal={deal} canUpload />
+      <AppraisalTracker deal={deal} />
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
         <div className="min-w-0 space-y-4">
           <Section title="Documents" right={<span className="text-xs text-muted-foreground">{deal.docs.filter((doc) => doc.status === "accepted").length}/{deal.docs.length} accepted</span>}>
