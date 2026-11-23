@@ -96,3 +96,42 @@ describe("LendHous's public contact details", () => {
     expect(nmlsLookup("12345")).toBe("https://www.nmlsconsumeraccess.org/EntityDetails.aspx/COMPANY/12345");
   });
 });
+
+describe("deploys and middleware", () => {
+  it("runs middleware on public pages only for the visits it redirects, so uploads aren't cut off", async () => {
+    const { config } = await import("@/middleware");
+    expect(config.matcher[0]).toBe("/admin/:path*");
+    const conditional = config.matcher.slice(1) as { has: { type: string; value: string }[] }[];
+    expect(conditional).toHaveLength(2);
+    expect(conditional.every((rule) => rule.has.length === 1)).toBe(true);
+    const visitor = conditional[0].has[0].value;
+    expect(new RegExp(`^(?:${visitor})$`).test('{"scheme":"http"}')).toBe(true);
+    expect(new RegExp(`^(?:${visitor})$`).test('{"scheme":"https"}')).toBe(false);
+  });
+  it("lets the panel's uploads through middleware whole, up to the upload limit", async () => {
+    // @ts-expect-error -- a plain JavaScript module without types
+    const { default: nextConfig } = await import("../next.config.mjs");
+    expect(nextConfig.experimental.middlewareClientMaxBodySize).toBe("16mb");
+    expect(nextConfig.experimental.serverActions.bodySizeLimit).toBe("16mb");
+  });
+  it("builds only into .next or deploy.sh's .next-build", async () => {
+    // @ts-expect-error -- a plain JavaScript module without types
+    const { buildDir } = await import("../next.config.mjs");
+    expect(buildDir({})).toBe(".next");
+    expect(buildDir({ LENDHOUS_BUILD_DIR: ".next-build" })).toBe(".next-build");
+    expect(() => buildDir({ LENDHOUS_BUILD_DIR: "../elsewhere" })).toThrow(/only be \.next-build/);
+  });
+  it("finds the pm2 process serving this checkout, not the jobs or another app", async () => {
+    // @ts-expect-error -- a plain JavaScript module without types
+    const { webApp, portOf, staticUrls } = await import("../scripts/deploy-helpers.mjs");
+    const list = [
+      { pm_id: 1, name: "upb-capital", pm2_env: { pm_cwd: "/root/upbcapital", pm_exec_path: "/root/upbcapital/node_modules/.bin/next", args: ["start", "-p", "3009"] } },
+      { pm_id: 2, name: "lendhous-jobs", pm2_env: { pm_cwd: "/root/lendhous", pm_exec_path: "/root/lendhous/node_modules/.bin/tsx", args: ["--env-file=.env", "scripts/jobs.ts"] } },
+      { pm_id: 3, name: "lendhous", pm2_env: { pm_cwd: "/root/lendhous", pm_exec_path: "/root/lendhous/node_modules/.bin/next", args: ["start", "-p", "3011", "-H", "0.0.0.0"] } },
+    ];
+    const app = webApp(list, ["/root/lendhous"]);
+    expect(app?.pm_id).toBe(3);
+    expect(portOf(app)).toBe("3011");
+    expect(staticUrls('<link href="/_next/static/css/a1.css"/><script src="/_next/static/chunks/app/(site)/page-9.js"></script>')).toEqual(["/_next/static/css/a1.css", "/_next/static/chunks/app/(site)/page-9.js"]);
+  });
+});

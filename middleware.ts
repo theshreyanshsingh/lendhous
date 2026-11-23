@@ -25,7 +25,20 @@ export async function middleware(request: NextRequest) {
   return NextResponse.next();
 }
 
+// The signed-in panel, as before. Elsewhere middleware runs only for the visits it redirects: plain http through
+// Cloudflare, or a www. host. Next copies a request's body for middleware and cuts the copy off at
+// middlewareClientMaxBodySize (next.config.mjs), so ordinary https traffic, uploads included, never passes through it.
+// Next reads this object at build time, so it stays a literal.
 export const config = {
-  // Every page and API route, for the https and www redirects; built files and icons are left alone.
-  matcher: ["/((?!_next/static|_next/image|favicon\\.ico|icon\\.png|apple-icon\\.png|robots\\.txt|sitemap\\.xml|manifest\\.webmanifest).*)"],
+  matcher: [
+    "/admin/:path*",
+    {
+      source: "/((?!_next/static|_next/image|favicon\\.ico|icon\\.png|apple-icon\\.png).*)",
+      has: [{ type: "header", key: "cf-visitor", value: '.*"scheme"\\s*:\\s*"http".*' }],
+    },
+    {
+      source: "/((?!_next/static|_next/image|favicon\\.ico|icon\\.png|apple-icon\\.png).*)",
+      has: [{ type: "host", value: "www\\..+" }],
+    },
+  ],
 };

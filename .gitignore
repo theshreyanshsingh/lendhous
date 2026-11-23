@@ -1,5 +1,9 @@
 node_modules
 .next
+# scripts/deploy.sh: the build being made, the build before, and its lock
+.next-build
+.next-old
+.deploy.lock
 next-env.d.ts
 *.tsbuildinfo
 screenshots
