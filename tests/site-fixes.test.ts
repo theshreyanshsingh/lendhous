@@ -133,6 +133,12 @@ describe("deploys and middleware", () => {
     expect(nextConfig.experimental.middlewareClientMaxBodySize).toBe("16mb");
     expect(nextConfig.experimental.serverActions.bodySizeLimit).toBe("16mb");
   });
+  it("puts every page's title and icons in the head for every visitor, not just crawlers", async () => {
+    // @ts-expect-error -- a plain JavaScript module without types
+    const { default: nextConfig } = await import("../next.config.mjs");
+    const browser = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0 Safari/537.36";
+    for (const agent of [browser, "curl/8.7.1", "Googlebot/2.1", ""]) expect(nextConfig.htmlLimitedBots.test(agent)).toBe(true);
+  });
   it("builds only into .next or deploy.sh's .next-build", async () => {
     // @ts-expect-error -- a plain JavaScript module without types
     const { buildDir } = await import("../next.config.mjs");

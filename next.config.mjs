@@ -27,6 +27,10 @@ const nextConfig = {
   },
   // pdfkit reads its font metrics from its own folder at run time, which bundling would lose.
   serverExternalPackages: ["pdfkit"],
+  // Every page's title, description and icons go in the <head> of the HTML, for every visitor. By default Next 15
+  // streams them into the <body> for anything but a short list of crawlers (browsers move them up with JavaScript), so
+  // link previews, scanners and other tools that read the HTML found pages without a title in the head.
+  htmlLimitedBots: /.*/,
   headers: async () => [
     { source: "/:path*", headers: [{ key: "Strict-Transport-Security", value: "max-age=31536000" }, { key: "X-Content-Type-Options", value: "nosniff" }, { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" }] },
     // No other site may frame LendHous's pages, except the quote widget, which exists to be framed (/embed/quote).
